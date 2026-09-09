@@ -332,6 +332,11 @@ interface CoachHintGroup {
 }
 // A targeted guard for Cyrillic leaking into fan-facing drafts, not a general
 // language classifier. Preserve every original byte for the chatter to review.
+// E108: the guard applies only to a fan who never wrote Cyrillic themselves
+// (the background measures the fan's own transcript lines into
+// turnContext.fanWritesCyrillic); for a Russian-speaking fan a Cyrillic draft
+// is the intended output, not a leak. An absent flag (old background) keeps
+// the guard fully on.
 const COACH_DRAFT_CYRILLIC = /\p{Script=Cyrillic}/u;
 const COACH_DRAFT_LANGUAGE_NOTE =
   'В черновике есть кириллица. Попроси Coach переписать его на английском.';
@@ -2163,7 +2168,13 @@ export class OverlayController {
           ? COACH_SITUATION_DRAFT_CAPTIONS[position]
           : undefined;
         drafts.append(
-          this.createCoachDraftCard(item.operationId, item.generationRef, draft, caption),
+          this.createCoachDraftCard(
+            item.operationId,
+            item.generationRef,
+            draft,
+            item.turnContext?.fanWritesCyrillic === true,
+            caption,
+          ),
         );
       }
       wrapper.append(drafts);
@@ -2568,6 +2579,7 @@ export class OverlayController {
     exchangeOperationId: string,
     generationRef: string | undefined,
     draft: CoachOverlayDraft,
+    allowCyrillic: boolean,
     caption?: string,
   ): HTMLElement {
     const card = document.createElement('div');
@@ -2626,7 +2638,7 @@ export class OverlayController {
         return;
       }
       disarm();
-      void this.acceptCoachDraft(exchangeOperationId, generationRef, draft, 'inserted');
+      void this.acceptCoachDraft(exchangeOperationId, generationRef, draft, 'inserted', allowCyrillic);
     });
     insert.textContent = getActiveConversationDraftText().trim() ? 'Заменить черновик…' : 'Вставить';
 
@@ -2635,15 +2647,15 @@ export class OverlayController {
     copy.className = 'chatgoose-button chatgoose-button-secondary';
     copy.textContent = 'Копировать';
     copy.addEventListener('click', () => {
-      void this.acceptCoachDraft(exchangeOperationId, generationRef, draft, 'copied');
+      void this.acceptCoachDraft(exchangeOperationId, generationRef, draft, 'copied', allowCyrillic);
     });
 
-    const containsCyrillic = COACH_DRAFT_CYRILLIC.test(draft.text);
-    insert.disabled = containsCyrillic;
-    copy.disabled = containsCyrillic;
+    const blockedCyrillic = !allowCyrillic && COACH_DRAFT_CYRILLIC.test(draft.text);
+    insert.disabled = blockedCyrillic;
+    copy.disabled = blockedCyrillic;
     actions.append(insert, keep, copy);
     card.append(title, text);
-    if (containsCyrillic) {
+    if (blockedCyrillic) {
       const note = document.createElement('div');
       note.className = 'chatgoose-inline-error';
       note.dataset.role = 'coach-draft-language-note';
@@ -2662,10 +2674,12 @@ export class OverlayController {
     generationRef: string | undefined,
     draft: CoachOverlayDraft,
     action: 'inserted' | 'copied',
+    allowCyrillic: boolean,
   ): Promise<void> {
     // Recheck at the side-effect boundary too: stale/cached cards and callers
-    // bypassing a disabled control must not copy or insert Cyrillic drafts.
-    if (COACH_DRAFT_CYRILLIC.test(draft.text)) return;
+    // bypassing a disabled control must not copy or insert Cyrillic drafts
+    // for a fan who never wrote Cyrillic (E108).
+    if (!allowCyrillic && COACH_DRAFT_CYRILLIC.test(draft.text)) return;
     try {
       if (action === 'inserted') {
         const expectedGroupId = this.model.kind === 'coach'

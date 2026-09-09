@@ -12,6 +12,7 @@ import {
   collectUnverifiedPpvAttachmentRequests,
   estimateTargetPages,
   extractOldestMessageId,
+  fanWritesCyrillic,
 } from '../src/shared/transcript.js';
 import {
   FAN_SILENCE_DAYS_MAX,
@@ -87,6 +88,38 @@ it('orders PPV verification candidates newest-first without reversing fresh page
     ...newestIds.map((id) => `media-${id}`),
     'shared',
   ]);
+});
+
+// ─── fanWritesCyrillic (E108) ────────────────────────────────────────────
+
+describe('fanWritesCyrillic', () => {
+  const msg = (id: string, senderId: string, content: string, type = 1) =>
+    ({ id, type, content, groupId: 'g1', senderId, createdAt: Number(id), attachments: [], embeds: [], totalTipAmount: 0 });
+
+  it('is true only when a FAN text line carries Cyrillic', () => {
+    const fanRussian = normalizeTranscript([makePage({ messages: [
+      msg('1', MODEL_ID, 'hey you'),
+      msg('2', FAN_ID, 'Легче понимать всё ... людей и их культуре'),
+    ] })], MODEL_ID, FAN_ID);
+    expect(fanWritesCyrillic(fanRussian)).toBe(true);
+  });
+
+  it("ignores the model side: the chatter's own Russian is never a signal", () => {
+    const modelOnly = normalizeTranscript([makePage({ messages: [
+      msg('1', MODEL_ID, 'не представляю что в голове творится'),
+      msg('2', FAN_ID, 'yeah that is wild lol'),
+    ] })], MODEL_ID, FAN_ID);
+    expect(fanWritesCyrillic(modelOnly)).toBe(false);
+  });
+
+  it('ignores system lines, Latin-only threads and an empty window', () => {
+    const systemOnly = normalizeTranscript([makePage({ messages: [
+      msg('1', FAN_ID, 'Подписка', 2),
+      msg('2', FAN_ID, 'José 😘 https://example.test'),
+    ] })], MODEL_ID, FAN_ID);
+    expect(fanWritesCyrillic(systemOnly)).toBe(false);
+    expect(fanWritesCyrillic([])).toBe(false);
+  });
 });
 
 // ─── normalizeTranscript ────────────────────────────────────────────────

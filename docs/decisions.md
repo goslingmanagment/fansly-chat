@@ -3466,3 +3466,33 @@ overflow, including with every disclosure open. The evidence is browser viewport
 testing, not an on-device Safari or full assistive-technology acceptance test.
 Current screenshots and measurements are recorded in
 `docs/release-2.0-mobile-review.md` and its linked local evidence folder.
+
+
+**E108 (2026-09-09).** The owner shows the flip side of E91: a Russian-speaking
+fan (Serbian and Russian, the whole thread in Russian) pressed through Fix
+receives an English message, because the Hub's #201 amendment made every
+proposed fan message English regardless of the fan. Hub Decision #283 replaces
+that blanket with the precise rule the amendment was reaching for: every
+proposed fan message is written in the fan's language, where the fan's language
+is English unless the fan's OWN transcript lines (`Fan:`) are in another
+language, and the chatter's draft, question, coach history, recaps, dossier and
+persona notes are never a language signal. The rule is identical for Reply, Fix,
+Hi, Ping, Voice Script, Coach (including the situation preset), Help and Review
+replacements, so no follow-up action flips the language. That prompt change
+deploys with the Hub, not with this extension.
+
+This extension keeps E91's Cyrillic guard on Coach Copy/Insert but scopes it to
+the same signal. The background measures the fan's own text lines in the SAME
+windowed transcript it ships to the kernel (`fanWritesCyrillic`, a script
+detector, not a language classifier) and reports it in the typed
+`CoachTurnContext`; the validator accepts only an optional boolean there. The
+draft card and the acceptance boundary both honour it: a Cyrillic draft is
+blocked, with the E91 note, only for a fan who never wrote Cyrillic; an absent
+flag (an older background) keeps the guard fully on. The Review replacement
+parser is language-agnostic for the quoted wording and needs no change. Kernel
+SDK, storage and the kernel request shape are unchanged; the only protocol
+change is the new optional field on the background→content turn context.
+Copy/Insert still never happen without the chatter's click, and nothing is
+translated or regenerated automatically. Tests cover the helper (fan-only
+lines, model-side Russian ignored, system lines ignored), the validator, and
+both guard branches in the overlay.

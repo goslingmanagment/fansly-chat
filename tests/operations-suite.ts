@@ -7177,10 +7177,13 @@ describe(`OperationCoordinator (${part})`, () => {
     // Exact typed shape (E28): no extra keys at any level.
     expect(Object.keys(turnContext!).sort()).toEqual([
       'attachedRecaps',
+      'fanWritesCyrillic',
       'presetQuestion',
       'sentMessageCount',
       'transcriptCoverage',
     ]);
+    // E108: the Latin-only fixture transcript reports no Cyrillic from the fan.
+    expect(turnContext!.fanWritesCyrillic).toBe(false);
     expect(turnContext!.attachedRecaps).toEqual({ full: { ageMs: 1000 }, short: null });
     expect(turnContext!.presetQuestion).toBe('Разбери ситуацию');
     expect(Number.isInteger(turnContext!.sentMessageCount)).toBe(true);
@@ -7214,7 +7217,42 @@ describe(`OperationCoordinator (${part})`, () => {
     expect(turnContext).toBeDefined();
     // The key is ABSENT — a regression to an unconditional {full:null,short:null}
     // would render a confirmed «рекап: нет» for an unreporting kernel.
-    expect(Object.keys(turnContext!).sort()).toEqual(['sentMessageCount', 'transcriptCoverage']);
+    expect(Object.keys(turnContext!).sort()).toEqual(['fanWritesCyrillic', 'sentMessageCount', 'transcriptCoverage']);
+  });
+
+  it('E108: turnContext.fanWritesCyrillic is true only when the FAN wrote Cyrillic in the shipped window', async () => {
+    const run = async (fanText: string, modelText: string) => {
+      const fanslyClient = buildFanslyClientMock();
+      const page = pagesFromTranscript([
+        { id: 'm-1', createdAt: 1_000, senderId: 'account-1', senderLabel: 'Model', type: 1, text: modelText, labels: [] },
+        { id: 'm-2', createdAt: 1_001, senderId: 'fan-1', senderLabel: 'Fan', type: 1, text: fanText, labels: [] },
+      ])[0]!;
+      fanslyClient.getMessagePage.mockResolvedValue(page);
+      fanslyClient.loadMessages.mockResolvedValue({ pages: [page], pagesLoaded: 1, targetPages: 1, reachedEnd: true });
+      const kernelGateway = {
+        isConfigured: vi.fn(() => true),
+        streamFeature: vi.fn(async (
+          _settings: unknown,
+          _request: Record<string, unknown>,
+          callbacks: { onMeta?: (m: Record<string, unknown>) => void; onText?: (t: string) => void },
+        ) => {
+          callbacks.onMeta?.({ requestId: 'gen-lang', clientRequestId: 'coach-op', model: 'm' });
+          callbacks.onText?.('Advice');
+          return 'Advice';
+        }),
+      };
+      const { coordinator, port } = await createCoordinatorHarness({ kernelGateway, fanslyClient });
+      await coordinator.startOperation(1, coachStart());
+      const complete = postedMessages(port).find(
+        (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
+          message.type === 'operation:complete',
+      );
+      return complete?.turnContext?.fanWritesCyrillic;
+    };
+    // The fan writes Russian: the Coach guard may pass a Cyrillic draft.
+    expect(await run('Легче понимать всё ... людей и их культуре', 'hey you')).toBe(true);
+    // Only the model side is Russian (the chatter typed it): never a signal.
+    expect(await run('yeah that is wild lol', 'не представляю что в голове творится')).toBe(false);
   });
 
   it('a bumped transcriptEpoch forces a full quick-window reseed (review P2)', async () => {

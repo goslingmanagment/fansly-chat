@@ -481,6 +481,16 @@ describe('protocol boundary guards', () => {
         presetQuestion: 42,
       }),
     ).toBe(false);
+    // E108: the fan-language signal is an optional boolean, nothing else.
+    expect(
+      isCoachTurnContext({ sentMessageCount: 42, transcriptCoverage: 'window', fanWritesCyrillic: true }),
+    ).toBe(true);
+    expect(
+      isCoachTurnContext({ sentMessageCount: 42, transcriptCoverage: 'window', fanWritesCyrillic: false }),
+    ).toBe(true);
+    expect(
+      isCoachTurnContext({ sentMessageCount: 42, transcriptCoverage: 'window', fanWritesCyrillic: 'да' }),
+    ).toBe(false);
 
     // Invalid shapes — E28 declassification boundary: exact keys at every
     // level, non-negative integer counts.
