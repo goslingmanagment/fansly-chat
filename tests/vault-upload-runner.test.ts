@@ -451,9 +451,36 @@ describe('VaultUploadRunner', () => {
 
     await h.runner.start();
 
-    expect(h.last().stopReason).toEqual({ kind: 'checkpoint-write-failed' });
+    expect(h.last().stopReason).toEqual({ kind: 'checkpoint-write-failed', afterUpload: false });
     expect(h.vault.handoffs).toEqual([]);
     expect(h.last().items[0]!.status).toBe('pending');
+  });
+
+  it('a write failure AFTER a confirmed upload keeps the file verified and says so', async () => {
+    let writes = 0;
+    const h = harness(['001.jpg', '002.jpg'], {
+      saveCheckpoint: async () => {
+        writes += 1;
+        // First write: the in-flight mark (succeeds). Second: after confirmation.
+        if (writes === 2) {
+          throw new Error('quota');
+        }
+      },
+    });
+
+    await h.runner.start();
+
+    expect(h.vault.handoffs).toEqual(['002.jpg']);
+    expect(h.last().stopReason).toEqual({ kind: 'checkpoint-write-failed', afterUpload: true });
+    expect(h.last().items.find((entry) => entry.item.name === '002.jpg')).toMatchObject({
+      status: 'verified',
+      source: 'upload',
+    });
+
+    // Resuming neither re-uploads the verified file nor loses it.
+    await h.runner.start();
+    expect(h.vault.handoffs).toEqual(['002.jpg', '001.jpg']);
+    expect(h.last().state).toBe('complete');
   });
 
   it('reports a failed final checkpoint wipe instead of hiding it', async () => {

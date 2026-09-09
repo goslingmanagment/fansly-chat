@@ -64,7 +64,10 @@ export type VaultStopReason =
   | { kind: 'handoff-indeterminate' }
   | { kind: 'timeout' }
   | { kind: 'order-mismatch'; expected: string; actual: string | null }
-  | { kind: 'checkpoint-write-failed' }
+  /** `afterUpload` tells the copy apart: before a handoff nothing happened,
+   * after a confirmed upload the file IS in the album and must not be
+   * re-picked by hand. */
+  | { kind: 'checkpoint-write-failed'; afterUpload: boolean }
   | { kind: 'file-missing'; name: string }
   /** The runner itself threw (a DOM read, a dependency); the queue never
    * hides that behind a hung «running» state. */
@@ -292,7 +295,7 @@ export class VaultUploadRunner {
       entry.status = 'present';
       entry.source = 'album';
       if (!(await this.persist())) {
-        return this.stop({ kind: 'checkpoint-write-failed' });
+        return this.stop({ kind: 'checkpoint-write-failed', afterUpload: false });
       }
       this.emit();
       return 'next';
@@ -315,7 +318,7 @@ export class VaultUploadRunner {
     this.inFlight = item.name;
     if (!(await this.persist())) {
       this.inFlight = null;
-      return this.stop({ kind: 'checkpoint-write-failed' });
+      return this.stop({ kind: 'checkpoint-write-failed', afterUpload: false });
     }
 
     // The write took real time; re-read the page so a change in that gap is a
@@ -373,7 +376,9 @@ export class VaultUploadRunner {
     this.currentStartedAt = null;
     const persisted = await this.persist();
     if (!persisted) {
-      return this.stop({ kind: 'checkpoint-write-failed' });
+      // The file is verified in memory and in the album; only the disk still
+      // says «in flight». A reload auto-resolves it from the visible card.
+      return this.stop({ kind: 'checkpoint-write-failed', afterUpload: true });
     }
     if (!top || top.key !== item.key) {
       // The file is in the album (verified above), so it is not re-uploaded;

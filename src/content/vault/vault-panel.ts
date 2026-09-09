@@ -135,6 +135,9 @@ export class VaultUploaderPanel {
   private snapshot: VaultUploadSnapshot | null = null;
   private orderReport: OrderReport | null = null;
   private startPending = false;
+  /** A storage write the panel itself issued (resolve, reset, auto-resolve)
+   * failed; shown until the next panel action succeeds. */
+  private storageNote: string | null = null;
 
   // Live nodes patched in place — a full re-render every tick would drop the
   // preview's scroll position and the focused control.
@@ -591,7 +594,9 @@ export class VaultUploaderPanel {
           inFlight: null,
           updatedAt: this.deps.now(),
         };
-        await this.deps.checkpoints.save(checkpoint);
+        if (!(await this.writeCheckpoint(checkpoint))) {
+          return null;
+        }
         this.checkpoint = checkpoint;
       } else {
         this.resolution = { name: checkpoint.inFlight, target: 'checkpoint' };
@@ -648,7 +653,15 @@ export class VaultUploaderPanel {
       return;
     }
     if (resolution.target === 'runner') {
-      await this.runner?.resolveUncertain(resolution.name, outcome);
+      try {
+        await this.runner?.resolveUncertain(resolution.name, outcome);
+      } catch {
+        // The runner keeps the file «uncertain» when its own write fails, so
+        // the question stays; only the failure needs a voice.
+        this.storageNote = VAULT_COPY.checkpointSaveFailed;
+        this.render();
+        return;
+      }
     } else if (this.checkpoint) {
       const next: VaultUploadCheckpoint = {
         ...this.checkpoint,
@@ -658,11 +671,28 @@ export class VaultUploaderPanel {
         inFlight: null,
         updatedAt: this.deps.now(),
       };
-      await this.deps.checkpoints.save(next);
+      if (!(await this.writeCheckpoint(next))) {
+        return;
+      }
       this.checkpoint = next;
     }
+    this.storageNote = null;
     this.resolution = null;
     this.render();
+  }
+
+  /** Panel-issued checkpoint write with the failure surfaced, never thrown
+   * into a `void` handler where it would vanish. */
+  private async writeCheckpoint(checkpoint: VaultUploadCheckpoint): Promise<boolean> {
+    try {
+      await this.deps.checkpoints.save(checkpoint);
+      this.storageNote = null;
+      return true;
+    } catch {
+      this.storageNote = VAULT_COPY.checkpointSaveFailed;
+      this.render();
+      return false;
+    }
   }
 
   private async handleReset(): Promise<void> {
@@ -678,8 +708,15 @@ export class VaultUploaderPanel {
     const identity = this.identity;
     const albumTitle = this.checkpointAlbum;
     if (identity && albumTitle) {
-      await this.deps.checkpoints.clear(identity.accountId, albumTitle);
+      try {
+        await this.deps.checkpoints.clear(identity.accountId, albumTitle);
+      } catch {
+        this.storageNote = VAULT_COPY.checkpointClearFailed;
+        this.render();
+        return;
+      }
     }
+    this.storageNote = null;
     this.checkpoint = null;
     this.resolution = null;
     this.runner = null;
@@ -810,6 +847,9 @@ export class VaultUploaderPanel {
     }
     if (snapshot?.checkpointLeftBehind) {
       notes.push({ tone: 'warn', text: VAULT_COPY.checkpointLeftBehind });
+    }
+    if (this.storageNote) {
+      notes.push({ tone: 'bad', text: this.storageNote });
     }
     if (this.resetArmed) {
       const confirm = el('div', 'chatgoose-vault-note chatgoose-vault-note-warn');

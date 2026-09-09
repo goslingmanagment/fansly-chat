@@ -413,6 +413,72 @@ describe('VaultUploaderPanel', () => {
     expect(css).toMatch(/#chatgoose-vault-root \[hidden\] \{\s*display: none !important;/);
   });
 
+  it('reports a failed resolve write instead of swallowing it, and keeps the question', async () => {
+    const f = fixture();
+    await f.checkpoints.save({
+      version: 1,
+      accountId: 'acc-1',
+      albumTitle: 'ALBUM',
+      total: 2,
+      done: [],
+      inFlight: '002.jpg',
+      updatedAt: 4_999_000,
+    });
+    f.panel.open();
+    await flush();
+    pickFiles(['001.jpg', '002.jpg']);
+    await flush();
+    buttonByText(VAULT_COPY.start).click();
+    await flush();
+    expect(document.querySelector('.chatgoose-vault-resolve-title')).not.toBeNull();
+
+    const save = f.checkpoints.save.bind(f.checkpoints);
+    let fail = true;
+    f.checkpoints.save = async (checkpoint) => {
+      if (fail) throw new Error('quota');
+      return save(checkpoint);
+    };
+
+    buttonByText(VAULT_COPY.uncertainPresent).click();
+    await flush();
+    expect(q('.chatgoose-vault-notes').textContent).toContain(VAULT_COPY.checkpointSaveFailed);
+    expect(document.querySelector('.chatgoose-vault-resolve-title')).not.toBeNull();
+    expect(f.page.handoffs).toEqual([]);
+
+    fail = false;
+    buttonByText(VAULT_COPY.uncertainPresent).click();
+    await flush();
+    expect(document.querySelector('.chatgoose-vault-resolve-title')).toBeNull();
+    expect(q('.chatgoose-vault-notes').textContent).not.toContain(VAULT_COPY.checkpointSaveFailed);
+    expect((await f.checkpoints.load('acc-1', 'ALBUM'))?.inFlight).toBeNull();
+  });
+
+  it('reports a failed reset instead of pretending the checkpoint is gone', async () => {
+    const f = fixture();
+    await f.checkpoints.save({
+      version: 1,
+      accountId: 'acc-1',
+      albumTitle: 'ALBUM',
+      total: 1,
+      done: ['001.jpg'],
+      inFlight: null,
+      updatedAt: 4_999_000,
+    });
+    f.checkpoints.clear = async () => {
+      throw new Error('quota');
+    };
+    f.panel.open();
+    await flush();
+
+    buttonByText(VAULT_COPY.checkpointReset).click();
+    buttonByText(VAULT_COPY.checkpointResetYes).click();
+    await flush();
+
+    expect(q('.chatgoose-vault-notes').textContent).toContain(VAULT_COPY.checkpointClearFailed);
+    expect(q('.chatgoose-vault-notes').textContent).toContain('Прошлый запуск');
+    expect(f.checkpoints.rows.size).toBe(1);
+  });
+
   it('resets a stored checkpoint only after an inline confirmation', async () => {
     const f = fixture();
     await f.checkpoints.save({
