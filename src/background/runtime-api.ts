@@ -36,6 +36,7 @@ import type {
   PopupStatus,
   RecapStatusResponse,
   SpendersBuildPayload,
+  TabAccountIdentity,
 } from '../shared/types.js';
 import type {
   StoredVoiceAttemptRoute,
@@ -621,6 +622,37 @@ export function registerRuntimeApi({
           normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl),
           resolveHubBearer(settings),
         );
+      }
+
+      if (requestType === 'getTabAccountIdentity') {
+        // Which account the asking tab is signed into (the vault uploader binds
+        // its queue to it). Memory + the local label store only: a tab the
+        // worker cannot attribute reads as null, never as a guess.
+        const tabId = sender.tab?.id;
+        if (typeof tabId !== 'number') {
+          return null;
+        }
+        const session = sessionStore.getSessionForTab(tabId);
+        const accountId = session
+          ? session.resolvedAccountId ?? session.accountId
+          : tabContexts.get(tabId)?.accountId ?? null;
+        if (!accountId) {
+          return null;
+        }
+        const labels = await getAccountLabels();
+        const username = session?.resolvedUsername ?? null;
+        const displayName = session?.resolvedDisplayName ?? null;
+        return {
+          accountId,
+          label: buildAccountRowLabel(
+            accountId,
+            labels.byAccount[accountId] ?? null,
+            username,
+            displayName,
+          ),
+          username,
+          displayName,
+        } satisfies TabAccountIdentity;
       }
 
       if (requestType === 'getAccountsView') {

@@ -4,8 +4,11 @@ import { BoardLauncher } from './spenders/board-launcher.js';
 import { installContentStyles } from './dom-anchor.js';
 import {
   parseGroupIdFromPath,
+  startPathWatcher,
   startRouteWatcher,
 } from './route-watcher.js';
+import { VaultLauncher } from './vault/vault-launcher.js';
+import { isVaultPath } from './vault/vault-route.js';
 import {
   buildHotkeyBindings,
   detectLabelPlatform,
@@ -223,6 +226,81 @@ const launcher = new BoardLauncher(() => {
   runAppIntent('launcher', parseGroupIdFromPath(window.location.pathname));
 });
 launcher.mount();
+
+// ─── Vault uploader (E109) ────────────────────────────────────────────────
+// A second lazy module, independent of the conversation app: it never needs
+// the controller graph, and a running upload queue must survive the chatter
+// wandering off the vault route (the launcher hides, the queue keeps going).
+
+type VaultModule = typeof import('./vault/index.js');
+type VaultHandle = ReturnType<VaultModule['startVaultUploader']>;
+
+let vaultHandle: VaultHandle | null = null;
+let vaultModulePromise: Promise<VaultModule> | null = null;
+let vaultModuleAttempt = 0;
+let vaultOpenPending = false;
+
+function loadVaultModule(): Promise<VaultModule> {
+  if (!vaultModulePromise) {
+    const baseModuleUrl = browser.runtime.getURL('content-vault.js');
+    const attempt = vaultModuleAttempt++;
+    const moduleUrl = attempt === 0
+      ? baseModuleUrl
+      : `${baseModuleUrl}?retry=${attempt}`;
+    vaultModulePromise = (import(moduleUrl) as Promise<VaultModule>)
+      .catch((error: unknown) => {
+        vaultModulePromise = null;
+        throw error;
+      });
+  }
+  return vaultModulePromise;
+}
+
+function openVaultUploader(): void {
+  if (vaultHandle) {
+    vaultHandle.toggle();
+    return;
+  }
+  if (vaultOpenPending) {
+    return;
+  }
+  vaultOpenPending = true;
+  showBootstrapLoading();
+  void Promise.all([loadVaultModule(), ensureContentAppStyles()])
+    .then(([module]) => {
+      clearBootstrapStatus();
+      if (!isVaultPath(window.location.pathname)) {
+        return;
+      }
+      vaultHandle ??= module.startVaultUploader();
+      vaultHandle.open();
+    })
+    .catch((error: unknown) => {
+      console.error('[ChatGoose] failed to load the vault uploader', error);
+      if (isVaultPath(window.location.pathname)) {
+        showBootstrapLoadError(openVaultUploader);
+      } else {
+        clearBootstrapStatus();
+      }
+    })
+    .finally(() => {
+      vaultOpenPending = false;
+    });
+}
+
+const vaultLauncher = new VaultLauncher(openVaultUploader);
+startPathWatcher(isVaultPath, (onVault) => {
+  if (onVault) {
+    vaultLauncher.mount();
+  } else {
+    vaultLauncher.unmount();
+    // Leaving the route hides the panel unless a queue is mid-file: the runner
+    // then stops itself on the next poll and keeps its state for the return.
+    if (vaultHandle && !vaultHandle.running) {
+      vaultHandle.close();
+    }
+  }
+});
 
 const keymap = createKeymap(buildHotkeyBindings(detectLabelPlatform()));
 function handleBootstrapKeydown(event: KeyboardEvent): void {

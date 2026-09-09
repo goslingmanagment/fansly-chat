@@ -21,3 +21,25 @@ export function startRouteWatcher(onChange: (groupId: string | null) => void): (
     window.clearInterval(interval);
   };
 }
+
+/** Same poll cadence as the conversation watcher, for a boolean route
+ * predicate (the vault uploader's /creator/vault). Fires once immediately. */
+export function startPathWatcher(
+  matches: (pathname: string) => boolean,
+  onChange: (active: boolean) => void,
+): () => void {
+  let last = matches(window.location.pathname);
+  onChange(last);
+
+  const interval = window.setInterval(() => {
+    const next = matches(window.location.pathname);
+    if (next !== last) {
+      last = next;
+      onChange(next);
+    }
+  }, ROUTE_POLL_INTERVAL_MS);
+
+  return () => {
+    window.clearInterval(interval);
+  };
+}
