@@ -1947,6 +1947,11 @@ export interface CoachTurnContext {
    * content session stores it for faithful coachHistory replay while showing
    * the shorter chatter-facing preset label. */
   presetQuestion?: string;
+  /** Whether the fan's OWN text lines in the shipped transcript window carry
+   * Cyrillic (E108). Drives the Coach draft Copy/Insert guard: a Cyrillic draft
+   * is blocked only for a fan who never wrote Cyrillic. Absent (old
+   * background) reads as false, i.e. the E91 guard stays fully on. */
+  fanWritesCyrillic?: boolean;
 }
 
 /** Debug provenance captured for a coach turn while debugMode was on (E81):

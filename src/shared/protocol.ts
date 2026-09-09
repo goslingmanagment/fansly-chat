@@ -279,6 +279,7 @@ export function isCoachTurnContext(value: unknown): value is CoachTurnContext {
   const keys = Object.keys(value);
   const allowedKeys = new Set([
     'attachedRecaps',
+    'fanWritesCyrillic',
     'presetQuestion',
     'sentMessageCount',
     'transcriptCoverage',
@@ -304,7 +305,8 @@ export function isCoachTurnContext(value: unknown): value is CoachTurnContext {
   return countOk(value.sentMessageCount) &&
     (value.transcriptCoverage === 'full-history' || value.transcriptCoverage === 'window') &&
     recapsOk &&
-    isOptionalString(value, 'presetQuestion');
+    isOptionalString(value, 'presetQuestion') &&
+    (value.fanWritesCyrillic === undefined || typeof value.fanWritesCyrillic === 'boolean');
 }
 
 function isVoiceNoteStatusView(value: unknown): boolean {

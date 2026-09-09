@@ -597,6 +597,20 @@ export function formatTranscriptForKernel(
   };
 }
 
+/** Whether the FAN's own text lines in this (already windowed) transcript carry
+ * Cyrillic. Mirrors the kernel's fan-language rule (hub Decision #283 / E108):
+ * only the fan's lines are a language signal, never the chatter's draft or the
+ * model side of the thread. A targeted script detector, not a language
+ * classifier, on purpose: it decides whether a Cyrillic Coach draft may be
+ * copied/inserted for THIS fan, and a fan who wrote Cyrillic anywhere in the
+ * shipped window is one that Cyrillic may legitimately be sent to. */
+export function fanWritesCyrillic(messages: NormalizedTranscriptMessage[]): boolean {
+  return messages.some(
+    (message) =>
+      message.senderLabel === 'Fan' && message.type === 1 && /\p{Script=Cyrillic}/u.test(message.text),
+  );
+}
+
 export function buildTranscriptWindowStart(messages: NormalizedTranscriptMessage[], nowMs: number): number {
   if (messages.length === 0) {
     return nowMs - 90 * 24 * 60 * 60 * 1000;

@@ -27,6 +27,7 @@ import {
 import type {
   CoachOverlayFeedItem,
   CoachOverlaySessionView,
+  CoachTurnContext,
   CoachTurnDebug,
   LlmSpendSummary,
   OperationProfilingSnapshot,
@@ -1340,15 +1341,76 @@ describe('OverlayController — coach chat mode', () => {
     insert.click();
     // Exercise the acceptance boundary even when UI disabling is bypassed.
     const internal = controller as unknown as {
-      acceptCoachDraft: (op: string, ref: undefined, draft: {text: string; index: number}, action: 'copied' | 'inserted') => Promise<void>;
+      acceptCoachDraft: (op: string, ref: undefined, draft: {text: string; index: number}, action: 'copied' | 'inserted', allowCyrillic: boolean) => Promise<void>;
     };
-    await internal.acceptCoachDraft('cached-op', undefined, draft, 'copied');
-    await internal.acceptCoachDraft('cached-op', undefined, draft, 'inserted');
+    await internal.acceptCoachDraft('cached-op', undefined, draft, 'copied', false);
+    await internal.acceptCoachDraft('cached-op', undefined, draft, 'inserted', false);
     expect(copyToClipboard).not.toHaveBeenCalled();
     expect(insertIntoFanslyTextarea).not.toHaveBeenCalled();
     expect(callbacks.onAcceptance).not.toHaveBeenCalled();
     expect(callbacks.onClose).not.toHaveBeenCalled();
     expect(callbacks.onCoachRetry).not.toHaveBeenCalled();
+  });
+
+  it.each(['Привет', 'Hey, не дави на него'])('E108: allows a Cyrillic draft when the fan writes Cyrillic themselves: %s', async (text) => {
+    const { controller, callbacks } = makeController();
+    const draft = { text, index: 0 };
+    controller.render(createCoachModel({
+      feedItems: [{
+        kind: 'exchange',
+        operationId: 'ru-fan-op',
+        question: 'q',
+        answerProse: 'Русский разбор',
+        drafts: [draft],
+        turnContext: { sentMessageCount: 12, transcriptCoverage: 'window', fanWritesCyrillic: true },
+      }],
+    }));
+    const card = document.querySelector('.chatgoose-coach-draft')!;
+    expect(card.querySelector('.chatgoose-card-text')!.textContent).toBe(text);
+    expect(card.querySelector('[data-role="coach-draft-language-note"]')).toBeNull();
+    const copy = Array.from(card.querySelectorAll<HTMLButtonElement>('button'))
+      .find((button) => button.textContent === 'Копировать')!;
+    const insert = card.querySelector<HTMLButtonElement>('.chatgoose-coach-draft-insert')!;
+    expect(copy.disabled).toBe(false);
+    expect(insert.disabled).toBe(false);
+    copy.click();
+    await vi.waitFor(() => expect(copyToClipboard).toHaveBeenCalledWith(text));
+    insert.click();
+    await vi.waitFor(() => expect(insertIntoFanslyTextarea).toHaveBeenCalledWith(text));
+    await vi.waitFor(() => expect(callbacks.onAcceptance).toHaveBeenCalledWith('ru-fan-op', 'copied', 0, undefined));
+  });
+
+  it.each([
+    ['fanWritesCyrillic false', { sentMessageCount: 12, transcriptCoverage: 'window', fanWritesCyrillic: false } satisfies CoachTurnContext],
+    ['fanWritesCyrillic absent (old background)', { sentMessageCount: 12, transcriptCoverage: 'window' } satisfies CoachTurnContext],
+  ])('E108: keeps blocking a Cyrillic draft when the fan did not write Cyrillic: %s', async (_label, turnContext) => {
+    const { controller, callbacks } = makeController();
+    const draft = { text: 'Привет', index: 0 };
+    controller.render(createCoachModel({
+      feedItems: [{
+        kind: 'exchange',
+        operationId: 'en-fan-op',
+        question: 'q',
+        answerProse: 'Русский разбор',
+        drafts: [draft],
+        turnContext,
+      }],
+    }));
+    const card = document.querySelector('.chatgoose-coach-draft')!;
+    expect(card.querySelector('[data-role="coach-draft-language-note"]')).not.toBeNull();
+    const copy = Array.from(card.querySelectorAll<HTMLButtonElement>('button'))
+      .find((button) => button.textContent === 'Копировать')!;
+    const insert = card.querySelector<HTMLButtonElement>('.chatgoose-coach-draft-insert')!;
+    expect(copy.disabled).toBe(true);
+    expect(insert.disabled).toBe(true);
+    const internal = controller as unknown as {
+      acceptCoachDraft: (op: string, ref: undefined, draft: {text: string; index: number}, action: 'copied' | 'inserted', allowCyrillic: boolean) => Promise<void>;
+    };
+    await internal.acceptCoachDraft('en-fan-op', undefined, draft, 'copied', false);
+    await internal.acceptCoachDraft('en-fan-op', undefined, draft, 'inserted', false);
+    expect(copyToClipboard).not.toHaveBeenCalled();
+    expect(insertIntoFanslyTextarea).not.toHaveBeenCalled();
+    expect(callbacks.onAcceptance).not.toHaveBeenCalled();
   });
 
   it('allows English with emoji, accented Latin names and URLs despite Russian analysis', async () => {

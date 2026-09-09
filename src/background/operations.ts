@@ -65,6 +65,7 @@ import { formatFanSubscriptionData } from '../shared/subscriptions.js';
 import {
   analyzePingSegment,
   fanSilenceDaysFromAnalysis,
+  fanWritesCyrillic,
   formatTranscriptForKernel,
   normalizeTranscript,
 } from '../shared/transcript.js';
@@ -3320,6 +3321,9 @@ export class OperationCoordinator {
                   }
                 : {}),
               ...(presetQuestion !== undefined ? { presetQuestion } : {}),
+              // E108: the fan-language signal for the content-side Cyrillic
+              // guard, measured on the SAME windowed transcript the kernel got.
+              fanWritesCyrillic: fanWritesCyrillic(transcriptMessages),
             }
           : undefined;
       this.sendComplete(tabId, {
