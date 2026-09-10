@@ -26,7 +26,8 @@ describe('two-stage content bootstrap build contract', () => {
     const lazyAssets = manifest.web_accessible_resources.find((entry) =>
       entry.resources.includes('content-chat.js') &&
       entry.resources.includes('content-vault.js') &&
-      entry.resources.includes('content.css'));
+      entry.resources.includes('content.css') &&
+      entry.resources.includes('vault.css'));
 
     expect(lazyAssets).toBeDefined();
     expect(lazyAssets?.matches).toEqual(['*://fansly.com/*']);
@@ -53,9 +54,14 @@ describe('two-stage content bootstrap build contract', () => {
     expect(build).toMatch(
       /cp\(path\.join\(root, 'src\/content\/styles\.css'\), path\.join\(outdir, 'content\.css'\)\)/,
     );
+    expect(build).toMatch(
+      /cp\(path\.join\(root, 'src\/content\/vault\/vault\.css'\), path\.join\(outdir, 'vault\.css'\)\)/,
+    );
     expect(bootstrap).toContain("browser.runtime.getURL('content-chat.js')");
     expect(bootstrap).toContain("browser.runtime.getURL('content-vault.js')");
-    expect(bootstrap).toContain("browser.runtime.getURL('content.css')");
+    // Both sheets go through one fetch-and-install helper keyed by file name.
+    expect(bootstrap).toContain("ensureStylesheet('content.css', 'chatgoose-style'");
+    expect(bootstrap).toContain("ensureStylesheet('vault.css', 'chatgoose-vault-style'");
     expect(bootstrap).toContain('`${baseModuleUrl}?retry=${attempt}`');
     expect(build.match(/minifySyntax: true/g)).toHaveLength(2);
     expect(build.match(/minifyWhitespace: true/g)).toHaveLength(2);

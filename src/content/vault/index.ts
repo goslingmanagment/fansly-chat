@@ -7,7 +7,7 @@ import { sendRuntimeRequest } from '../../shared/runtime-request.js';
 import { handoffFileToNativeInput } from '../native-file-handoff.js';
 import { createVaultCheckpointStore } from './checkpoint-store.js';
 import { VaultUploaderPanel } from './vault-panel.js';
-import { readVaultView, VAULT_UPLOADER_INPUT_PAGE_SELECTOR } from './vault-dom.js';
+import { createVaultViewReader, VAULT_UPLOADER_INPUT_PAGE_SELECTOR } from './vault-dom.js';
 import { isVaultPath } from './vault-route.js';
 
 export interface VaultUploaderHandle {
@@ -20,10 +20,13 @@ export interface VaultUploaderHandle {
 }
 
 export function startVaultUploader(): VaultUploaderHandle {
+  // One mutation-gated reader serves both the panel's refresh and the
+  // runner's poll: the album is walked once per page change, not per timer.
+  const reader = createVaultViewReader(document);
   const panel = new VaultUploaderPanel({
     identity: () => sendRuntimeRequest('getTabAccountIdentity'),
     checkpoints: createVaultCheckpointStore(),
-    readView: () => readVaultView(document),
+    readView: () => reader.read(),
     isOnVaultRoute: () => isVaultPath(window.location.pathname),
     handoff: (input, file) =>
       handoffFileToNativeInput(input, file, VAULT_UPLOADER_INPUT_PAGE_SELECTOR),
@@ -38,6 +41,9 @@ export function startVaultUploader(): VaultUploaderHandle {
     get running() {
       return panel.isRunning;
     },
-    destroy: () => panel.destroy(),
+    destroy: () => {
+      panel.destroy();
+      reader.dispose();
+    },
   };
 }

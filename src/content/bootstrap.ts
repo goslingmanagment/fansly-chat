@@ -25,7 +25,6 @@ let routeNonce = 0;
 let app: ContentApp | null = null;
 let appModulePromise: Promise<ContentAppModule> | null = null;
 let appModuleAttempt = 0;
-let contentStylesPromise: Promise<void> | null = null;
 let bootstrapStatusRoot: HTMLElement | null = null;
 
 type ContentAppLoadIntent =
@@ -117,24 +116,43 @@ function loadContentAppModule(): Promise<ContentAppModule> {
   return appModulePromise;
 }
 
-function ensureContentAppStyles(): Promise<void> {
-  if (document.getElementById('chatgoose-style')) {
+/** Fetches an extension stylesheet once and installs it under `styleId`; a
+ * failed fetch is forgotten so the next caller retries. */
+function ensureStylesheet(
+  file: string,
+  styleId: string,
+  slot: { promise: Promise<void> | null },
+): Promise<void> {
+  if (document.getElementById(styleId)) {
     return Promise.resolve();
   }
-  if (!contentStylesPromise) {
-    contentStylesPromise = fetch(browser.runtime.getURL('content.css'))
+  if (!slot.promise) {
+    slot.promise = fetch(browser.runtime.getURL(file))
       .then(async (response) => {
         if (!response.ok) {
-          throw new Error(`content stylesheet returned ${response.status}`);
+          throw new Error(`${file} returned ${response.status}`);
         }
-        installContentStyles(await response.text());
+        installContentStyles(await response.text(), styleId);
       })
       .catch((error: unknown) => {
-        contentStylesPromise = null;
+        slot.promise = null;
         throw error;
       });
   }
-  return contentStylesPromise;
+  return slot.promise;
+}
+
+const contentStylesSlot: { promise: Promise<void> | null } = { promise: null };
+const vaultStylesSlot: { promise: Promise<void> | null } = { promise: null };
+
+function ensureContentAppStyles(): Promise<void> {
+  return ensureStylesheet('content.css', 'chatgoose-style', contentStylesSlot);
+}
+
+/** The vault panel's own sheet rides on top of content.css (tokens, shared
+ * buttons); conversation pages never fetch it. */
+function ensureVaultStyles(): Promise<void> {
+  return ensureStylesheet('vault.css', 'chatgoose-vault-style', vaultStylesSlot);
 }
 
 let stopRouteWatcher: (() => void) | null = null;
@@ -231,6 +249,8 @@ launcher.mount();
 // A second lazy module, independent of the conversation app: it never needs
 // the controller graph, and a running upload queue must survive the chatter
 // wandering off the vault route (the launcher hides, the queue keeps going).
+// Off /creator/vault nothing of it exists in the page: no node, no sheet, no
+// timer of its own (the launcher rides the shared pathname poll) — E111.
 
 type VaultModule = typeof import('./vault/index.js');
 type VaultHandle = ReturnType<VaultModule['startVaultUploader']>;
@@ -266,7 +286,7 @@ function openVaultUploader(): void {
   }
   vaultOpenPending = true;
   showBootstrapLoading();
-  void Promise.all([loadVaultModule(), ensureContentAppStyles()])
+  void Promise.all([loadVaultModule(), ensureContentAppStyles(), ensureVaultStyles()])
     .then(([module]) => {
       clearBootstrapStatus();
       if (!isVaultPath(window.location.pathname)) {

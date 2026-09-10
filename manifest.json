@@ -38,7 +38,8 @@
       "resources": [
         "content-chat.js",
         "content-vault.js",
-        "content.css"
+        "content.css",
+        "vault.css"
       ],
       "matches": [
         "*://fansly.com/*"

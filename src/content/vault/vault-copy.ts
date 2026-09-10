@@ -7,9 +7,9 @@ import type {
 } from '../../shared/vault-upload.js';
 import type { VaultItemState, VaultStopReason } from './upload-runner.js';
 
+// The launcher's own two strings are in `vault-launcher-copy.ts`: that file is
+// bundled into the classic bootstrap, this one must never be.
 export const VAULT_COPY = {
-  launcherLabel: 'Загрузка',
-  launcherTitle: 'Загрузить набор в этот альбом по порядку',
   title: 'Загрузка в волт',
   subtitleIdle: 'Набор файлов в один альбом, по одному, с проверкой каждого.',
   close: 'Закрыть',

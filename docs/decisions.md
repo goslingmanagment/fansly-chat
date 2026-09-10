@@ -3561,3 +3561,55 @@ migration, no new Fansly egress. Not verified in this release pass: the vault
 selectors against the current Fansly build — the panel's facts row (account,
 album, form) is the visible guard for that, and the chapter tells the chatter
 what green means.
+
+**E111 (2026-09-10).** The owner asks that the vault uploader (E109) cost
+ordinary chatters nothing and be optimized in its own right. Measured first:
+the «Загрузка» launcher, which lives in the classic bootstrap every Fansly page
+runs, imported the panel's copy object for two strings, and esbuild cannot
+tree-shake object properties — 20.6 KB of the 42 KB `content.js` was Russian
+panel copy parsed on every page by every chatter; the launcher also appended
+its root node to every page at bootstrap and ran a second 500 ms route timer;
+the panel's 476 CSS lines rode in `content.css` for every conversation. On the
+vault page itself the runner (1.5 s) and the panel (1 s) each walked the whole
+album with innerText on every tick, every runner snapshot triggered another
+read and a full re-render, and the render rebuilt the notes, the status and
+the resume question every second — the focused «есть/нет» button was
+recreated under the chatter's pointer once a second.
+
+Decision, shared path first. The launcher owns its two strings
+(`vault-launcher-copy.ts`) and its stylesheet (`vault-launcher.css`), installs
+both on its first mount on `/creator/vault` and removes its root on unmount;
+the panel sheet ships as `vault.css`, fetched with the module on the first
+press (the tokens and shared buttons still come from `content.css`, so the
+sheet is never installed alone); route polling is one shared interval per
+bundle, subscribers come and go. `content.js` is 22 KB, of which ~3 KB is the
+launcher; `bootstrap.css` and `styles.css` are byte-identical to their
+pre-E109 state. The contract is pinned by a bundle-composition test that reads
+esbuild's metafile: the bootstrap carries the launcher only (ceiling 28 KB)
+and the vault module carries neither the chat app nor the settings graph.
+While at it, all bundles are emitted as UTF-8 instead of `\uXXXX` escapes —
+Firefox decodes every path we load scripts through as UTF-8 — which is a pure
+size cut (content-chat 447 → 408 KB, background 1.23 → 1.16 MB).
+
+Decision, the feature itself. One mutation-gated reader
+(`createVaultViewReader`) serves the panel and the runner: a MutationObserver
+on the album host — only the host, because Fansly's shell keeps mutating
+elsewhere (unread counters, presence, relative times) and a document-wide
+observer would have spoiled the cache every tick (review finding) — marks the
+cached view stale on its first record and disconnects, so a quiet album costs
+nothing and an uploading one costs one callback per read; the host leaving
+the tree or being re-created is caught by `isConnected` on the cached host,
+a missing host is never cached, and `takeRecords()` closes the same-task gap
+after a handoff's synchronous change handler. The album title comes from the first host child
+that renders text rather than the host's whole innerText (documented
+equivalence: a title never straddles two top-level inline siblings). Panel
+writes are idempotent, status lines are patched in place (the aria-live region
+announces changes, not ticks), the notes and the question are rebuilt only on
+content change, the row loop indexes the snapshot once, the refresh tick
+pauses while the tab is hidden, and the runner emits a snapshot only when the
+uploader line changed. Not changed: the family law of E109 (in-flight mark
+before the handoff, «неизвестно» never re-uploaded, positive-evidence
+confirmation), the selectors, the checkpoint format. A checkpoint written by
+2.1.0 still matches when the new title reader yields the same string, which it
+does for a block-level header; if it did not, the run would simply see no
+checkpoint and detect the present cards from the album instead.

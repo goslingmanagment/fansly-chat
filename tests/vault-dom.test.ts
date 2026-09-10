@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
-import { findReadyCard, readVaultView } from '../src/content/vault/vault-dom.js';
+import { createVaultViewReader, findReadyCard, readVaultView } from '../src/content/vault/vault-dom.js';
 import { isVaultPath } from '../src/content/vault/vault-route.js';
 import { createVaultCheckpointStore } from '../src/content/vault/checkpoint-store.js';
 import {
@@ -128,6 +128,133 @@ describe('readVaultView', () => {
     expect(findReadyCard(view, '108__final')).toBeNull();
     expect(findReadyCard(view, 'missing')).toBeNull();
     expect(findReadyCard({ ...view, uploader: { ...view.uploader, busy: true } }, '107__tizer')).toBeNull();
+  });
+
+  it('takes the album title from the first child that renders text, without walking the cards', () => {
+    // Leading empty/whitespace children are skipped; a top-level text node
+    // counts; the cards further down are never consulted.
+    installDom(`
+      <app-media-vault>
+        <div class="toolbar"></div>
+        <!-- a comment -->
+          Set «SEX-002»
+        <div class="vault-row"><div class="image-filename">001.jpg</div></div>
+      </app-media-vault>`);
+    expect(readVaultView(document)!.albumTitle).toBe('Set «SEX-002»');
+
+    installDom(`
+      <app-media-vault>
+        <app-vault-header><div><span>SEX-003</span> <em>12 items</em></div></app-vault-header>
+        <div class="vault-row"><div class="image-filename">001.jpg</div></div>
+      </app-media-vault>`);
+    expect(readVaultView(document)!.albumTitle).toBe('SEX-003 12 items');
+
+    installDom('<app-media-vault><div></div></app-media-vault>');
+    expect(readVaultView(document)!.albumTitle).toBeNull();
+  });
+});
+
+describe('createVaultViewReader', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  async function settle(): Promise<void> {
+    // MutationObserver records are delivered as a microtask.
+    await Promise.resolve();
+    await Promise.resolve();
+  }
+
+  it('returns the cached view until the page mutates, then re-reads once', async () => {
+    installDom(ALBUM_HTML);
+    vi.stubGlobal('MutationObserver', dom.window.MutationObserver);
+    const reader = createVaultViewReader(document);
+
+    const first = reader.read();
+    expect(first!.cards).toHaveLength(2);
+    expect(reader.read()).toBe(first);
+    expect(reader.read()).toBe(first);
+
+    document.querySelector('.vault-row span')!.remove();
+    await settle();
+
+    const second = reader.read();
+    expect(second).not.toBe(first);
+    expect(second!.cards[0]!.processing).toBe(false);
+    expect(reader.read()).toBe(second);
+  });
+
+  it('keeps the cache through mutations elsewhere on the page', async () => {
+    // Fansly's shell never sits still (unread counters, presence, relative
+    // times); only the album host can change what the album shows.
+    installDom(`<nav><span class="unread">3</span></nav>${ALBUM_HTML}`);
+    vi.stubGlobal('MutationObserver', dom.window.MutationObserver);
+    const reader = createVaultViewReader(document);
+    const first = reader.read();
+
+    document.querySelector('.unread')!.textContent = '4';
+    document.body.append(document.createElement('div'));
+    document.body.setAttribute('class', 'scrolled');
+    await settle();
+
+    expect(reader.read()).toBe(first);
+  });
+
+  it('notices the album host itself disappearing, reappearing or being replaced', async () => {
+    installDom(ALBUM_HTML);
+    vi.stubGlobal('MutationObserver', dom.window.MutationObserver);
+    const reader = createVaultViewReader(document);
+    expect(reader.read()!.albumTitle).toBe('SEX-001-CLEAN');
+
+    const host = document.querySelector('app-media-vault')!;
+    host.remove();
+    expect(reader.read()).toBeNull();
+    // A missing album is never cached: the lookup is one selector.
+    document.body.append(host);
+    expect(reader.read()!.albumTitle).toBe('SEX-001-CLEAN');
+
+    // Angular re-creating the component for another album: a new host
+    // element, the old one gone — no mutation inside either that the old
+    // observer could see.
+    const replacement = document.createElement('app-media-vault');
+    replacement.innerHTML = '<h2>OTHER</h2>';
+    host.replaceWith(replacement);
+    await settle();
+    expect(reader.read()!.albumTitle).toBe('OTHER');
+    expect(reader.read()!.albumTitle).toBe('OTHER');
+
+    replacement.querySelector('h2')!.textContent = 'RENAMED';
+    await settle();
+    expect(reader.read()!.albumTitle).toBe('RENAMED');
+  });
+
+  it('does not trust the cache across a same-task mutation', () => {
+    installDom(ALBUM_HTML);
+    vi.stubGlobal('MutationObserver', dom.window.MutationObserver);
+    const reader = createVaultViewReader(document);
+    const first = reader.read();
+
+    // A synchronous change handler after a handoff mutates the page before
+    // any microtask runs; the reader asks the observer for pending records.
+    document.querySelector('app-media-upload-input')!.append(
+      Object.assign(document.createElement('div'), { className: 'media-container', textContent: 'x' }),
+    );
+    const second = reader.read();
+    expect(second).not.toBe(first);
+    expect(second!.uploader.busy).toBe(true);
+  });
+
+  it('reads every time when no observer is available, and forgets everything on dispose', async () => {
+    installDom(ALBUM_HTML);
+    vi.stubGlobal('MutationObserver', undefined);
+    const plain = createVaultViewReader(document);
+    expect(plain.read()).not.toBe(plain.read());
+
+    vi.stubGlobal('MutationObserver', dom.window.MutationObserver);
+    const reader = createVaultViewReader(document);
+    const first = reader.read();
+    reader.dispose();
+    expect(reader.read()).not.toBe(first);
   });
 });
 

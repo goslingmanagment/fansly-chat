@@ -8,7 +8,12 @@ import { describe, expect, it } from 'vitest';
 // actions, e.g. «Рекап ▾ → Обновить переписку», have the toast as their only
 // feedback), the cheatsheet sits above the other surfaces, and the launcher
 // stays at the bottom.
-const css = readFileSync(new URL('../src/content/styles.css', import.meta.url), 'utf8');
+// The vault panel's sheet is installed on top of content.css (E111), so the
+// contract spans both.
+const css = [
+  '../src/content/styles.css',
+  '../src/content/vault/vault.css',
+].map((file) => readFileSync(new URL(file, import.meta.url), 'utf8')).join('\n');
 
 /** Every `#chatgoose-*-root { … z-index: N … }` declaration in the stylesheet. */
 function readRootZIndexes(source: string): Map<string, number> {
