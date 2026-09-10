@@ -3592,11 +3592,15 @@ Firefox decodes every path we load scripts through as UTF-8 — which is a pure
 size cut (content-chat 447 → 408 KB, background 1.23 → 1.16 MB).
 
 Decision, the feature itself. One mutation-gated reader
-(`createVaultViewReader`) serves the panel and the runner: a document-wide
-MutationObserver marks the cached view stale on its first record and
-disconnects, so an idle page costs nothing and a busy one costs one callback
-per read; `takeRecords()` closes the same-task gap after a handoff's
-synchronous change handler. The album title comes from the first host child
+(`createVaultViewReader`) serves the panel and the runner: a MutationObserver
+on the album host — only the host, because Fansly's shell keeps mutating
+elsewhere (unread counters, presence, relative times) and a document-wide
+observer would have spoiled the cache every tick (review finding) — marks the
+cached view stale on its first record and disconnects, so a quiet album costs
+nothing and an uploading one costs one callback per read; the host leaving
+the tree or being re-created is caught by `isConnected` on the cached host,
+a missing host is never cached, and `takeRecords()` closes the same-task gap
+after a handoff's synchronous change handler. The album title comes from the first host child
 that renders text rather than the host's whole innerText (documented
 equivalence: a title never straddles two top-level inline siblings). Panel
 writes are idempotent, status lines are patched in place (the aria-live region

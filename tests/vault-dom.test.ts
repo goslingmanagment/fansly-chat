@@ -184,7 +184,23 @@ describe('createVaultViewReader', () => {
     expect(reader.read()).toBe(second);
   });
 
-  it('notices the album host itself disappearing and reappearing', async () => {
+  it('keeps the cache through mutations elsewhere on the page', async () => {
+    // Fansly's shell never sits still (unread counters, presence, relative
+    // times); only the album host can change what the album shows.
+    installDom(`<nav><span class="unread">3</span></nav>${ALBUM_HTML}`);
+    vi.stubGlobal('MutationObserver', dom.window.MutationObserver);
+    const reader = createVaultViewReader(document);
+    const first = reader.read();
+
+    document.querySelector('.unread')!.textContent = '4';
+    document.body.append(document.createElement('div'));
+    document.body.setAttribute('class', 'scrolled');
+    await settle();
+
+    expect(reader.read()).toBe(first);
+  });
+
+  it('notices the album host itself disappearing, reappearing or being replaced', async () => {
     installDom(ALBUM_HTML);
     vi.stubGlobal('MutationObserver', dom.window.MutationObserver);
     const reader = createVaultViewReader(document);
@@ -192,12 +208,24 @@ describe('createVaultViewReader', () => {
 
     const host = document.querySelector('app-media-vault')!;
     host.remove();
-    await settle();
     expect(reader.read()).toBeNull();
-
+    // A missing album is never cached: the lookup is one selector.
     document.body.append(host);
-    await settle();
     expect(reader.read()!.albumTitle).toBe('SEX-001-CLEAN');
+
+    // Angular re-creating the component for another album: a new host
+    // element, the old one gone — no mutation inside either that the old
+    // observer could see.
+    const replacement = document.createElement('app-media-vault');
+    replacement.innerHTML = '<h2>OTHER</h2>';
+    host.replaceWith(replacement);
+    await settle();
+    expect(reader.read()!.albumTitle).toBe('OTHER');
+    expect(reader.read()!.albumTitle).toBe('OTHER');
+
+    replacement.querySelector('h2')!.textContent = 'RENAMED';
+    await settle();
+    expect(reader.read()!.albumTitle).toBe('RENAMED');
   });
 
   it('does not trust the cache across a same-task mutation', () => {

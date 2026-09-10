@@ -129,40 +129,46 @@ function readCards(root: Element): VaultCardView[] {
   return cards;
 }
 
-/** One synchronous snapshot of the open album; null when no album is open. */
-export function readVaultView(root: ParentNode = document): VaultView | null {
-  const vault = root.querySelector(VAULT_ROOT_SELECTOR);
-  if (!vault) {
-    return null;
-  }
+function readHost(host: Element): VaultView {
   return {
-    albumTitle: readAlbumTitle(vault),
-    uploader: readUploader(vault),
-    cards: readCards(vault),
+    albumTitle: readAlbumTitle(host),
+    uploader: readUploader(host),
+    cards: readCards(host),
   };
 }
 
+/** One synchronous snapshot of the open album; null when no album is open. */
+export function readVaultView(root: ParentNode = document): VaultView | null {
+  const host = root.querySelector(VAULT_ROOT_SELECTOR);
+  return host ? readHost(host) : null;
+}
+
 export interface VaultViewReader {
-  /** The current view; a cached one while the page has not changed since it
+  /** The current view; a cached one while the album has not changed since it
    * was read. Callers must treat the result as immutable. */
   read(): VaultView | null;
   /** Drops the observer and the cache; the next read starts afresh. */
   dispose(): void;
 }
 
-/** A `readVaultView` that re-reads only after the page mutated.
+/** A `readVaultView` that re-reads only after the album changed.
  *
  * The panel refreshes every second and the runner polls every 1.5 s, both
  * against the same album; a snapshot costs a layout flush plus an innerText
  * walk over every card. Between two reads a MutationObserver watches the
- * document for any change (child list, text, attributes — visibility toggles
- * are attribute changes and innerText honours them); the first record marks
- * the cache stale and disconnects the observer, so an active upload page
- * costs one callback per read, not one per mutation, and an idle page costs
- * nothing at all. The whole document is observed, not the album host: the
- * host itself being removed (album closed) is a mutation on its parent. */
-export function createVaultViewReader(root: Document = document): VaultViewReader {
+ * album host — and only the host: Fansly's shell keeps mutating elsewhere
+ * (unread counters, presence dots, relative times) and none of that can
+ * change what the album shows. Any change under the host (child list, text,
+ * attributes — visibility toggles are attribute changes and innerText
+ * honours them) marks the cache stale and disconnects the observer, so an
+ * uploading album costs one callback per read, not one per mutation, and a
+ * quiet one costs nothing. The host leaving the tree (album closed, or the
+ * component re-created for another album) is a mutation on its parent, which
+ * the host observer cannot see; `isConnected` on the cached host catches it
+ * for free. A missing host is never cached: the lookup is one selector. */
+export function createVaultViewReader(root: ParentNode = document): VaultViewReader {
   let cached: VaultView | null = null;
+  let host: Element | null = null;
   let fresh = false;
   let observer: MutationObserver | null = null;
 
@@ -179,17 +185,19 @@ export function createVaultViewReader(root: Document = document): VaultViewReade
       if (fresh && observer && observer.takeRecords().length > 0) {
         invalidate();
       }
-      if (fresh) {
+      if (fresh && host?.isConnected) {
         return cached;
       }
-      cached = readVaultView(root);
-      const target = root.documentElement;
-      if (!target || typeof MutationObserver !== 'function') {
+      observer?.disconnect();
+      fresh = false;
+      host = root.querySelector(VAULT_ROOT_SELECTOR);
+      cached = host ? readHost(host) : null;
+      if (!host || typeof MutationObserver !== 'function') {
         // Nothing to watch means nothing to trust: read again next time.
         return cached;
       }
       observer ??= new MutationObserver(invalidate);
-      observer.observe(target, {
+      observer.observe(host, {
         subtree: true,
         childList: true,
         characterData: true,
@@ -202,6 +210,7 @@ export function createVaultViewReader(root: Document = document): VaultViewReade
       observer?.disconnect();
       observer = null;
       cached = null;
+      host = null;
       fresh = false;
     },
   };
