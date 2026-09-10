@@ -90,6 +90,9 @@ async function ensureStaticFiles() {
   await cp(path.join(root, 'src/popup/styles.css'), path.join(outdir, 'popup.css'));
   await cp(path.join(root, 'src/debug-prompt/styles.css'), path.join(outdir, 'debug-prompt.css'));
   await cp(path.join(root, 'src/content/styles.css'), path.join(outdir, 'content.css'));
+  // E111: the vault panel's sheet ships apart from content.css and is fetched
+  // only when the launcher is pressed.
+  await cp(path.join(root, 'src/content/vault/vault.css'), path.join(outdir, 'vault.css'));
   await cp(path.join(root, 'icons'), path.join(outdir, 'icons'), { recursive: true });
   // Family fonts ride along instead of a Google Fonts CDN request: the
   // `@font-face` rules in options/popup styles resolve `url('fonts/…')`
@@ -217,6 +220,7 @@ if (!watchMode) {
       'src/popup/styles.css',
       'src/debug-prompt/styles.css',
       'src/content/styles.css',
+      'src/content/vault/vault.css',
     ].map((relativePath) => ({
       watchPath: path.join(root, relativePath),
       shouldRebuild() {

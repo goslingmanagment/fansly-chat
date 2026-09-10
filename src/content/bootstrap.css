@@ -93,62 +93,8 @@
   outline-offset: 1px;
 }
 
-/* ─── Vault uploader launcher (E109) — bootstrap-owned, so it paints before
-   content.css is fetched. Bottom-right, mirroring the «$» launcher. */
-
-#chatgoose-vault-launcher-root {
-  position: fixed;
-  right: 18px;
-  bottom: 18px;
-  z-index: 2147483644;
-  color-scheme: light;
-}
-
-:root.chatgoose-theme-dark #chatgoose-vault-launcher-root {
-  color-scheme: dark;
-}
-
-.chatgoose-vault-launcher {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  height: 38px;
-  padding: 0 14px 0 11px;
-  border-radius: 19px;
-  border: 1px solid var(--chatgoose-line-strong);
-  background: var(--chatgoose-bg1);
-  color: var(--chatgoose-ink);
-  font: 600 12.5px/1 var(--chatgoose-font-mono);
-  cursor: pointer;
-  box-shadow: var(--chatgoose-shadow);
-  opacity: 0.7;
-  transition: opacity 150ms ease, transform 150ms ease, border-color 150ms ease;
-}
-
-.chatgoose-vault-launcher-glyph {
-  color: var(--chatgoose-clay);
-  font-size: 15px;
-}
-
-.chatgoose-vault-launcher:hover {
-  opacity: 1;
-  transform: translateY(-1px);
-  border-color: var(--chatgoose-clay);
-}
-
-.chatgoose-vault-launcher:focus-visible {
-  outline: 2px solid var(--chatgoose-clay);
-  outline-offset: 2px;
-}
-
-.chatgoose-vault-launcher-busy {
-  opacity: 1;
-  border-color: var(--chatgoose-clay);
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .chatgoose-launcher,
-  .chatgoose-vault-launcher {
+  .chatgoose-launcher {
     transition: none !important;
   }
 }

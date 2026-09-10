@@ -409,7 +409,7 @@ describe('VaultUploaderPanel', () => {
   });
 
   it('hides the panel through the hidden attribute only, with CSS that honours it', () => {
-    const css = readFileSync(new URL('../src/content/styles.css', import.meta.url), 'utf8');
+    const css = readFileSync(new URL('../src/content/vault/vault.css', import.meta.url), 'utf8');
     expect(css).toMatch(/#chatgoose-vault-root \[hidden\] \{\s*display: none !important;/);
   });
 
