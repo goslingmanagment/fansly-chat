@@ -920,11 +920,14 @@ export function registerRuntimeApi({
           const pagePath = browser.runtime.getURL(OPTIONS_PAGE_PATH);
           const url = `${pagePath}${formatOptionsHash({ pane, code: code ?? null })}`;
           let existingTabId: number | undefined;
+          let existingTabUrl: string | undefined;
           try {
             // Match patterns ignore the fragment, so this finds the tab whatever
             // pane it is currently showing.
             const tabs = await browser.tabs.query({ url: `${pagePath}*` });
-            existingTabId = tabs.find((tab) => tab.id !== undefined)?.id;
+            const existing = tabs.find((tab) => tab.id !== undefined);
+            existingTabId = existing?.id;
+            existingTabUrl = existing?.url;
           } catch {
             // No answer is not «no tab open», but creating one is the only other
             // move available — and the reuse path is best-effort by nature.
@@ -933,6 +936,15 @@ export function registerRuntimeApi({
             try {
               // Same document, new hash: the page's hashchange listener paints the
               // pane and arms the highlight — no reload, no lost form state.
+              //
+              // The same hash twice (the chatter clicked the same error's link
+              // again) fires no hashchange at all, so the highlight would never
+              // re-arm. Hop through the bare pane first: two hash changes, the
+              // second one being the deep link the page is waiting for (BL-006).
+              const bareUrl = `${pagePath}${formatOptionsHash({ pane, code: null })}`;
+              if (existingTabUrl === url && url !== bareUrl) {
+                await browser.tabs.update(existingTabId, { url: bareUrl });
+              }
               await browser.tabs.update(existingTabId, { active: true, url });
               try {
                 const tab = await browser.tabs.get(existingTabId);

@@ -3628,3 +3628,29 @@ behaviour did not change). No Kernel SDK change, no storage migration, no new
 Fansly egress. Still not verified in a release pass: the vault selectors and
 the new title reader against the live Fansly build — the panel's facts row
 remains the visible guard.
+
+**E113 (2026-09-10).** The owner asks for the cabinet's P2 review tail
+(BL-004…BL-006) and two housekeeping items to be fixed without a release.
+Fixed, each with a test: the «Контракт» status row follows the debug switch
+live instead of the value at render; hub/access rows that a dropped paint left
+as skeletons are healed — the drop marks them stale and `healHubStatusRows`
+repaints once the live form equals the saved snapshot (at the drop, after a
+persist that ran no diagnostics, on the chatter's return to the tab); typing
+cannot reach that state (an input event nulls the connection-test signature,
+so every persist re-hydrates), only a programmatic move of the field can, and
+that is what the test models. «AI отключён» is drawn by `renderMappingInfo`,
+so a live `accountMappings`/catalog refresh repaints it — before, the refresh
+wiped the badge for every row until a reload, the opposite of the stale badge
+the backlog described. A successful rename moves focus to the rebuilt row's
+rename control. A deep link to the hash the options tab already shows hops
+through the bare pane first so the page gets a real hashchange (the hash
+grammar is unchanged); two codes landing on one row force a style flush
+between remove and add so the second flash is visible. A middle-click on the
+changelog link records the version as seen through `auxclick` and leaves the
+opening to the browser. An empty accounts table after a failed live read says
+«Список не обновился», not «Пока пусто». Housekeeping: the 1.9.11 block of
+changelog.html loses its second «latest» badge; the backlog note about the
+Coach feed rebuilding on every chunk is retired (the feed reconciles by key)
+and the closed items are struck through with their reason. Not touched:
+BL-003's harness/interface notes, BL-007's debounce re-arm (a paired fix with
+the field writeback), the `signOutAgencyHub` sender check.

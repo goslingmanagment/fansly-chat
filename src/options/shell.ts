@@ -74,7 +74,14 @@ export interface RailFootHandles {
  */
 export function renderRailFoot(
   slot: HTMLElement,
-  options: { version: string; changelogUrl: string; onOpenChangelog: () => void },
+  options: {
+    version: string;
+    changelogUrl: string;
+    onOpenChangelog: () => void;
+    /** A middle-click: the browser opens the href itself (in a background
+     * tab), so only the seen-version write is left to do (BL-006). */
+    onOpenChangelogNatively?: () => void;
+  },
 ): RailFootHandles {
   const doc = slot.ownerDocument;
 
@@ -103,6 +110,13 @@ export function renderRailFoot(
   link.addEventListener('click', (event) => {
     event.preventDefault();
     options.onOpenChangelog();
+  });
+  // Middle-click never reaches `click`: it is `auxclick`, and the browser opens
+  // the href on its own. Default stays — only the dot has to learn about it.
+  link.addEventListener('auxclick', (event) => {
+    if (event.button === 1) {
+      options.onOpenChangelogNatively?.();
+    }
   });
 
   slot.append(versionTag, link);

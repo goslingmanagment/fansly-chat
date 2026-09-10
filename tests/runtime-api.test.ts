@@ -1780,6 +1780,43 @@ describe('runtime-api openOptions', () => {
     expect(harness.tabsCreate).not.toHaveBeenCalled();
   });
 
+  it('hops through the bare pane when the open tab already shows the same deep link (BL-006)', async () => {
+    // The same hash twice fires no hashchange, so the page could never re-arm
+    // its highlight. A hop to `#hub` first makes the deep link a real change.
+    mockStorage = createStorage();
+    const harness = await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });
+    harness.tabsQuery.mockResolvedValueOnce([
+      { id: 41, url: 'moz-extension://cg-test-uuid/options.html#hub:CG-HUB-04' },
+    ]);
+    harness.tabsGet.mockResolvedValueOnce({ id: 41, windowId: 5 } as never);
+
+    const result = await harness.send({ type: 'openOptions', pane: 'hub', code: 'CG-HUB-04' });
+
+    expect(result).toEqual({ opened: true, reused: true });
+    expect(harness.tabsUpdate.mock.calls).toEqual([
+      [41, { url: 'moz-extension://cg-test-uuid/options.html#hub' }],
+      [41, { active: true, url: 'moz-extension://cg-test-uuid/options.html#hub:CG-HUB-04' }],
+    ]);
+    expect(harness.tabsCreate).not.toHaveBeenCalled();
+  });
+
+  it('does not hop when the tab already shows the bare pane it is sent to', async () => {
+    mockStorage = createStorage();
+    const harness = await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });
+    harness.tabsQuery.mockResolvedValueOnce([
+      { id: 41, url: 'moz-extension://cg-test-uuid/options.html#hub' },
+    ]);
+    harness.tabsGet.mockResolvedValueOnce({ id: 41, windowId: 5 } as never);
+
+    await harness.send({ type: 'openOptions', pane: 'hub' });
+
+    expect(harness.tabsUpdate).toHaveBeenCalledTimes(1);
+    expect(harness.tabsUpdate).toHaveBeenCalledWith(41, {
+      active: true,
+      url: 'moz-extension://cg-test-uuid/options.html#hub',
+    });
+  });
+
   it('opens one tab when none is open, and drops an unusable code', async () => {
     mockStorage = createStorage();
     const harness = await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });

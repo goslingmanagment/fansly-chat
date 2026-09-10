@@ -57,6 +57,25 @@ describe('options rail footer — changelog', () => {
     expect(dot(page).hidden).toBe(true);
   });
 
+  it('records the version on a middle-click too, leaving the browser to open the href (BL-006)', async () => {
+    const page = await mountOptionsPage({
+      sessions: [],
+      runtime: { lastSeenVersion: '1.9.10' },
+    });
+    expect(dot(page).hidden).toBe(false);
+
+    // A middle-click is `auxclick` with button 1 — it never reaches `click`,
+    // and the browser opens the link's href in a background tab by itself.
+    const aux = new page.window.MouseEvent('auxclick', { button: 1, bubbles: true, cancelable: true });
+    link(page).dispatchEvent(aux);
+    await page.flushAsync();
+
+    expect(page.lastSeenWrites()).toEqual([MOUNTED_VERSION]);
+    expect(aux.defaultPrevented).toBe(false);
+    expect(page.openedTabs()).toEqual([]);
+    expect(dot(page).hidden).toBe(true);
+  });
+
   it('stays quiet when this version has already been seen', async () => {
     const page = await mountOptionsPage({
       sessions: [],

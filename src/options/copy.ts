@@ -466,6 +466,9 @@ export const COPY = {
      * one instead of repeating the id printed right below it. */
     renameInvite: 'подписать',
     subtitleFresh: 'Пока пусто — аккаунты появляются здесь сами.',
+    /** Empty because the live read FAILED, not because there is nothing: the
+     * chip must not promise rows that may already exist (BL-006). */
+    subtitleUnavailable: 'Список не обновился',
     emptyFresh:
       'Открой fansly.com в этом браузере и войди под аккаунтом модели — строка появится сама, останется назначить персону.',
     loading: 'Загружаем аккаунты Fansly…',
