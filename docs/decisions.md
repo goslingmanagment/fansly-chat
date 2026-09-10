@@ -3702,3 +3702,17 @@ on code points), the policy flag test; `pnpm check` green. Deploy order: core
 first (the kernel rejects unknown `clientContext` keys on the strict schema),
 then this release; until the core deploy this branch must not ship.
 
+**E116 (2026-09-11).** Release 2.1.3 from `main` (57b2076 + this release
+commit): Ping sends the chatter-saved fan name and the bio to the kernel
+(E115), paired with core Decision 290 (ping template without its seeded
+"hey stranger" openers, a Fan section with username / saved name / bio, the
+name-priority rule), which was deployed to the hub first: the kernel's strict
+`clientContext` schema had to accept `fanCustomName` before any client sent
+it. Package and manifest are 2.1.3; the committed changelog/install stamps
+read v2.1.3. CHANGELOG.md gains the 2.1.3 section that becomes the Telegram
+announce; changelog.html the matching block above 2.1.2, whose badge drops
+«latest»; README the date. Kernel SDK re-vendored (contract hash
+`af58db69…`, core `32478124`); no storage migration; no new Fansly egress
+(the saved name and bio ride the account lookup every generation already
+made). Live acceptance: the reporting chatter's next pings after the update.
+
