@@ -23,6 +23,9 @@ export interface KernelFeatureClientContext {
   fanSpendingData: string;
   fanSubscriptionData: string;
   fanBio?: string;
+  /** The chatter's saved name for the fan (Fansly rename, E115 / Core
+   * Decision 290); read by the ping template. Absent when never renamed. */
+  fanCustomName?: string;
   pingSegment?: PingSegment;
   /** Whole days since the fan's latest text, derived with the same clock as
    * `pingSegment`; ping only, bounded to Core's 0..20_000 contract (#127). */
@@ -450,6 +453,9 @@ export function createKernelFeatureGateway(
               fanSubscriptionData: request.clientContext.fanSubscriptionData,
               ...(request.clientContext.fanBio !== undefined
                 ? { fanBio: request.clientContext.fanBio }
+                : {}),
+              ...(request.clientContext.fanCustomName !== undefined
+                ? { fanCustomName: request.clientContext.fanCustomName }
                 : {}),
               ...(request.clientContext.pingSegment !== undefined
                 ? { pingSegment: request.clientContext.pingSegment }

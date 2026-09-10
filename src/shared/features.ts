@@ -113,6 +113,9 @@ export const FEATURE_POLICIES = {
     supportsReplyTone: false,
     requiresDraft: false,
     usesPingSegment: true,
+    // E115: the fan's bio is a ping hook; Core Decision 290 flips the kernel
+    // policy the same way, both sides gate by this flag.
+    includesFanBio: true,
   },
   'hi-greeting': {
     messageCountBucket: 'hi',

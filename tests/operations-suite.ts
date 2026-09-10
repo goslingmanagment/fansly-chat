@@ -6888,6 +6888,120 @@ describe(`OperationCoordinator (${part})`, () => {
     expect(complete?.fanDisplayName).toBe('SECRET-PET-NAME');
   });
 
+  it('E115: the chatter-saved name (account note 12002) rides clientContext.fanCustomName beside the platform name', async () => {
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.getAccountNames.mockResolvedValue([
+      {
+        id: 'fan-1',
+        username: 'alice',
+        displayName: 'Alice',
+        notes: [
+          { contentType: 12000, note: '{"crm":true}' },
+          { contentType: 12002, note: '  Mike  ' },
+        ],
+      },
+    ] as never);
+    const { coordinator, kernelGateway } = await createCoordinatorHarness({
+      anthropicRawText: 'reply',
+      fanslyClient,
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'Mike',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    const request = kernelRequestFromStreamCall(kernelGateway);
+    // The platform name stays the kernel-facing display name; the saved name
+    // travels trimmed in its own field (Core Decision 290), still never the
+    // DOM label.
+    expect(request.clientContext.fanDisplayName).toBe('alice');
+    expect(request.clientContext.fanCustomName).toBe('Mike');
+  });
+
+  it('E115: a fan the chatter never renamed ships no fanCustomName key at all', async () => {
+    const { coordinator, kernelGateway } = await createCoordinatorHarness({
+      anthropicRawText: 'reply',
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'reply-op',
+      feature: 'fast-reply',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'alice',
+      forceRegenerate: false,
+      replyMode: 'default',
+    });
+
+    expect(kernelRequestFromStreamCall(kernelGateway).clientContext).not.toHaveProperty('fanCustomName');
+  });
+
+  it('E115: a ping carries the saved name and the bio, and the vendored contract accepts both', async () => {
+    const nowSeconds = Math.floor(currentNow / 1000);
+    const daySeconds = 24 * 60 * 60;
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.loadMessages.mockResolvedValue({
+      pages: pagesFromTranscript([
+        { id: 'fan-1', createdAt: nowSeconds - 14 * daySeconds, senderId: 'fan-1', senderLabel: 'Fan', type: 1, text: 'hey', labels: [] },
+        { id: 'fan-2', createdAt: nowSeconds - 13 * daySeconds, senderId: 'fan-1', senderLabel: 'Fan', type: 1, text: 'you there?', labels: [] },
+        { id: 'fan-3', createdAt: nowSeconds - 12 * daySeconds, senderId: 'fan-1', senderLabel: 'Fan', type: 1, text: 'ok', labels: [] },
+        { id: 'model-1', createdAt: nowSeconds - 11 * daySeconds, senderId: 'account-1', senderLabel: 'Model', type: 1, text: 'heyy', labels: [] },
+      ]),
+      pagesLoaded: 1,
+      targetPages: 1,
+      reachedEnd: false,
+    });
+    fanslyClient.getAccountNames.mockResolvedValue([
+      {
+        id: 'fan-1',
+        username: 'alice',
+        displayName: 'Alice',
+        about: 'dad of two, rally on weekends',
+        notes: [{ contentType: 12002, note: 'Mike' }],
+      },
+    ] as never);
+    const { coordinator, kernelGateway } = await createCoordinatorHarness({
+      anthropicRawText: 'did you win the rally thing',
+      fanslyClient,
+    });
+
+    await coordinator.startOperation(1, {
+      type: 'operation:start',
+      operationId: 'ping-op-names',
+      feature: 'ping',
+      groupId: 'group-1',
+      routeNonce: 1,
+      domFanDisplayName: 'Mike',
+      forceRegenerate: false,
+    });
+
+    expect(kernelGateway.streamFeature).toHaveBeenCalledTimes(1);
+    const request = kernelRequestFromStreamCall(kernelGateway);
+    expect(request.clientContext).toMatchObject({
+      fanDisplayName: 'alice',
+      fanCustomName: 'Mike',
+      // E115 turns includesFanBio on for ping (Core Decision 290 mirrors it).
+      fanBio: 'dad of two, rally on weekends',
+      pingSegment: 'segment-a',
+    });
+    const parsed = routeSchemas.aiFeatureStream.body.safeParse({
+      clientRequestId: '00000000-0000-4000-8000-000000000000',
+      pageLabel: request.pageLabel,
+      platform: 'fansly',
+      conversationRef: request.conversationRef,
+      clientContext: request.clientContext,
+    });
+    expect(parsed.success, parsed.error?.message).toBe(true);
+  });
+
   it('custom-name rule (compare): a lookup failure sends "fan" to every card, never the DOM custom name', async () => {
     // Analogous compare-lane guard to the fast-reply case above: the chatter's
     // private custom fan name rides the DOM label, the account lookup fails, so

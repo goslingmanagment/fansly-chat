@@ -21,6 +21,7 @@ import {
   STREAM_CHUNK_FLUSH_MS,
   SUMMARY_SYNC_RETRY_COOLDOWN_MS,
 } from '../shared/constants.js';
+import { kernelFanCustomName } from '../shared/fansly-custom-name.js';
 import { isOutputExhausted } from '@kernel/sdk';
 import { mapWithConcurrency } from '../shared/concurrency.js';
 import {
@@ -382,11 +383,13 @@ function buildConversationRefs(
 }
 
 /**
- * Custom-name rule (spec §4): the kernel-facing fan display name comes ONLY
- * from the Fansly account lookup (username → displayName), falling back to a
- * neutral "fan" when the lookup fails. The DOM label may carry a chatter's
- * private custom fan name and must NEVER reach a prompt — it stays a local UI
- * label. Applies to every feature.
+ * Kernel-facing fan display name: ONLY the Fansly account lookup (username →
+ * displayName), falling back to a neutral "fan" when the lookup fails. The DOM
+ * label is never used for it: it is ambiguous (platform name or the chatter's
+ * rename) and stays a local UI label. The chatter's saved name itself DOES
+ * reach the kernel since E115, but through its own field
+ * (`clientContext.fanCustomName`, read from the same account lookup), never
+ * through this one. Applies to every feature.
  */
 function kernelFanDisplayName(
   account: { username?: string | null; displayName?: string | null } | undefined,
@@ -2316,9 +2319,11 @@ export class OperationCoordinator {
       // UI-facing label (may carry the chatter's private custom fan name via
       // the DOM fallback). NEVER used for the kernel — see kernelFanName below.
       let fanDisplayName = payload.domFanDisplayName ?? 'fan';
-      // Kernel-facing name (custom-name rule, spec §4): account lookup ONLY,
-      // neutral "fan" on failure — the DOM label must not reach a prompt.
+      // Kernel-facing name: account lookup ONLY, neutral "fan" on failure; the
+      // DOM label never feeds it. The chatter's saved name (E115) rides its own
+      // field from the same lookup; undefined when the fan was never renamed.
       let kernelFanName = 'fan';
+      let fanCustomName: string | undefined;
       let fanBio: string | undefined;
       fanAccountId =
         groupUsers?.find(
@@ -2436,6 +2441,7 @@ export class OperationCoordinator {
             payload.domFanDisplayName ||
             'fan';
           kernelFanName = kernelFanDisplayName(account);
+          fanCustomName = kernelFanCustomName(account);
           // Bio inclusion is a per-feature policy (spec §7): hi-greeting, help-me,
           // and coach-chat — NOT a hardcoded hi-greeting check (that omitted the
           // bio for coach + help-me, the bug this fixes).
@@ -2803,12 +2809,14 @@ export class OperationCoordinator {
         clientContext: {
           transcript: formattedTranscript,
           messageCount: keptMessageCount,
-          // Custom-name rule (spec §4): kernel-facing name is account-lookup
-          // only — never the DOM label (which fanDisplayName still uses for UI).
+          // Kernel-facing name is account-lookup only, never the DOM label
+          // (which fanDisplayName still uses for UI); the chatter's saved name
+          // travels beside it in its own field (E115, Core Decision 290).
           fanDisplayName: kernelFanName,
           fanSpendingData: spendingData,
           fanSubscriptionData: subscriptionData,
           ...(fanBio !== undefined ? { fanBio } : {}),
+          ...(fanCustomName !== undefined ? { fanCustomName } : {}),
           ...(pingSegment !== undefined ? { pingSegment } : {}),
           ...(fanSilenceDays !== undefined ? { fanSilenceDays } : {}),
           ...(transcriptCoverage !== undefined ? { transcriptCoverage } : {}),
