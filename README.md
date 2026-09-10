@@ -87,9 +87,10 @@ Important references:
 
 ## Release
 
-Release 2.1.1 is dated 2026-09-10 (the vault uploader off the shared content
-path, UTF-8 bundles); 2.1.0 (the vault uploader and the scoped Coach Cyrillic
-guard) is dated the same day; 2.0.0 is dated 2026-09-08. Verify the signed update feed when
+Release 2.1.2 is dated 2026-09-10 (the settings cabinet's review-tail fixes);
+2.1.1 (the vault uploader off the shared content path, UTF-8 bundles) and 2.1.0
+(the vault uploader and the scoped Coach Cyrillic guard) are dated the same
+day; 2.0.0 is dated 2026-09-08. Verify the signed update feed when
 checking which version is currently available. Agency Hub selects the models and
 generation settings; the [2.0 changelog](CHANGELOG.md#200) records the
 server-side update.

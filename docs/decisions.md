@@ -3654,3 +3654,15 @@ Coach feed rebuilding on every chunk is retired (the feed reconciles by key)
 and the closed items are struck through with their reason. Not touched:
 BL-003's harness/interface notes, BL-007's debounce re-arm (a paired fix with
 the field writeback), the `signOutAgencyHub` sender check.
+
+**E114 (2026-09-10).** Release 2.1.2 from `main` (d0e888b + this release
+commit): the cabinet's P2 review-tail fixes (E113) — live «Контракт» row,
+healed hub/access skeletons, the «AI отключён» badge surviving a live refresh,
+rename focus, the repeated deep link, middle-click on the changelog link, the
+honest empty-accounts subtitle — and the changelog.html badge fix. Package and
+manifest are 2.1.2; the committed changelog/install stamps read v2.1.2.
+CHANGELOG.md gains the 2.1.2 section that becomes the Telegram announce
+(preflight: 1482 chars, markdown subset clean); changelog.html the matching
+block above 2.1.1, whose badge drops «latest»; README the date. No Kernel SDK
+change, no storage migration, no new Fansly egress; guide.html untouched. The
+vault selectors remain unverified against the live Fansly build (E110/E112).
