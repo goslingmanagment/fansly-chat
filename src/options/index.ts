@@ -726,6 +726,7 @@ async function render(): Promise<void> {
         console.error('Failed to open the changelog', error);
       });
     },
+    onOpenChangelogNatively: markVersionSeen,
   });
 
   const versionHistory = document.createElement('a');
@@ -2565,9 +2566,13 @@ async function render(): Promise<void> {
   };
   for (const row of Object.values(statusRows)) row.skeleton();
   // The Контракт row is debug-only here (the Hub pane shows it unconditionally
-  // — E59 amendment). It still hydrates, so toggling debug and reloading shows
-  // a live value rather than a stale one.
-  if (!state.settings.debugMode) statusRows.contract.root.hidden = true;
+  // — E59 amendment). It always hydrates, so it follows the debug switch live:
+  // flipping the switch shows the current value, no reload needed (BL-004).
+  const syncContractRowVisibility = (): void => {
+    statusRows.contract.root.hidden = !debugInput.checked;
+  };
+  syncContractRowVisibility();
+  debugInput.addEventListener('change', syncContractRowVisibility);
 
   // «Проверить всё» is THE action of this pane, so it alone wears the primary
   // clay — and it sits in the pane head, where a chatter looks first.
@@ -3233,6 +3238,16 @@ async function render(): Promise<void> {
   // Monotonic run id: a newer run bumps it, so an older same-signature run that
   // resolves out of order drops its paint.
   let agencyHubHydrationRun = 0;
+  // True while the hub/access rows show a skeleton that no run is going to
+  // replace: a paint dropped by the in-flight guard below. Every later moment
+  // at which the form provably equals the saved snapshot (the drop itself, a
+  // persist that ran no diagnostics, the chatter coming back to the tab) heals
+  // it through `healHubStatusRows` — a field moved and moved back by code (a
+  // sanitising writeback, an external settings change) fires no input event
+  // and no persist, so without this the rows stayed skeletons until
+  // «Проверить всё» (BL-004).
+  let hubStatusRowsStale = false;
+  let healHubStatusRows: () => void = () => undefined;
 
   const hydrateHubStatusRows = async (expectedSignature: string): Promise<void> => {
     const run = ++agencyHubHydrationRun;
@@ -3255,8 +3270,15 @@ async function render(): Promise<void> {
     // drops the result (that edit's own persist re-runs hydration). The run id
     // additionally drops a same-signature run a newer run has superseded.
     if (disposed || run !== agencyHubHydrationRun || currentHubSignature() !== expectedSignature) {
+      // Only the newest run speaks for the rows: an older superseded run has a
+      // successor in flight that will paint (or flag) them itself.
+      if (!disposed && run === agencyHubHydrationRun) {
+        hubStatusRowsStale = true;
+        healHubStatusRows();
+      }
       return;
     }
+    hubStatusRowsStale = false;
     // A fulfilled read still has to be a well-formed response — a transport that
     // resolves `undefined` (a harness with no handler, a truncated frame) is a
     // failure, never invented into a verdict: fall to honest «unreachable».
@@ -3343,6 +3365,19 @@ async function render(): Promise<void> {
 
     rowsRefreshedAt = Date.now();
     refreshStatusView();
+  };
+
+  /** Repaint rows a dropped paint left as skeletons — only when the live form
+   * equals the saved snapshot, so the run is one the guards will let paint. A
+   * form that is mid-edit is left to that edit's own persist. */
+  healHubStatusRows = (): void => {
+    if (disposed || !hubStatusRowsStale) return;
+    const stored = storedHubSignature();
+    if (currentHubSignature() !== stored) return;
+    hubStatusRowsStale = false;
+    void hydrateHubStatusRows(stored).catch((error: unknown) => {
+      console.error('Failed to repaint Agency Hub status', error);
+    });
   };
 
   const hydrateLocalStatusRows = async (): Promise<void> => {
@@ -3769,6 +3804,11 @@ async function render(): Promise<void> {
         })().catch((error: unknown) => {
           console.error('Failed to refresh Agency Hub status after Settings save', error);
         });
+      } else {
+        // The connection test already knows this hub, so no diagnostics run —
+        // but rows a dropped paint left as skeletons get their repaint here,
+        // against the snapshot this persist just wrote (BL-004).
+        healHubStatusRows();
       }
     };
     const execution = settingsSaveChain
@@ -4348,7 +4388,14 @@ async function render(): Promise<void> {
     // calls back into here, so a late hydration still fires the pending flash.
     if (!target || !isDeepLinkTargetReady(target)) return;
     pendingDeepLink = null;
+    const sameTarget = flashedElement === target;
     clearFlash();
+    if (sameTarget) {
+      // Two codes in a row landing on one row: remove+add within a frame is a
+      // no-op for the CSS animation, so force a style flush between them so
+      // the second flash is visible (BL-006).
+      void target.offsetWidth;
+    }
     flashedElement = target;
     target.classList.add('chatgoose-flash');
     flashTimer = setTimeout(() => {
@@ -4441,6 +4488,8 @@ async function render(): Promise<void> {
     info: HTMLElement,
     view: { label: string; usable: boolean } | null,
     connected: boolean,
+    accountId: string,
+    personaMapped: boolean,
   ): void => {
     // No «в работе» pill any more: the rows are grouped BY state (E62), so the
     // group caption says it once for its whole block instead of once per row.
@@ -4451,6 +4500,16 @@ async function render(): Promise<void> {
       // An archived persona still mapped: the only useful instruction is «pick a
       // replacement», which is exactly what the Персоны pane says too.
       info.append(createStatusPill('warn', COPY.personas.archivedMapped));
+    }
+    if (!personaMapped) {
+      // Amber, not red: nothing is broken — the account simply cannot generate
+      // until a persona is chosen, and the hint says exactly that. Owned here,
+      // not appended after the fact, so a catalog or mapping refresh repaints
+      // it with the rest of the pills instead of wiping it (BL-005).
+      const aiOff = createBadge(COPY.accounts.personaUnmapped, 'amber');
+      aiOff.dataset.accountAiOff = accountId;
+      aiOff.title = COPY.accounts.personaUnmappedHint;
+      info.append(aiOff);
     }
   };
   const populateMappingSelect = (
@@ -4509,7 +4568,15 @@ async function render(): Promise<void> {
       const info = select.closest<HTMLElement>('[data-account-mapping-row]')
         ?.querySelector<HTMLElement>('[data-role="mapping-info"]');
       if (info) {
-        renderMappingInfo(info, selectedView, select.dataset.connected === 'true');
+        // The badge follows the value the select shows: a pending pick counts
+        // as mapped only once it lands in storage (which re-runs this refresh).
+        renderMappingInfo(
+          info,
+          selectedView,
+          select.dataset.connected === 'true',
+          accountId,
+          isAccountPersonaMapped(accountId),
+        );
       }
     }
   };
@@ -4771,8 +4838,11 @@ async function render(): Promise<void> {
     // pending deep-link highlight may now land on it.
     mappingsTable.dataset.deeplinkReady = 'true';
 
+    // An empty table after a FAILED refresh is not «fresh»: the rows may well
+    // exist, this page just could not read them. The ghosts below are gated the
+    // same way; the chip must agree with them.
     accountsSubtitle.textContent = rows.length === 0
-      ? COPY.accounts.subtitleFresh
+      ? (hydrationFailed ? COPY.accounts.subtitleUnavailable : COPY.accounts.subtitleFresh)
       : COPY.accounts.subtitle
           .replace('{live}', String(rows.filter((row) => row.state === 'live').length))
           .replace('{total}', String(rows.length));
@@ -4937,6 +5007,13 @@ async function render(): Promise<void> {
             if (!disposed) {
               // The rebuilt row carries the new label; this editor goes with it.
               renderAccountMappings(sessions, hydrationFailed);
+              // The editor the chatter was typing in is gone with the old row;
+              // keyboard users land on the rebuilt row's rename control, not
+              // on <body> (BL-005).
+              const rebuiltRename = Array.from(
+                mappingsTable.querySelectorAll<HTMLButtonElement>('[data-account-rename]'),
+              ).find((node) => node.dataset.accountRename === accountId);
+              rebuiltRename?.focus();
             }
           } catch (error) {
             // Keep the editor open with the typed text: a rename that did not
@@ -5061,15 +5138,7 @@ async function render(): Promise<void> {
       const info = document.createElement('div');
       info.dataset.role = 'mapping-info';
       info.className = 'chatgoose-account-pills';
-      renderMappingInfo(info, mappedView, isLive);
-      if (!view.personaMapped) {
-        // Amber, not red: nothing is broken — the account simply cannot generate
-        // until a persona is chosen, and the hint says exactly that.
-        const aiOff = createBadge(COPY.accounts.personaUnmapped, 'amber');
-        aiOff.dataset.accountAiOff = accountId;
-        aiOff.title = COPY.accounts.personaUnmappedHint;
-        info.append(aiOff);
-      }
+      renderMappingInfo(info, mappedView, isLive, accountId, view.personaMapped);
       actions.append(info);
       // «к вкладке» ONLY for a live row: the tab id comes from the worker's
       // in-memory capture map, and after a restart there is nothing to focus.
@@ -5287,10 +5356,12 @@ async function render(): Promise<void> {
   const handleVisibilityRepoll = (): void => {
     if (document.visibilityState === 'visible') {
       void repollSessions();
+      healHubStatusRows();
     }
   };
   const handleFocusRepoll = (): void => {
     void repollSessions();
+    healHubStatusRows();
   };
   document.addEventListener('visibilitychange', handleVisibilityRepoll);
   window.addEventListener('focus', handleFocusRepoll);

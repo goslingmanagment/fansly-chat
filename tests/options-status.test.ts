@@ -745,6 +745,78 @@ describe('options «Статус» pane', () => {
     expect(row(debug, 'contract').textContent).toContain(COPY.status.contractMatches);
   });
 
+  it('shows and hides the Контракт row as the debug switch is flipped, no reload (BL-004)', async () => {
+    const page = await readyMount({
+      settings: {
+        agencyHubBaseUrl: 'https://hub.example',
+        agencyHubDeviceToken: 'agency_hub_device_tok',
+      },
+    });
+    expect(row(page, 'contract').hidden).toBe(true);
+    const debugSwitch = page.document.querySelector<HTMLInputElement>(
+      '[data-pane="generation"] .chatgoose-switch input[type="checkbox"]',
+    )!;
+
+    debugSwitch.checked = true;
+    debugSwitch.dispatchEvent(new page.window.Event('change', { bubbles: true }));
+    // The row hydrated behind the flag, so the value it shows is live.
+    expect(row(page, 'contract').hidden).toBe(false);
+    expect(row(page, 'contract').textContent).toContain(COPY.status.contractMatches);
+
+    debugSwitch.checked = false;
+    debugSwitch.dispatchEvent(new page.window.Event('change', { bubbles: true }));
+    expect(row(page, 'contract').hidden).toBe(true);
+  });
+
+  it('heals rows a dropped paint left as skeletons once the field is back at the saved value (BL-004)', async () => {
+    // Hydration starts under hub A; the field moves to hub B by CODE (a
+    // sanitising writeback, an external settings change — no input event, so
+    // no persist and no diagnostics) while A's health is in flight. A's reply
+    // lands and its paint is dropped. The field then moves back to A the same
+    // way. Nothing else would ever repaint the rows; the chatter's return to
+    // the tab (focus/visibility) now heals them with one read.
+    vi.useFakeTimers();
+    try {
+      const healthResolvers: Array<(value: AgencyHubHealthResponse) => void> = [];
+      const nextHealth = (): Promise<AgencyHubHealthResponse> =>
+        new Promise<AgencyHubHealthResponse>((resolve) => { healthResolvers.push(resolve); });
+      const page = await mountOptionsPage({
+        settings: { agencyHubBaseUrl: 'https://hub-a.example', agencyHubDeviceToken: 'tok' },
+        permissionGranted: true,
+        runtime: { health: () => nextHealth(), identity: IDENTITY_AUTH },
+      });
+      expect(healthResolvers).toHaveLength(1); // the mount run for hub A is parked
+
+      const urlInput = page.document.querySelector<HTMLInputElement>(
+        '[data-pane="hub"] input[type="url"]',
+      )!;
+      urlInput.value = 'https://hub-b.example'; // moved while A's health is in flight
+      healthResolvers[0]!(HEALTH_UP); // A lands under a live field of B → dropped
+      await page.flushAsync();
+      expect(row(page, 'hub').dataset.status).toBe('loading');
+      expect(healthResolvers).toHaveLength(1); // the field is still B: no heal yet
+
+      urlInput.value = 'https://hub-a.example'; // …and back, still without an event
+      vi.advanceTimersByTime(6_000); // past the sessions re-poll throttle
+      page.window.dispatchEvent(new page.window.Event('focus'));
+      await page.flushAsync();
+
+      expect(healthResolvers).toHaveLength(2); // one healing read against the saved hub
+      healthResolvers[1]!(HEALTH_UP);
+      await page.flushAsync();
+      expect(row(page, 'hub').dataset.status).toBe('ready');
+      expect(row(page, 'hub').textContent).toContain(COPY.status.hubUp);
+      expect(row(page, 'access').dataset.status).toBe('ready');
+
+      // Healed rows are not stale: another return issues nothing.
+      page.window.dispatchEvent(new page.window.Event('focus'));
+      await page.flushAsync();
+      expect(healthResolvers).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   describe('readiness aggregate', () => {
     it('reads ready when every ACTIONABLE prerequisite is met', async () => {
       const page = await readyMount();

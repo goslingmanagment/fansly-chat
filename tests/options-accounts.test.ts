@@ -1843,6 +1843,45 @@ describe('Options «Аккаунты» pane', () => {
       accountRow('acc-live')
         .querySelector<HTMLElement>('.chatgoose-account-label')?.dataset.accountLocalLabel,
     ).toBe('true');
+    // The row was rebuilt under the editor; a keyboard user lands on the
+    // rebuilt row's rename control, not on <body> (BL-005).
+    expect(page.document.activeElement).toBe(
+      page.document.querySelector('[data-account-rename="acc-live"]'),
+    );
+  });
+
+  it('keeps «AI отключён» in step with the mapping across a live refresh (BL-005)', async () => {
+    page = await mountOptionsPage({
+      state: { personaCatalog: CATALOG, knownAccounts: ['acc-live'] },
+      accounts: {
+        accounts: [viewEntry({ personaMapped: false })],
+        unattributedFanslyTabs: 0,
+      },
+    });
+    expect(page.document.querySelector('[data-account-ai-off="acc-live"]')).not.toBeNull();
+
+    // A mapping written elsewhere (another tab, the background) arrives as a
+    // storage event; the pane refreshes its pills in place — the badge used to
+    // vanish here for EVERY row, mapped or not, until a reload.
+    page.emitStorageChange({ accountMappings: { newValue: { 'acc-live': 'p1' } } }, 'local');
+    await page.flushAsync();
+    expect(page.getState().accountMappings).toEqual({ 'acc-live': 'p1' });
+    expect(page.document.querySelector('[data-account-ai-off="acc-live"]')).toBeNull();
+
+    page.emitStorageChange({ accountMappings: { newValue: {} } }, 'local');
+    await page.flushAsync();
+    const badge = page.document.querySelector<HTMLElement>('[data-account-ai-off="acc-live"]');
+    expect(badge?.textContent).toBe(COPY.accounts.personaUnmapped);
+  });
+
+  it('does not call an empty table «fresh» when the live read failed (BL-006)', async () => {
+    page = await mountOptionsPage({
+      state: { personaCatalog: CATALOG, knownAccounts: [] },
+      sessions: () => Promise.reject(new Error('Fansly identity timed out')),
+    });
+    const subtitle = page.document.querySelector<HTMLElement>('[data-role="accounts-subtitle"]');
+    expect(subtitle?.textContent).toBe(COPY.accounts.subtitleUnavailable);
+    expect(subtitle?.textContent).not.toBe(COPY.accounts.subtitleFresh);
   });
 
   it('Esc cancels the inline editor without writing anything', async () => {
