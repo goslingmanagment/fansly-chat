@@ -91,6 +91,63 @@ function button(className: string, label: string, onClick: () => void): HTMLButt
   return node;
 }
 
+// Idempotent DOM writes. The panel re-renders every second while open and on
+// every runner snapshot while a queue runs; writing an unchanged value still
+// costs Firefox an attribute/child mutation, a style invalidation and — for the
+// aria-live status — a screen-reader announcement. Each helper reads first.
+function setText(node: Element, text: string): void {
+  if (node.textContent !== text) {
+    node.textContent = text;
+  }
+}
+
+function setHidden(node: HTMLElement, hidden: boolean): void {
+  if (node.hidden !== hidden) {
+    node.hidden = hidden;
+  }
+}
+
+function setDisabled(node: HTMLButtonElement | HTMLInputElement, disabled: boolean): void {
+  if (node.disabled !== disabled) {
+    node.disabled = disabled;
+  }
+}
+
+function setData(node: HTMLElement, key: string, value: string): void {
+  if (node.dataset[key] !== value) {
+    node.dataset[key] = value;
+  }
+}
+
+function setAttr(node: Element, name: string, value: string): void {
+  if (node.getAttribute(name) !== value) {
+    node.setAttribute(name, value);
+  }
+}
+
+function setClass(node: Element, className: string, on: boolean): void {
+  if (node.classList.contains(className) !== on) {
+    node.classList.toggle(className, on);
+  }
+}
+
+/** Keeps `host` holding exactly one `<div class="className">` per line, in
+ * order, patching text in place so unchanged lines are untouched. */
+function syncLines(host: HTMLElement, className: string, lines: readonly string[]): void {
+  const children = host.children;
+  while (children.length > lines.length) {
+    children[children.length - 1]?.remove();
+  }
+  lines.forEach((line, index) => {
+    const existing = children[index];
+    if (existing) {
+      setText(existing, line);
+    } else {
+      host.append(el('div', className, line));
+    }
+  });
+}
+
 function candidatesFromFiles(files: FileList | File[]): {
   candidates: VaultUploadCandidate[];
   byName: Map<string, File>;
@@ -144,9 +201,12 @@ export class VaultUploaderPanel {
   private nodes: {
     subtitle: HTMLElement;
     account: HTMLElement;
+    accountText: HTMLElement;
     accountRefresh: HTMLButtonElement;
     album: HTMLElement;
+    albumText: HTMLElement;
     uploader: HTMLElement;
+    uploaderText: HTMLElement;
     orderFirst: HTMLButtonElement;
     orderLast: HTMLButtonElement;
     orderHint: HTMLElement;
@@ -165,7 +225,19 @@ export class VaultUploaderPanel {
     folderInput: HTMLInputElement;
     filesInput: HTMLInputElement;
   } | null = null;
-  private rowsByName = new Map<string, { row: HTMLElement; chip: HTMLElement }>();
+  private rowsByName = new Map<string, {
+    row: HTMLElement;
+    chip: HTMLElement;
+    /** Last rendered values, so a tick writes nothing to an unchanged row. */
+    status: string;
+    chipText: string;
+  }>();
+  // Sub-trees that hold buttons (the reset confirm, the resume question) are
+  // rebuilt only when their content changes: recreating them every second
+  // would pull the focus from under the chatter's pointer.
+  private notesSignature: string | null = null;
+  private resolveSignature: string | null = null;
+  private visibilityListener: (() => void) | null = null;
 
   constructor(deps: VaultPanelDeps) {
     this.deps = deps;
@@ -195,6 +267,9 @@ export class VaultUploaderPanel {
       ? document.activeElement
       : null;
     const panel = this.mount();
+    // A closed-and-reopened panel keeps its selection; the rows are DOM, so
+    // they are rebuilt with the rest of the card.
+    this.rebuildList();
     this.render();
     this.startRefresh();
     this.tick();
@@ -206,11 +281,7 @@ export class VaultUploaderPanel {
       return;
     }
     this.stopRefresh();
-    this.root.replaceChildren();
-    this.panel = null;
-    this.strip = null;
-    this.nodes = null;
-    this.rowsByName.clear();
+    this.unmount();
     this.minimized = false;
     if (this.previousFocus?.isConnected) {
       this.previousFocus.focus();
@@ -228,11 +299,17 @@ export class VaultUploaderPanel {
 
   destroy(): void {
     this.stopRefresh();
+    this.unmount();
+  }
+
+  private unmount(): void {
     this.root.replaceChildren();
     this.panel = null;
     this.strip = null;
     this.nodes = null;
     this.rowsByName.clear();
+    this.notesSignature = null;
+    this.resolveSignature = null;
   }
 
   // ─── Mount ───────────────────────────────────────────────────────────
@@ -269,9 +346,9 @@ export class VaultUploaderPanel {
       VAULT_COPY.accountRefresh,
       () => this.requestIdentity(true),
     );
-    const account = this.fact(facts, VAULT_COPY.accountLabel, accountRefresh);
-    const album = this.fact(facts, VAULT_COPY.albumLabel);
-    const uploader = this.fact(facts, VAULT_COPY.uploaderLabel);
+    const [account, accountText] = this.fact(facts, VAULT_COPY.accountLabel, accountRefresh);
+    const [album, albumText] = this.fact(facts, VAULT_COPY.albumLabel);
+    const [uploader, uploaderText] = this.fact(facts, VAULT_COPY.uploaderLabel);
 
     const pick = el('div', 'chatgoose-vault-pick');
     const folderInput = el('input');
@@ -359,9 +436,12 @@ export class VaultUploaderPanel {
     this.nodes = {
       subtitle,
       account,
+      accountText,
       accountRefresh,
       album,
+      albumText,
       uploader,
+      uploaderText,
       orderFirst,
       orderLast,
       orderHint,
@@ -383,7 +463,11 @@ export class VaultUploaderPanel {
     return panel;
   }
 
-  private fact(host: HTMLElement, label: string, extra?: HTMLElement): HTMLElement {
+  private fact(
+    host: HTMLElement,
+    label: string,
+    extra?: HTMLElement,
+  ): [value: HTMLElement, text: HTMLElement] {
     const term = el('dt', 'chatgoose-vault-fact-label', label);
     const value = el('dd', 'chatgoose-vault-fact-value');
     const text = el('span', 'chatgoose-vault-fact-text');
@@ -392,7 +476,7 @@ export class VaultUploaderPanel {
       value.append(extra);
     }
     host.append(term, value);
-    return value;
+    return [value, text];
   }
 
   private setMinimized(minimized: boolean): void {
@@ -418,17 +502,41 @@ export class VaultUploaderPanel {
 
   // ─── Refresh ─────────────────────────────────────────────────────────
 
+  // The refresh tick exists for the chatter's eyes only (the runner has its
+  // own poll), so it runs only while the tab is visible and catches up the
+  // moment the tab is shown again.
   private startRefresh(): void {
-    if (this.refreshTimer !== null) {
+    if (this.visibilityListener) {
       return;
     }
-    this.refreshTimer = window.setInterval(
-      () => this.tick(),
-      this.deps.refreshMs ?? VAULT_PANEL_REFRESH_MS,
-    );
+    this.visibilityListener = () => {
+      this.syncRefreshTimer();
+      if (this.refreshTimer !== null) {
+        this.tick();
+      }
+    };
+    document.addEventListener('visibilitychange', this.visibilityListener);
+    this.syncRefreshTimer();
+  }
+
+  private syncRefreshTimer(): void {
+    const wanted = this.panel !== null && document.visibilityState !== 'hidden';
+    if (wanted && this.refreshTimer === null) {
+      this.refreshTimer = window.setInterval(
+        () => this.tick(),
+        this.deps.refreshMs ?? VAULT_PANEL_REFRESH_MS,
+      );
+    } else if (!wanted && this.refreshTimer !== null) {
+      window.clearInterval(this.refreshTimer);
+      this.refreshTimer = null;
+    }
   }
 
   private stopRefresh(): void {
+    if (this.visibilityListener) {
+      document.removeEventListener('visibilitychange', this.visibilityListener);
+      this.visibilityListener = null;
+    }
     if (this.refreshTimer !== null) {
       window.clearInterval(this.refreshTimer);
       this.refreshTimer = null;
@@ -778,7 +886,7 @@ export class VaultUploaderPanel {
       row.append(chip);
       row.title = item.name;
       fragment.append(row);
-      this.rowsByName.set(item.name, { row, chip });
+      this.rowsByName.set(item.name, { row, chip, status: '', chipText: '' });
     });
     nodes.list.replaceChildren(fragment);
   }
@@ -794,34 +902,34 @@ export class VaultUploaderPanel {
     const albumTitle = this.view?.albumTitle ?? null;
 
     // Facts
-    const accountText = nodes.account.querySelector('.chatgoose-vault-fact-text')!;
-    accountText.textContent = this.identity
+    setText(nodes.accountText, this.identity
       ? this.identity.label
       : this.identityPending
         ? VAULT_COPY.accountLoading
-        : VAULT_COPY.accountUnknown;
-    nodes.account.dataset.tone = this.identity ? 'ok' : 'bad';
-    nodes.accountRefresh.hidden = Boolean(this.identity) || this.identityPending;
+        : VAULT_COPY.accountUnknown);
+    setData(nodes.account, 'tone', this.identity ? 'ok' : 'bad');
+    setHidden(nodes.accountRefresh, Boolean(this.identity) || this.identityPending);
 
-    nodes.album.querySelector('.chatgoose-vault-fact-text')!.textContent =
-      albumTitle ?? VAULT_COPY.albumMissing;
-    nodes.album.dataset.tone = albumTitle ? 'ok' : 'bad';
+    setText(nodes.albumText, albumTitle ?? VAULT_COPY.albumMissing);
+    setData(nodes.album, 'tone', albumTitle ? 'ok' : 'bad');
 
     const uploader = this.view?.uploader;
-    nodes.uploader.querySelector('.chatgoose-vault-fact-text')!.textContent = !uploader?.input
+    setText(nodes.uploaderText, !uploader?.input
       ? VAULT_COPY.uploaderMissing
       : uploader.busy
         ? VAULT_COPY.uploaderBusy
-        : VAULT_COPY.uploaderReady;
-    nodes.uploader.dataset.tone = uploader?.input ? (uploader.busy ? 'warn' : 'ok') : 'bad';
+        : VAULT_COPY.uploaderReady);
+    setData(nodes.uploader, 'tone', uploader?.input ? (uploader.busy ? 'warn' : 'ok') : 'bad');
 
     // Order segment
-    nodes.orderFirst.setAttribute('aria-checked', String(this.albumOrder === 'first-on-top'));
-    nodes.orderLast.setAttribute('aria-checked', String(this.albumOrder === 'last-on-top'));
-    nodes.orderFirst.classList.toggle('chatgoose-vault-segment-active', this.albumOrder === 'first-on-top');
-    nodes.orderLast.classList.toggle('chatgoose-vault-segment-active', this.albumOrder === 'last-on-top');
-    nodes.orderFirst.disabled = running || Boolean(this.runner);
-    nodes.orderLast.disabled = running || Boolean(this.runner);
+    const firstOnTop = this.albumOrder === 'first-on-top';
+    setAttr(nodes.orderFirst, 'aria-checked', String(firstOnTop));
+    setAttr(nodes.orderLast, 'aria-checked', String(!firstOnTop));
+    setClass(nodes.orderFirst, 'chatgoose-vault-segment-active', firstOnTop);
+    setClass(nodes.orderLast, 'chatgoose-vault-segment-active', !firstOnTop);
+    const orderLocked = running || Boolean(this.runner);
+    setDisabled(nodes.orderFirst, orderLocked);
+    setDisabled(nodes.orderLast, orderLocked);
 
     // Notes: problems, warnings, checkpoint
     const notes: Array<{ tone: 'bad' | 'warn' | 'info'; text: string }> = [];
@@ -851,72 +959,95 @@ export class VaultUploaderPanel {
     if (this.storageNote) {
       notes.push({ tone: 'bad', text: this.storageNote });
     }
-    if (this.resetArmed) {
-      const confirm = el('div', 'chatgoose-vault-note chatgoose-vault-note-warn');
-      confirm.append(
-        el('span', undefined, VAULT_COPY.checkpointResetConfirm),
-        button('chatgoose-button chatgoose-button-danger chatgoose-vault-inline-button', VAULT_COPY.checkpointResetYes, () => {
-          void this.handleReset();
-        }),
-        button('chatgoose-button chatgoose-button-secondary chatgoose-vault-inline-button', VAULT_COPY.checkpointResetNo, () => {
-          this.resetArmed = false;
-          this.render();
-        }),
-      );
-      nodes.notes.replaceChildren(
-        ...notes.map((note) => el('div', `chatgoose-vault-note chatgoose-vault-note-${note.tone}`, note.text)),
-        confirm,
-      );
-    } else {
-      nodes.notes.replaceChildren(
-        ...notes.map((note) => el('div', `chatgoose-vault-note chatgoose-vault-note-${note.tone}`, note.text)),
-      );
+    const notesSignature = [
+      ...notes.map((note) => `${note.tone}:${note.text}`),
+      this.resetArmed ? 'reset-armed' : '',
+    ].join(' | ');
+    if (notesSignature !== this.notesSignature) {
+      this.notesSignature = notesSignature;
+      const children = notes.map((note) =>
+        el('div', `chatgoose-vault-note chatgoose-vault-note-${note.tone}`, note.text));
+      if (this.resetArmed) {
+        const confirm = el('div', 'chatgoose-vault-note chatgoose-vault-note-warn');
+        confirm.append(
+          el('span', undefined, VAULT_COPY.checkpointResetConfirm),
+          button('chatgoose-button chatgoose-button-danger chatgoose-vault-inline-button', VAULT_COPY.checkpointResetYes, () => {
+            void this.handleReset();
+          }),
+          button('chatgoose-button chatgoose-button-secondary chatgoose-vault-inline-button', VAULT_COPY.checkpointResetNo, () => {
+            this.resetArmed = false;
+            this.render();
+          }),
+        );
+        children.push(confirm);
+      }
+      nodes.notes.replaceChildren(...children);
+      setHidden(nodes.notes, children.length === 0);
     }
-    nodes.notes.hidden = nodes.notes.childElementCount === 0;
 
     // Resume question
-    if (this.resolution) {
-      const block = el('div', 'chatgoose-vault-resolve-card');
-      block.append(
-        el('div', 'chatgoose-vault-resolve-title', VAULT_COPY.uncertainTitle(this.resolution.name)),
-        el('div', 'chatgoose-vault-resolve-body', VAULT_COPY.uncertainBody),
-      );
-      const row = el('div', 'chatgoose-vault-resolve-actions');
-      row.append(
-        button('chatgoose-button', VAULT_COPY.uncertainPresent, () => {
-          void this.handleResolve('present');
-        }),
-        button('chatgoose-button chatgoose-button-secondary', VAULT_COPY.uncertainMissing, () => {
-          void this.handleResolve('missing');
-        }),
-      );
-      block.append(row);
-      nodes.resolve.replaceChildren(block);
-      nodes.resolve.hidden = false;
-    } else {
-      nodes.resolve.replaceChildren();
-      nodes.resolve.hidden = true;
+    const resolveSignature = this.resolution
+      ? `${this.resolution.target}:${this.resolution.name}`
+      : '';
+    if (resolveSignature !== this.resolveSignature) {
+      this.resolveSignature = resolveSignature;
+      if (this.resolution) {
+        const block = el('div', 'chatgoose-vault-resolve-card');
+        block.append(
+          el('div', 'chatgoose-vault-resolve-title', VAULT_COPY.uncertainTitle(this.resolution.name)),
+          el('div', 'chatgoose-vault-resolve-body', VAULT_COPY.uncertainBody),
+        );
+        const row = el('div', 'chatgoose-vault-resolve-actions');
+        row.append(
+          button('chatgoose-button', VAULT_COPY.uncertainPresent, () => {
+            void this.handleResolve('present');
+          }),
+          button('chatgoose-button chatgoose-button-secondary', VAULT_COPY.uncertainMissing, () => {
+            void this.handleResolve('missing');
+          }),
+        );
+        block.append(row);
+        nodes.resolve.replaceChildren(block);
+        setHidden(nodes.resolve, false);
+      } else {
+        nodes.resolve.replaceChildren();
+        setHidden(nodes.resolve, true);
+      }
     }
 
     // Preview
     if (selection) {
-      nodes.previewTitle.textContent =
-        `${VAULT_COPY.previewTitle(selection.plan.items.length, selection.plan.folderName)} · ${formatBytes(selection.plan.totalBytes)}`;
-      nodes.list.hidden = false;
+      setText(
+        nodes.previewTitle,
+        `${VAULT_COPY.previewTitle(selection.plan.items.length, selection.plan.folderName)} · ${formatBytes(selection.plan.totalBytes)}`,
+      );
+      setHidden(nodes.list, false);
     } else {
-      nodes.previewTitle.textContent = VAULT_COPY.previewEmpty;
-      nodes.list.hidden = true;
+      setText(nodes.previewTitle, VAULT_COPY.previewEmpty);
+      setHidden(nodes.list, true);
+    }
+    // One index per render, not a scan of the snapshot per row.
+    const entriesByName = new Map<string, VaultItemState>();
+    for (const entry of snapshot?.items ?? []) {
+      entriesByName.set(entry.item.name, entry);
     }
     const doneFromCheckpoint = new Set(this.runner ? [] : this.checkpoint?.done ?? []);
-    for (const [name, { row, chip }] of this.rowsByName) {
-      const entry: VaultItemState | undefined = snapshot?.items.find((item) => item.item.name === name);
+    for (const [name, cell] of this.rowsByName) {
+      const entry = entriesByName.get(name);
       const status = entry?.status ?? (doneFromCheckpoint.has(name) ? 'verified' : 'pending');
-      row.dataset.status = status;
-      chip.textContent = entry
+      const chipText = entry
         ? VAULT_COPY.itemStatus(entry)
         : doneFromCheckpoint.has(name)
           ? VAULT_COPY.itemStatus({ item: { name, key: '', size: 0 }, status: 'verified', source: 'checkpoint' })
           : '';
+      if (cell.status !== status) {
+        cell.status = status;
+        cell.row.dataset.status = status;
+      }
+      if (cell.chipText !== chipText) {
+        cell.chipText = chipText;
+        cell.chip.textContent = chipText;
+      }
     }
 
     // Status + progress
@@ -944,34 +1075,38 @@ export class VaultUploaderPanel {
         statusLines.push(VAULT_COPY.stateComplete);
         statusLines.push(...this.reportLines(snapshot));
       }
-      nodes.progressTrack.hidden = false;
+      setHidden(nodes.progressTrack, false);
       const ratio = snapshot.totalCount > 0 ? snapshot.doneCount / snapshot.totalCount : 0;
-      nodes.progressBar.style.width = `${Math.round(ratio * 100)}%`;
-      nodes.progressTrack.setAttribute('aria-valuenow', String(snapshot.doneCount));
-      nodes.progressTrack.setAttribute('aria-valuemax', String(snapshot.totalCount));
+      const width = `${Math.round(ratio * 100)}%`;
+      if (nodes.progressBar.style.width !== width) {
+        nodes.progressBar.style.width = width;
+      }
+      setAttr(nodes.progressTrack, 'aria-valuenow', String(snapshot.doneCount));
+      setAttr(nodes.progressTrack, 'aria-valuemax', String(snapshot.totalCount));
     } else {
-      nodes.progressTrack.hidden = true;
+      setHidden(nodes.progressTrack, true);
     }
-    nodes.status.replaceChildren(
-      ...statusLines.map((line) => el('div', 'chatgoose-vault-status-line', line)),
-    );
-    nodes.status.dataset.tone = snapshot?.state === 'stopped'
+    // Patched line by line: the aria-live region must announce a change, not
+    // every tick.
+    syncLines(nodes.status, 'chatgoose-vault-status-line', statusLines);
+    const tone = snapshot?.state === 'stopped'
       ? 'bad'
       : snapshot?.state === 'complete'
         ? 'ok'
         : 'info';
-    nodes.status.hidden = statusLines.length === 0;
+    setData(nodes.status, 'tone', tone);
+    setHidden(nodes.status, statusLines.length === 0);
 
     // Header subtitle doubles as the compact progress line.
     const subtitle = snapshot && snapshot.state !== 'idle'
       ? `${this.identity?.label ?? ''}${this.runAlbum ? ` · ${this.runAlbum}` : ''} · ${VAULT_COPY.progress(snapshot.doneCount, snapshot.totalCount)}`
       : VAULT_COPY.subtitleIdle;
-    nodes.subtitle.textContent = subtitle;
+    setText(nodes.subtitle, subtitle);
     if (this.strip) {
-      this.strip.textContent = snapshot
+      setText(this.strip, snapshot
         ? `${VAULT_COPY.title} · ${VAULT_COPY.progress(snapshot.doneCount, snapshot.totalCount)}${snapshot.state === 'stopped' ? ' · стоп' : ''}`
-        : VAULT_COPY.title;
-      this.strip.dataset.tone = nodes.status.dataset.tone ?? 'info';
+        : VAULT_COPY.title);
+      setData(this.strip, 'tone', tone);
     }
 
     // Controls
@@ -987,17 +1122,20 @@ export class VaultUploaderPanel {
       !this.startPending &&
       snapshot?.state !== 'complete',
     );
-    nodes.start.disabled = !canStart;
-    nodes.start.textContent = snapshot?.state === 'paused' || snapshot?.state === 'stopped'
+    setDisabled(nodes.start, !canStart);
+    setText(nodes.start, snapshot?.state === 'paused' || snapshot?.state === 'stopped'
       ? VAULT_COPY.resume
-      : VAULT_COPY.start;
-    nodes.pause.hidden = !running;
-    nodes.pause.disabled = snapshot?.state === 'pausing';
-    nodes.reset.hidden = running || !this.checkpoint || this.resetArmed;
-    nodes.close.disabled = running;
-    nodes.close.title = running ? VAULT_COPY.closeBlocked : VAULT_COPY.close;
-    nodes.folderInput.disabled = running;
-    nodes.filesInput.disabled = running;
+      : VAULT_COPY.start);
+    setHidden(nodes.pause, !running);
+    setDisabled(nodes.pause, snapshot?.state === 'pausing');
+    setHidden(nodes.reset, running || !this.checkpoint || this.resetArmed);
+    setDisabled(nodes.close, running);
+    const closeTitle = running ? VAULT_COPY.closeBlocked : VAULT_COPY.close;
+    if (nodes.close.title !== closeTitle) {
+      nodes.close.title = closeTitle;
+    }
+    setDisabled(nodes.folderInput, running);
+    setDisabled(nodes.filesInput, running);
   }
 
   private reportLines(snapshot: VaultUploadSnapshot): string[] {

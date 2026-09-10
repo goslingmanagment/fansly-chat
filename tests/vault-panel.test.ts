@@ -181,6 +181,9 @@ describe('VaultUploaderPanel', () => {
     expect(q('.chatgoose-vault-facts').textContent).toContain(VAULT_COPY.uploaderReady);
     expect(buttonByText(VAULT_COPY.start).disabled).toBe(true);
     expect(q('.chatgoose-vault-preview-title').textContent).toBe(VAULT_COPY.previewEmpty);
+    // Nothing to say yet: the notes block and the question take no space.
+    expect(q('.chatgoose-vault-notes').hidden).toBe(true);
+    expect(q('.chatgoose-vault-resolve').hidden).toBe(true);
   });
 
   it('shows what is missing: no account, no album, collapsed uploader', async () => {
@@ -406,6 +409,116 @@ describe('VaultUploaderPanel', () => {
     await flush();
     expect(f.page.handoffs).toEqual(['001.jpg']);
     expect(statusText()).toContain(VAULT_COPY.stateComplete);
+  });
+
+  it('keeps the resume question and its buttons as the same nodes across ticks', async () => {
+    // E111: the panel ticks every second; a question rebuilt on every tick
+    // would take the focus from under the chatter's pointer.
+    const f = fixture();
+    await f.checkpoints.save({
+      version: 1,
+      accountId: 'acc-1',
+      albumTitle: 'ALBUM',
+      total: 2,
+      done: [],
+      inFlight: '001.jpg',
+      updatedAt: 4_999_000,
+    });
+    f.panel.open();
+    await flush();
+    pickFiles(['001.jpg', '002.jpg']);
+    await flush();
+    buttonByText(VAULT_COPY.start).click();
+    await flush();
+
+    const question = q('.chatgoose-vault-resolve-card');
+    const yes = buttonByText(VAULT_COPY.uncertainPresent);
+    const facts = q('.chatgoose-vault-fact-text');
+    const notes = Array.from(document.querySelectorAll('.chatgoose-vault-note'));
+    yes.focus();
+    f.panel.tick();
+    f.panel.tick();
+    await flush();
+
+    expect(q('.chatgoose-vault-resolve-card')).toBe(question);
+    expect(buttonByText(VAULT_COPY.uncertainPresent)).toBe(yes);
+    expect(document.activeElement).toBe(yes);
+    expect(q('.chatgoose-vault-fact-text')).toBe(facts);
+    expect(Array.from(document.querySelectorAll('.chatgoose-vault-note'))).toEqual(notes);
+  });
+
+  it('patches status lines in place and rebuilds the notes only when they change', async () => {
+    const f = fixture();
+    f.panel.open();
+    await flush();
+    pickFiles(['001.jpg', '002.jpg']);
+    await flush();
+    buttonByText(VAULT_COPY.start).click();
+    await flush();
+    expect(statusText()).toContain(VAULT_COPY.stateComplete);
+
+    const lines = Array.from(document.querySelectorAll('.chatgoose-vault-status-line'));
+    expect(lines.length).toBeGreaterThan(1);
+    f.panel.tick();
+    await flush();
+    expect(Array.from(document.querySelectorAll('.chatgoose-vault-status-line'))).toEqual(lines);
+
+    // A row chip is written once per status, not once per tick.
+    const chip = q('.chatgoose-vault-chip');
+    const observed: string[] = [];
+    const observer = new dom.window.MutationObserver((records: MutationRecord[]) => {
+      observed.push(...records.map((record) => record.type));
+    });
+    observer.observe(q('.chatgoose-vault-panel'), { subtree: true, childList: true, characterData: true, attributes: true });
+    f.panel.tick();
+    f.panel.tick();
+    await flush();
+    observer.disconnect();
+    expect(observed).toEqual([]);
+    expect(chip.textContent).toBe(VAULT_COPY.itemStatus({ item: { name: '001.jpg', key: '001', size: 1 }, status: 'verified', source: 'upload' }));
+  });
+
+  it('pauses its refresh tick while the tab is hidden and catches up when shown', async () => {
+    vi.useFakeTimers();
+    try {
+      const page = new ScriptedPage();
+      const readView = vi.fn(() => page.view());
+      const panel = new VaultUploaderPanel({
+        identity: async () => ({ accountId: 'acc-1', label: 'Ari', username: 'ari', displayName: 'Ari' }),
+        checkpoints: new MemoryCheckpoints(),
+        readView,
+        isOnVaultRoute: () => true,
+        handoff: page.handoff,
+        now: () => Date.now(),
+        delay: async () => {},
+        refreshMs: 1000,
+      });
+      let visibility: DocumentVisibilityState = 'visible';
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => visibility });
+
+      panel.open();
+      const reads = readView.mock.calls.length;
+      vi.advanceTimersByTime(3000);
+      expect(readView.mock.calls.length).toBe(reads + 3);
+
+      visibility = 'hidden';
+      document.dispatchEvent(new dom.window.Event('visibilitychange'));
+      const hiddenReads = readView.mock.calls.length;
+      vi.advanceTimersByTime(10_000);
+      expect(readView.mock.calls.length).toBe(hiddenReads);
+
+      visibility = 'visible';
+      document.dispatchEvent(new dom.window.Event('visibilitychange'));
+      expect(readView.mock.calls.length).toBe(hiddenReads + 1);
+      vi.advanceTimersByTime(2000);
+      expect(readView.mock.calls.length).toBe(hiddenReads + 3);
+
+      panel.close();
+      vi.advanceTimersByTime(5000);
+      expect(readView.mock.calls.length).toBe(hiddenReads + 3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('hides the panel through the hidden attribute only, with CSS that honours it', () => {

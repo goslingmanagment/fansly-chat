@@ -422,8 +422,12 @@ export class VaultUploadRunner {
       if (stable >= this.stableTicks) {
         return 'ready';
       }
-      this.uploaderText = view!.uploader.text;
-      this.emit();
+      // The snapshot is the panel's cue to re-read and re-render; an unchanged
+      // uploader line is not news.
+      if (view!.uploader.text !== this.uploaderText) {
+        this.uploaderText = view!.uploader.text;
+        this.emit();
+      }
     }
 
     entry.status = 'uncertain';

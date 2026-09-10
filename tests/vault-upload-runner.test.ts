@@ -187,6 +187,22 @@ describe('VaultUploadRunner', () => {
     expect(h.cleared).toBe(1);
   });
 
+  it('emits a snapshot per change, not per poll, while waiting for a card', async () => {
+    // E111: the panel re-reads the page and re-renders on every snapshot; a
+    // long Processing stretch with a static uploader line is silence.
+    const h = harness(['001.jpg']);
+    h.vault.uploadTicks = 3;
+    h.vault.processingTicks = 6;
+
+    await h.runner.start();
+
+    expect(h.last().state).toBe('complete');
+    const texts = h.snapshots.map((snapshot) => snapshot.uploaderText);
+    // running → uploading (text '') → 'Uploading 42%' once → '' once → verified → complete
+    expect(texts.filter((text) => text === 'Uploading 42%')).toHaveLength(1);
+    expect(h.snapshots.length).toBeLessThan(3 + 6);
+  });
+
   it('persists the in-flight mark BEFORE the handoff and clears it after confirmation', async () => {
     const h = harness(['001.jpg']);
     let inFlightAtHandoff: string | null | undefined;

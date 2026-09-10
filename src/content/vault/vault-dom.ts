@@ -20,6 +20,9 @@ const CARD_NAME_SELECTOR = '.image-filename';
 const PROCESSING_PATTERN = /Verifying|Processing|Uploading|\d+(?:\.\d+)?%/i;
 const FAILURE_PATTERN = /Failed|Error|Retry/i;
 
+const TEXT_NODE = 3;
+const ELEMENT_NODE = 1;
+
 /** The page-context fallback needs a selector it can resolve on the unwrapped
  * document; exported so the handoff helper and this adapter cannot drift. */
 export const VAULT_UPLOADER_INPUT_PAGE_SELECTOR = UPLOADER_INPUT_SELECTOR;
@@ -56,12 +59,39 @@ function visibleText(element: Element): string {
   return typeof text === 'string' ? text : element.textContent ?? '';
 }
 
+function firstLine(text: string): string | null {
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed.length > 0) {
+      return trimmed;
+    }
+  }
+  return null;
+}
+
 function readAlbumTitle(root: Element): string | null {
-  const firstLine = visibleText(root)
-    .split('\n')
-    .map((line) => line.trim())
-    .find((line) => line.length > 0);
-  return firstLine ?? null;
+  // The title is the first visible text line of the host. Asking the host for
+  // its innerText would lay out and walk every album card to produce a string
+  // we only need the first line of, so the direct children are read in order
+  // and the first one that renders any text supplies the line — the same line
+  // the host's innerText would start with, as long as the title does not
+  // straddle two inline siblings at the top level (Angular headers are block
+  // components).
+  for (const node of root.childNodes) {
+    let text: string;
+    if (node.nodeType === TEXT_NODE) {
+      text = node.nodeValue ?? '';
+    } else if (node.nodeType === ELEMENT_NODE) {
+      text = visibleText(node as Element);
+    } else {
+      continue;
+    }
+    const line = firstLine(text);
+    if (line !== null) {
+      return line;
+    }
+  }
+  return null;
 }
 
 function readUploader(root: Element): VaultUploaderView {
@@ -71,10 +101,10 @@ function readUploader(root: Element): VaultUploaderView {
   }
   const input = uploader.querySelector('input[type="file"]');
   const text = visibleText(uploader).trim();
-  const pendingMedia = uploader.querySelectorAll(UPLOADER_PENDING_MEDIA_SELECTOR).length;
+  const pendingMedia = uploader.querySelector(UPLOADER_PENDING_MEDIA_SELECTOR) !== null;
   return {
     input: input instanceof HTMLInputElement ? input : null,
-    busy: pendingMedia > 0 || PROCESSING_PATTERN.test(text),
+    busy: pendingMedia || PROCESSING_PATTERN.test(text),
     errorText: FAILURE_PATTERN.test(text) ? text.slice(0, 300) : null,
     text,
   };
@@ -109,6 +139,71 @@ export function readVaultView(root: ParentNode = document): VaultView | null {
     albumTitle: readAlbumTitle(vault),
     uploader: readUploader(vault),
     cards: readCards(vault),
+  };
+}
+
+export interface VaultViewReader {
+  /** The current view; a cached one while the page has not changed since it
+   * was read. Callers must treat the result as immutable. */
+  read(): VaultView | null;
+  /** Drops the observer and the cache; the next read starts afresh. */
+  dispose(): void;
+}
+
+/** A `readVaultView` that re-reads only after the page mutated.
+ *
+ * The panel refreshes every second and the runner polls every 1.5 s, both
+ * against the same album; a snapshot costs a layout flush plus an innerText
+ * walk over every card. Between two reads a MutationObserver watches the
+ * document for any change (child list, text, attributes — visibility toggles
+ * are attribute changes and innerText honours them); the first record marks
+ * the cache stale and disconnects the observer, so an active upload page
+ * costs one callback per read, not one per mutation, and an idle page costs
+ * nothing at all. The whole document is observed, not the album host: the
+ * host itself being removed (album closed) is a mutation on its parent. */
+export function createVaultViewReader(root: Document = document): VaultViewReader {
+  let cached: VaultView | null = null;
+  let fresh = false;
+  let observer: MutationObserver | null = null;
+
+  const invalidate = (): void => {
+    fresh = false;
+    observer?.disconnect();
+  };
+
+  return {
+    read() {
+      // Records are delivered as a microtask; a read in the same task as a
+      // page mutation (a handoff's synchronous change handler, say) would
+      // otherwise trust a cache the observer has not yet had a turn to spoil.
+      if (fresh && observer && observer.takeRecords().length > 0) {
+        invalidate();
+      }
+      if (fresh) {
+        return cached;
+      }
+      cached = readVaultView(root);
+      const target = root.documentElement;
+      if (!target || typeof MutationObserver !== 'function') {
+        // Nothing to watch means nothing to trust: read again next time.
+        return cached;
+      }
+      observer ??= new MutationObserver(invalidate);
+      observer.observe(target, {
+        subtree: true,
+        childList: true,
+        characterData: true,
+        attributes: true,
+      });
+      fresh = true;
+      return cached;
+    },
+    dispose() {
+      observer?.disconnect();
+      observer = null;
+      cached = null;
+      fresh = false;
+    },
   };
 }
 
