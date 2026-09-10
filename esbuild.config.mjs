@@ -119,6 +119,11 @@ async function buildOnce() {
     // execute materially different JavaScript.
     minifySyntax: true,
     minifyWhitespace: true,
+    // Emit UTF-8 literals instead of `\uXXXX` escapes: the Russian copy in
+    // every bundle is a third smaller to fetch and parse, and Firefox decodes
+    // extension scripts (manifest, dynamic import, page <meta charset>) as
+    // UTF-8 regardless.
+    charset: 'utf8',
     loader: {
       '.md': 'text',
       '.css': 'text',
@@ -174,6 +179,7 @@ if (!watchMode) {
     sourcemap: true,
     minifySyntax: true,
     minifyWhitespace: true,
+    charset: 'utf8',
     loader: {
       '.md': 'text',
       '.css': 'text',
