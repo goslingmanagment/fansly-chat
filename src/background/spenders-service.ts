@@ -21,7 +21,6 @@
 // by every returned row.
 
 import {
-  FANSLY_CUSTOM_NAME_NOTE_TYPE,
   FANSLY_PAGINATION_DELAY_MS,
   SPENDERS_BUILD_TIMEOUT_REASON,
   SPENDERS_CACHE_TTL_MS,
@@ -32,6 +31,7 @@ import {
   SPENDERS_NAMES_CACHE_MAX,
   SPENDERS_NAMES_CACHE_TTL_MS,
 } from '../shared/constants.js';
+import { customNameFromAccount } from '../shared/fansly-custom-name.js';
 import {
   normalizeAgencyHubBaseUrl,
   normalizeAgencyHubUsername,
@@ -54,17 +54,6 @@ import {
   recordSpendersObservation,
   spendersObservationScope,
 } from './spenders-status-tracker.js';
-
-/** The creator's custom display name for a fan — Fansly's native rename,
- * stored as an account note whose text is the name. */
-function customNameFromAccount(account: FanslyAccountResponse): string | null {
-  if (!Array.isArray(account.notes)) return null;
-  const note = account.notes.find(
-    (entry) => entry?.contentType === FANSLY_CUSTOM_NAME_NOTE_TYPE,
-  );
-  const text = note?.note?.trim();
-  return text ? text : null;
-}
 
 /** What a board row needs to know about a fan's names. */
 interface FanNames {

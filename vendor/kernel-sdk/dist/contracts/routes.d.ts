@@ -4236,6 +4236,7 @@ export declare const aiFeatureStreamBodySchema: z.ZodObject<{
         fanSpendingData: z.ZodDefault<z.ZodString>;
         fanSubscriptionData: z.ZodDefault<z.ZodString>;
         fanBio: z.ZodOptional<z.ZodString>;
+        fanCustomName: z.ZodOptional<z.ZodString>;
         pingSegment: z.ZodOptional<z.ZodEnum<{
             active: "active";
             "segment-a": "segment-a";
@@ -22048,6 +22049,7 @@ declare const baseRouteSchemas: {
                 fanSpendingData: z.ZodDefault<z.ZodString>;
                 fanSubscriptionData: z.ZodDefault<z.ZodString>;
                 fanBio: z.ZodOptional<z.ZodString>;
+                fanCustomName: z.ZodOptional<z.ZodString>;
                 pingSegment: z.ZodOptional<z.ZodEnum<{
                     active: "active";
                     "segment-a": "segment-a";
