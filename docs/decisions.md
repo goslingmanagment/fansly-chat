@@ -3546,3 +3546,18 @@ guide chapter, and a live re-verification of the selectors on the current
 Fansly build — the adapter shows what it detects (account, album, form) before
 any upload, so a redesign fails visibly in the facts row, not silently
 mid-queue.
+
+**E110 (2026-09-10).** Release 2.1.0 from `main` (95b6ca3 + this release
+commit): the vault uploader (E109) and the scoped Coach Cyrillic guard (E108),
+plus the mobile walkthrough fix (E107). Package and manifest are 2.1.0; the
+committed changelog/install stamps read v2.1.0 so the repository matches what
+deploy.sh serves. CHANGELOG.md gains the 2.1.0 section that becomes the
+Telegram announce (preflight: 2914 chars, markdown subset clean);
+changelog.html gains the matching block above 2.0.0 with the fixed 2.0
+walkthrough left untouched; guide.html gains a versionless «Загрузка в волт»
+chapter, feature card and nav link; README lists the feature and the date.
+No Kernel SDK change (vendored contract da876ec6… — deploy.sh asserts it against production health before signing), no storage
+migration, no new Fansly egress. Not verified in this release pass: the vault
+selectors against the current Fansly build — the panel's facts row (account,
+album, form) is the visible guard for that, and the chapter tells the chatter
+what green means.

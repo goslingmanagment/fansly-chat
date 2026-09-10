@@ -35,6 +35,10 @@ from prose when checking what is installed or live; verify the signed update fee
   attachment, only for pages whose Hub capability enables it. Sending stays manual.
 - **Ping / Hi** — re-engage an inactive fan or greet a new conversation.
 - **Spenders** — kernel-backed ranking with data freshness and deleted-account labels.
+- **Vault uploader** — on `/creator/vault`, a folder of media goes into the open
+  album one file at a time through Fansly's own upload form, each confirmed by
+  its album card, with a per-account/per-album checkpoint for resuming; an
+  unconfirmed file is never re-uploaded without the chatter's answer.
 - **Settings cabinet** — seven panes for status, Hub, personas, accounts,
   generation, hotkeys, and appearance; includes sign-out and a support report.
 
@@ -83,9 +87,11 @@ Important references:
 
 ## Release
 
-Release 2.0.0 is dated 2026-09-08. Verify the signed update feed when checking
-which version is currently available. Agency Hub selects the models and generation
-settings; the [2.0 changelog](CHANGELOG.md#200) records the server-side update.
+Release 2.1.0 is dated 2026-09-10 (the vault uploader and the scoped Coach
+Cyrillic guard); 2.0.0 is dated 2026-09-08. Verify the signed update feed when
+checking which version is currently available. Agency Hub selects the models and
+generation settings; the [2.0 changelog](CHANGELOG.md#200) records the
+server-side update.
 Voice audio is generated separately through ElevenLabs for accounts enabled
 by the administrator.
 
