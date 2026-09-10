@@ -3613,3 +3613,18 @@ confirmation), the selectors, the checkpoint format. A checkpoint written by
 2.1.0 still matches when the new title reader yields the same string, which it
 does for a block-level header; if it did not, the run would simply see no
 checkpoint and detect the present cards from the album instead.
+
+**E112 (2026-09-10).** Release 2.1.1 from `main` (4535890 + this release
+commit): the E111 performance pass — the vault uploader off the shared content
+path (launcher-only bootstrap, `vault.css` fetched with the module, one route
+poll), mutation-gated album reads with a host-scoped observer, diffed panel
+renders, the reopened-panel preview fix — and UTF-8 bundles. Package and
+manifest are 2.1.1; the committed changelog/install stamps read v2.1.1.
+CHANGELOG.md gains the 2.1.1 section that becomes the Telegram announce
+(preflight: 1650 chars, markdown subset clean); changelog.html gains the
+matching block above 2.1.0, whose badge drops «latest»; README lists the date.
+guide.html is untouched (the chapter is versionless and the feature's
+behaviour did not change). No Kernel SDK change, no storage migration, no new
+Fansly egress. Still not verified in a release pass: the vault selectors and
+the new title reader against the live Fansly build — the panel's facts row
+remains the visible guard.
