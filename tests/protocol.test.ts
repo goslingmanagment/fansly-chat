@@ -58,6 +58,8 @@ describe('protocol boundary guards', () => {
     // above: a request type without its protocol case dies silently before the
     // handler, so the canonical suite has to know all three.
     expect(getRuntimeRequestType({ type: 'getAccountsView' })).toBe('getAccountsView');
+    // E109 — the vault uploader binds its queue to the asking tab's account.
+    expect(getRuntimeRequestType({ type: 'getTabAccountIdentity' })).toBe('getTabAccountIdentity');
     expect(
       getRuntimeRequestType({ type: 'focusAccountTab', accountId: 'acc-1' }),
     ).toBe('focusAccountTab');

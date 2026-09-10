@@ -439,6 +439,67 @@ describe('runtime-api boundary guard', () => {
   });
 });
 
+describe('runtime-api getTabAccountIdentity', () => {
+  beforeEach(() => {
+    mockStorage = {};
+    vi.clearAllMocks();
+  });
+
+  it('answers with the sender tab\'s live session, preferring the local label', async () => {
+    mockStorage = createStorage({
+      'chatgoose:accountLabels': { version: 1, byAccount: { resolved: 'Ари-1' } },
+    });
+    const fanslyClient = {
+      getAuthenticatedAccount: vi.fn(async () => {
+        throw new Error('should not be called');
+      }),
+    };
+    const { sessionStore, send } = await installRuntimeApiHarness(fanslyClient);
+    sessionStore.registerCapture(3, makeCapture('legacy'));
+    const session = sessionStore.getSessionForTab(3)!;
+    session.resolvedAccountId = 'resolved';
+    session.resolvedUsername = 'itsaribae';
+    session.resolvedDisplayName = 'Ari';
+
+    await expect(send({ type: 'getTabAccountIdentity' }, { tab: { id: 3 } })).resolves.toEqual({
+      accountId: 'resolved',
+      label: 'Ари-1',
+      username: 'itsaribae',
+      displayName: 'Ari',
+    });
+    expect(fanslyClient.getAuthenticatedAccount).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the display name, then to the tab context, and never guesses', async () => {
+    mockStorage = createStorage();
+    const fanslyClient = {
+      getAuthenticatedAccount: vi.fn(async () => null),
+    };
+    const { sessionStore, tabContexts, send } = await installRuntimeApiHarness(fanslyClient);
+    sessionStore.registerCapture(3, makeCapture('legacy'));
+    const session = sessionStore.getSessionForTab(3)!;
+    session.resolvedUsername = 'itsaribae';
+    session.resolvedDisplayName = 'Ari';
+
+    await expect(send({ type: 'getTabAccountIdentity' }, { tab: { id: 3 } })).resolves.toMatchObject({
+      accountId: 'legacy',
+      label: expect.stringContaining('Ari'),
+    });
+
+    // A tab the session store never saw but the capture layer attributed.
+    tabContexts.setAccount(9, 'ctx-account');
+    await expect(send({ type: 'getTabAccountIdentity' }, { tab: { id: 9 } })).resolves.toMatchObject({
+      accountId: 'ctx-account',
+      username: null,
+      displayName: null,
+    });
+
+    // Unknown tab, or no tab at all (an extension page asking): null.
+    await expect(send({ type: 'getTabAccountIdentity' }, { tab: { id: 42 } })).resolves.toBeNull();
+    await expect(send({ type: 'getTabAccountIdentity' }, {})).resolves.toBeNull();
+  });
+});
+
 describe('runtime-api voice-attempt custody RPC', () => {
   beforeEach(() => {
     mockStorage = {};

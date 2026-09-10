@@ -41,6 +41,7 @@ describe('content-script surface layering', () => {
       'chatgoose-launcher-root',
       'chatgoose-overlay-root',
       'chatgoose-toast-root',
+      'chatgoose-vault-root',
       'chatgoose-voice-studio-root',
     ]);
   });
@@ -57,11 +58,12 @@ describe('content-script surface layering', () => {
     }
   });
 
-  it('keeps the cheatsheet above the overlay, board and voice studio', () => {
+  it('keeps the cheatsheet above the overlay, board, voice studio and vault panel', () => {
     const cheatsheet = get('chatgoose-cheatsheet-root');
     expect(cheatsheet).toBeGreaterThan(get('chatgoose-overlay-root'));
     expect(cheatsheet).toBeGreaterThan(get('chatgoose-board-root'));
     expect(cheatsheet).toBeGreaterThan(get('chatgoose-voice-studio-root'));
+    expect(cheatsheet).toBeGreaterThan(get('chatgoose-vault-root'));
   });
 
   it('keeps overlay, board and voice studio in one band (their order is DOM order)', () => {

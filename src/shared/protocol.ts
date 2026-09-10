@@ -436,6 +436,8 @@ export function getRuntimeRequestType(message: unknown): RuntimeRequestType | nu
       return 'getSpendersStatus';
     case 'getAccountsView':
       return 'getAccountsView';
+    case 'getTabAccountIdentity':
+      return 'getTabAccountIdentity';
     case 'focusAccountTab':
       // An empty account id could only focus "some" tab — reject it rather than
       // guess which one the chatter meant.

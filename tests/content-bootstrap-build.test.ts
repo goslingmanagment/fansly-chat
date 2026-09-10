@@ -25,6 +25,7 @@ describe('two-stage content bootstrap build contract', () => {
   it('exposes the lazy application module and stylesheet only to Fansly pages', () => {
     const lazyAssets = manifest.web_accessible_resources.find((entry) =>
       entry.resources.includes('content-chat.js') &&
+      entry.resources.includes('content-vault.js') &&
       entry.resources.includes('content.css'));
 
     expect(lazyAssets).toBeDefined();
@@ -41,7 +42,7 @@ describe('two-stage content bootstrap build contract', () => {
       /const contentBootstrapEntryPoints = \{\s*content: path\.join\(root, 'src\/content\/bootstrap\.ts'\),?\s*\};/,
     );
     expect(build).toMatch(
-      /const contentAppEntryPoints = \{\s*'content-chat': path\.join\(root, 'src\/content\/index\.ts'\),?\s*\};/,
+      /const contentAppEntryPoints = \{\s*'content-chat': path\.join\(root, 'src\/content\/index\.ts'\),\s*(?:\/\/[^\n]*\n\s*)*'content-vault': path\.join\(root, 'src\/content\/vault\/index\.ts'\),?\s*\};/,
     );
     expect(build).toMatch(
       /entryPoints: contentBootstrapEntryPoints,\s*format: 'iife'/,
@@ -53,6 +54,7 @@ describe('two-stage content bootstrap build contract', () => {
       /cp\(path\.join\(root, 'src\/content\/styles\.css'\), path\.join\(outdir, 'content\.css'\)\)/,
     );
     expect(bootstrap).toContain("browser.runtime.getURL('content-chat.js')");
+    expect(bootstrap).toContain("browser.runtime.getURL('content-vault.js')");
     expect(bootstrap).toContain("browser.runtime.getURL('content.css')");
     expect(bootstrap).toContain('`${baseModuleUrl}?retry=${attempt}`');
     expect(build.match(/minifySyntax: true/g)).toHaveLength(2);

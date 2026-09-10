@@ -990,6 +990,17 @@ export interface AccountsView {
   unattributedFanslyTabs: number;
 }
 
+/** The Fansly account the SENDER tab is signed into, as the background knows it
+ * from captured session traffic. `label` follows the cabinet's account rows:
+ * local label > display name/@username > shortened id. Null until a capture
+ * attributes the tab (a worker restart forgets every tab). */
+export interface TabAccountIdentity {
+  accountId: string;
+  label: string;
+  username: string | null;
+  displayName: string | null;
+}
+
 export interface FocusAccountTabRequest {
   accountId: string;
 }
@@ -1016,6 +1027,7 @@ export interface RuntimeRequestMap {
   getAiQuotaByPage: undefined;
   getSpendersStatus: undefined;
   getAccountsView: undefined;
+  getTabAccountIdentity: undefined;
   focusAccountTab: FocusAccountTabRequest;
   setAccountLabel: SetAccountLabelRequest;
   getOnboardingState: undefined;
@@ -1048,6 +1060,7 @@ export interface RuntimeResponseMap {
   getAiQuotaByPage: Record<string, AiQuotaStatus>;
   getSpendersStatus: SpendersObservation | null;
   getAccountsView: AccountsView;
+  getTabAccountIdentity: TabAccountIdentity | null;
   focusAccountTab: { ok: boolean };
   setAccountLabel: { ok: boolean };
   getOnboardingState: OnboardingSnapshot;

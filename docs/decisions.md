@@ -3496,3 +3496,53 @@ Copy/Insert still never happen without the chatter's click, and nothing is
 translated or regenerated automatically. Tests cover the helper (fan-only
 lines, model-side Russian ignored, system lines ignored), the validator, and
 both guard branches in the overlay.
+
+**E109 (2026-09-09).** The owner asks to fold the one-off SEX-001-CLEAN vault
+queue (a console script that pushed 108 prepared files through Fansly's own
+«Upload to Vault» form one at a time, verified by the album card, with a
+localStorage checkpoint) into this extension as a first product: pick a folder,
+preview the order, run, get a checked result — and survive an interruption
+without the owner at the keyboard. The extension already owns the mechanism:
+the Voice attach adapter's content-world DataTransfer handoff with the
+page-context Xray fallback (E52), the launcher-plus-lazy-module bootstrap, and a
+per-tab account identity in the background.
+
+Design. A `content-vault.js` lazy ESM, loaded from a bootstrap-owned «Загрузка»
+launcher that exists only on `/creator/vault`; the conversation app is never
+loaded for it and it never loads the conversation app. The panel is a docked
+card, not a modal, because the chatter still has to expand the form and scroll
+the album. The pure half (`shared/vault-upload.ts`) builds the plan — natural
+sort, extension-less NFC lower-case match keys because Fansly rewrites `JPG` to
+`jpeg` on its cards, subfolders and unsupported files ignored and reported,
+duplicate keys and empty picks blocking, non-ASCII names a warning — and derives
+the upload sequence from the album order the chatter wants (Fansly lists the
+newest first, so «первый файл сверху» uploads the last file first). Every Fansly
+selector lives in one adapter with the date it was last seen working; the
+runner reads a typed view and never learns Angular tag names.
+
+Reliability is the product. The runner hands over one file, polls the album,
+and moves on only after the card exists with no processing or failure marker,
+the form is idle, and the new card is first; it re-reads the page after the
+checkpoint write so a change in that gap is a definite stop rather than an
+unknown. The checkpoint (`vaultUpload:<account>:<album>`, an operational store
+outside `NORMALIZED_STORAGE_STATE_KEYS`, no schema migration) records the
+in-flight name BEFORE the page sees the file. A file the page never confirmed —
+timeout, indeterminate dispatch, the album or route changing mid-file, an
+internal exception — becomes «неизвестно» and is never re-uploaded on the
+panel's initiative: the chatter looks at the album and answers «есть»/«нет»
+(same family law as an indeterminate send). A visible ready card auto-resolves
+the question. A Fansly-reported failure is the one definite negative and is
+retried only through the explicit «Продолжить». The queue is bound to the
+account the background attributes to the tab (new `getTabAccountIdentity`
+request, memory and the local label store only, null rather than a guess) and
+to the album title read when Start is pressed; Start stays disabled until the
+account, the album and the expanded form are all present.
+
+Egress: none. Every byte goes through Fansly's own uploader in the chatter's
+tab, exactly as a manual pick would; no request is added (same class as the
+Voice attach, DP 1-B unaffected). Not in this change: local file preparation
+(metadata strip, HEIC, transliteration stays the owner's script), the user
+guide chapter, and a live re-verification of the selectors on the current
+Fansly build — the adapter shows what it detects (account, album, form) before
+any upload, so a redesign fails visibly in the facts row, not silently
+mid-queue.

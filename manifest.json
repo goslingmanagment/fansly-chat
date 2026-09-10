@@ -37,6 +37,7 @@
     {
       "resources": [
         "content-chat.js",
+        "content-vault.js",
         "content.css"
       ],
       "matches": [
