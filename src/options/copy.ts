@@ -540,7 +540,7 @@ export const COPY = {
     coachRecapFull: 'Полный',
     coachRecapWarning: 'Полный рекап загружает до {n} сообщений — медленно и дорого.',
     debugTitle: 'Режим отладки',
-    debugHint: 'подробные логи фоновой страницы',
+    debugHint: 'подробные логи и журнал проверки новых фоловеров',
     savedAs: 'сохранено как {n}',
     /** Under the range: what one −/+ press moves. */
     stepNote: 'шаг {n}',
