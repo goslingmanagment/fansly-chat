@@ -110,6 +110,8 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E118 | 2026-09-14 | New-follower debug runs: scoped HTTP and decision timeline, extension-only viewer, bounded memory and full text export |
 | E119 | 2026-09-14 | Minor release 2.3.0 authorized after independent review, larger diagnostic retention and 700-follower coverage; Telegram announcement deferred |
 | E120 | 2026-09-14 | Owner corrects release numbering to patch 2.2.1; withdraw 2.3.0 from update discovery, preserve the complete logger and release history |
+| E121 | 2026-09-14 | Creator-wide follower GET pacing and cooldown, human pause/resume, cached proof and lazy conversation preview with clearer progress |
+| E122 | 2026-09-14 | Release E121 as 2.2.2 after independent adversarial review; retain the owner's corrected small-release numbering and skip Telegram |
 
 ## Entries
 
@@ -3874,3 +3876,92 @@ would need a manual move to the corrected release. Pre-withdrawal server-log
 inspection saw only curl/Python verification downloads, which is evidence of
 requests, not an installation inventory. Verify the final feed and tag before
 calling the correction published.
+
+
+**E121 (2026-09-14).** The owner approves chat previews and request delays
+following the Lora audit. Its 194-follower pass generated 118 HTTP 429 responses
+because three workers retried independently; the server's actual threshold is
+unknown. These observations justify conservative pacing, not a promise that
+Fansly can never return 429.
+
+Follower-owned session copies explicitly opt all their GET attempts into one
+FIFO per resolved creator in the background Fansly client. Only one attempt
+is in flight, with at least 1 second between GET starts and 1.5 seconds between
+message-route starts. All follower windows and lazy previews share the lane;
+other creators remain independent. On 429 the entire lane waits at least 30s,
+then 60/120/240/300s for repeated limits, honors a longer numeric or HTTP-date
+Retry-After without the old 5-second clamp, and doubles spacing up to 8s.
+An idle lane is discarded after 15 minutes and after its cooldown expires;
+closing/reopening a window does not erase an active cooldown. HTTP retries
+remain bounded; exhaustion pauses the pass instead of advancing through every
+remaining fan with an exhausted rate budget. Existing ordinary-chat traffic,
+other devices and platform clients do not participate in this local lane.
+POSTs never enter its retry loop. Identity is revalidated after the queue wait,
+before dispatch. The existing per-attempt HTTP timeout starts after waiting.
+Queue waits and cooldowns are traced without adding message bodies or secrets.
+
+This supersedes E117's 45-second row / 180-second pass wall deadlines for
+follower discovery/checks: intentional spacing is not an unknown verdict.
+Pagination caps and HTTP-attempt timeouts remain, while a human Pause aborts
+only the current checking pass. Continue preserves the scan, cutoff, completed
+rows and drafts and checks unfinished rows. Initial discovery finishes before
+Pause is available; closing the window cancels its owned requests at any stage.
+Welcome definition reads remain shared and independent of an individual
+window; their HTTP attempts use the same creator queue. A cancelled row stops
+waiting for that shared read. Generation/send operation deadlines and one-attempt
+send custody stay unchanged.
+
+A positive proof now carries its message and date to the follower card;
+legacy proof dates can be decoded from the message snowflake. New proofs also
+retain the platform createdAt field. No settings or schema migration is needed
+for this optional operational-cache field. For contacted/sent fans, selecting
+a card opens a read-only conversation projection, reusing already fetched
+history first. If missing, native search, participant verification and one
+message page run through the same paced session client. Repeated selection
+reuses that window's result; earlier pages load only on click, capped at 750
+displayed messages with a verified Fansly chat link. Read errors retain the
+proof and existing messages. Preview state cannot modify eligibility, history
+completeness, the reviewed-send revision or send custody. Ready/reply fans keep
+the existing composer and reviewed history path.
+
+The window uses 'К обработке', separate status filters, discovery/profile/check
+phases, exact local date boundaries, per-message dates, a shared cooldown
+countdown and distinct empty-period copy. No generation or message send is
+triggered by selection, opening history, pausing or resuming. Validation uses
+mocked browser-session transport and synthetic UI data, including a 194-fan
+mixed-status pass with a 429 and real pacing. Live rate behavior still needs
+measurement after installation. This change does not bump or publish a version
+and does not authorize a Telegram announcement.
+
+E121 adversarial review follow-up: an independent reviewer checked the actual
+uncommitted transport, service and UI changes and reproduced the defects before
+fixes. Queue progress/completion no longer rebuilds a selected fan's composer;
+DOM identity, focus and caret survive another fan leaving the pending list.
+Both follower time bounds now use one captured start timestamp, so followers
+arriving during a long welcome/queue wait belong to the next refresh, not to
+an interval ending before they followed. The 750-message preview cap is an
+informational truncated state with a hard no-fetch guard, not a retryable error.
+The first real transcript after a cached proof or empty placeholder opens at
+the latest messages; subsequent history reads preserve scrolling. The scroll
+failure and fix were verified with actual browser geometry on 25 long messages.
+Regression coverage also exercises repeated 429 through exhaustion, HTTP-date
+Retry-After, abort during a long cooldown, reopening during cooldown and idle
+lane expiry. These are synthetic transport/UI checks; they do not establish
+Fansly's live rate threshold or constitute a deployment.
+
+**E122 (2026-09-14).** The owner now authorizes publication of E121 and its
+adversarial review fixes. Keep the previously clarified small-release numbering
+(E120): package and manifest advance together from 2.2.1 to 2.2.2. The withdrawn
+2.3.0 entry, tag and artifact remain historical evidence. Update both changelogs
+and use the normal clean-main signing/deployment path with `SKIP_ANNOUNCE=1`;
+the prior instruction not to post in Telegram still applies.
+
+Independent adversarial review reproduced four UI/time-bound/history defects;
+all four are fixed and no confirmed unresolved correctness or architecture
+findings remain. The full local check passed 125 test files / 2292 tests before
+release preparation, including synthetic 700-follower diagnostics and a
+194-follower paced transport scenario. Run the final release check and CI before
+signing. Real-account acceptance and measurement of Fansly's rate behavior
+follow installation; the synthetic checks do not replace that evidence.
+This entry records authorization and validation scope. Successful publication
+must be established by the served feed, signed package hash and release tag.

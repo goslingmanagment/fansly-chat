@@ -1,19 +1,21 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FollowersService } from '../src/background/followers-service.js';
-import type { FanslyClient } from '../src/background/fansly-client.js';
+import { FanslyClient } from '../src/background/fansly-client.js';
 import type { SessionStore } from '../src/background/session-store.js';
 import type { AgencyHubClient } from '../src/background/agency-hub-client.js';
 import type { KernelFeatureGateway } from '../src/background/kernel-feature-gateway.js';
 import type { FanslyAccountResponse, FanslyMessage, PersistedState, SessionTemplate } from '../src/shared/types.js';
 import { createDefaultSettings } from '../src/shared/migrations.js';
 
-function harness(debugMode = false) {
+function harness(debugMode = false, realTransport = false) {
   const values: Record<string, unknown> = {};
   const session: SessionTemplate = { accountId: '1', resolvedAccountId: '1', resolvedUsername: 'creator', resolvedDisplayName: 'Creator', authorization: 'secret', fanslySessionId: 'session', fanslyClientId: 'client', latestTs: '1', latestCheck: 'check', routeChecks: {}, lastSeenAt: Date.now(), connected: true };
   const state: PersistedState = { schemaVersion: 16, settings: createDefaultSettings(), personalities: [], personaCatalog: [], personaCatalogSource: null, personaCatalogFetchedAt: null, accountMappings: {}, accountAliases: {}, knownAccounts: [] };
   state.settings.debugMode = debugMode;
   let messages: FanslyMessage[] = [];
   const fansly = {
+    followerSession: vi.fn((session: SessionTemplate) => structuredClone(session)),
+    followerReadStatus: vi.fn(() => undefined),
     getAuthenticatedAccount: vi.fn(async () => ({ id: '1', username: 'creator' })),
     getFollowerPage: vi.fn(async (): Promise<Awaited<ReturnType<FanslyClient['getFollowerPage']>>> => ({ followers: [{ id: String(BigInt(Date.now() - 3600_000 - 1561494360000) << 22n), followerId: '2' }], aggregationData: { accounts: [{ id: '2', username: 'fan', notes: [{ contentType: 12002, note: 'Alex' }] }] } })),
     getWelcomeDefinitions: vi.fn(async () => [{ messageTemplate: { content: 'auto welcome' } }]),
@@ -34,7 +36,7 @@ function harness(debugMode = false) {
     resolvePageLabelForUsername: vi.fn(async () => 'creator-fs'),
     followerOutreachAttempt: vi.fn(async (_settings: unknown, _page: string, body: { action: string }) => ({ owned: true, state: body.action === 'reserve' ? 'reserved' : body.action === 'dispatch' ? 'dispatching' : 'sent' })),
   };
-  const service = new FollowersService({ fansly: fansly as unknown as FanslyClient, sessions: { getSessionForTab: () => session } as unknown as SessionStore, gateway: gateway as unknown as KernelFeatureGateway, hub: hub as unknown as AgencyHubClient, readState: async () => state, storage: storage as unknown as browser.storage.StorageArea });
+  const service = new FollowersService({ fansly: realTransport ? new FanslyClient({ getSessionByAccount: () => session, markDisconnected: vi.fn() } as unknown as SessionStore) : fansly as unknown as FanslyClient, sessions: { getSessionForTab: () => session } as unknown as SessionStore, gateway: gateway as unknown as KernelFeatureGateway, hub: hub as unknown as AgencyHubClient, readState: async () => state, storage: storage as unknown as browser.storage.StorageArea });
   const start = async (tab = 7) => {
     const snapshot = await service.start(tab, 48);
     await vi.waitFor(() => expect(service.state(tab, snapshot.scanId).scanning).toBe(false));
@@ -45,7 +47,41 @@ function harness(debugMode = false) {
 const msg = (overrides: Partial<FanslyMessage> = {}): FanslyMessage => ({ id: '40', senderId: '1', groupId: '3', content: 'personal hello', type: 1, createdAt: 1, attachments: [], embeds: [], ...overrides });
 
 describe('followers scan and one-attempt send', () => {
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+  it('excludes followers after the scan upper bound while discovery waits in the queue', async () => {
+    const h = harness(); const startedAt = Date.now(); let now = startedAt;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    h.fansly.getWelcomeDefinitions.mockImplementation(async () => { now += 30_000; return []; });
+    h.fansly.getFollowerPage.mockResolvedValue({ followers: [
+      { id: String(BigInt(startedAt + 10_000 - 1561494360000) << 22n), followerId: '3' },
+      { id: String(BigInt(startedAt - 10_000 - 1561494360000) << 22n), followerId: '2' },
+    ], aggregationData: { accounts: [{ id: '2', username: 'fan2', notes: [] }, { id: '3', username: 'fan3', notes: [] }] } });
+    const result = await h.start();
+    expect(result.startedAt).toBe(startedAt);
+    expect(result.rows.map(row => row.id)).toEqual(['2']);
+    h.service.close(7);
+  });
+  it('does not refetch older history after reaching the advertised 750-message limit', async () => {
+    const h = harness();
+    h.values['chatgoose:followers:v1:personal:1:2'] = { message: msg() };
+    const first = await h.start();
+    h.fansly.getMessagePage.mockImplementation(async (_group, before) => ({
+      messages: Array.from({ length: 25 }, (_, i) => msg({ id: String((before ? Number(before) : 1001) - i - 1) })), accountMedia: [], accountMediaBundles: [],
+    }));
+    for (let i = 0; i < 30; i++) {
+      h.service.conversation(7, first.scanId, '2', i > 0);
+      await vi.waitFor(() => expect(h.service.state(7, first.scanId).rows[0]?.conversation?.loading).toBe(false));
+    }
+    const capped = h.service.state(7, first.scanId).rows[0]!.conversation!;
+    expect(capped.messages.length).toBe(750);
+    expect(capped.hasMore).toBe(false);
+    expect(capped.truncated).toBe(true);
+    expect(capped.error).toBeUndefined();
+    const calls = h.fansly.getMessagePage.mock.calls.length;
+    h.service.conversation(7, first.scanId, '2', true);
+    await vi.waitFor(() => expect(h.service.state(7, first.scanId).rows[0]?.conversation?.loading).toBe(false));
+    expect(h.fansly.getMessagePage).toHaveBeenCalledTimes(calls);
+  });
   it('allocates and exposes no diagnostic trace when debug mode is off', async () => {
     const h = harness(); const snapshot = await h.start();
     expect(snapshot.debug).toBeUndefined();
@@ -100,6 +136,119 @@ describe('followers scan and one-attempt send', () => {
     }
     expect(outcomes[1]).toEqual(outcomes[0]);
     expect(requests[1]).toEqual(requests[0]);
+  });
+  it('shows a cached proof immediately and loads only the selected excluded fan without changing eligibility', async () => {
+    const h = harness(true);
+    const proof = msg({ id: '70', createdAt: 1789400000 });
+    h.values['chatgoose:followers:v1:personal:1:2'] = { observedAt: Date.now() - 5000, message: proof };
+    h.setMessages([msg({ id: '90', senderId: '2', content: 'latest reply' })]);
+    const first = await h.start();
+    expect(first.rows[0]).toMatchObject({ status: 'contacted', proof: { source: 'cache', message: { text: 'personal hello', createdAt: 1789400000000 } } });
+    expect(h.fansly.getMessagePage).not.toHaveBeenCalled();
+    const writes = h.storage.set.mock.calls.length;
+    const revision = first.rows[0]!.historyRevision;
+    h.service.conversation(7, first.scanId, '2');
+    h.service.conversation(7, first.scanId, '2');
+    await vi.waitFor(() => expect(h.service.state(7, first.scanId).rows[0]?.conversation?.loading).toBe(false));
+    const row = h.service.state(7, first.scanId).rows[0]!;
+    expect(row).toMatchObject({ status: 'contacted', historyRevision: revision, conversation: { messages: [{ id: '90', text: 'latest reply', own: false }], hasMore: true } });
+    h.service.conversation(7, first.scanId, '2');
+    expect(h.fansly.getMessagePage).toHaveBeenCalledOnce();
+    expect(h.storage.set).toHaveBeenCalledTimes(writes);
+    expect(h.gateway.streamFeature).not.toHaveBeenCalled(); expect(h.fansly.sendFollowerMessage).not.toHaveBeenCalled();
+    h.service.conversation(7, first.scanId, '2', true);
+    await vi.waitFor(() => expect(h.service.state(7, first.scanId).rows[0]?.conversation?.loading).toBe(false));
+    expect(h.fansly.getMessagePage.mock.calls.at(-1)?.[1]).toBe('90');
+    expect(h.service.state(7, first.scanId).rows[0]?.conversation?.hasMore).toBe(false);
+  });
+  it('reuses both recent and older messages already fetched for the scan without extra requests', async () => {
+    const h = harness();
+    h.setMessages(Array.from({ length: 55 }, (_, i) => msg({ id: String(55 - i), createdAt: 55 - i })));
+    const first = await h.start();
+    h.service.conversation(7, first.scanId, '2');
+    await vi.waitFor(() => expect(h.service.state(7, first.scanId).rows[0]?.conversation?.loading).toBe(false));
+    expect(h.service.state(7, first.scanId).rows[0]?.conversation?.messages).toHaveLength(30);
+    h.service.conversation(7, first.scanId, '2', true);
+    await vi.waitFor(() => expect(h.service.state(7, first.scanId).rows[0]?.conversation?.loading).toBe(false));
+    expect(h.service.state(7, first.scanId).rows[0]?.conversation?.messages).toHaveLength(55);
+    expect(h.fansly.getMessagePage).toHaveBeenCalledOnce(); expect(h.fansly.getGroup).toHaveBeenCalledOnce();
+  });
+  it('does not expose an unverified conversation or turn a read failure into a different verdict', async () => {
+    const h = harness();
+    h.values['chatgoose:followers:v1:personal:1:2'] = { message: msg() };
+    const first = await h.start();
+    h.fansly.getGroup.mockResolvedValue({ users: [{ userId: '1' }, { userId: '99' }] });
+    h.service.conversation(7, first.scanId, '2');
+    await vi.waitFor(() => expect(h.service.state(7, first.scanId).rows[0]?.conversation?.loading).toBe(false));
+    expect(h.service.state(7, first.scanId).rows[0]).toMatchObject({ status: 'contacted', conversation: { messages: [], error: 'Не удалось подтвердить участников чата.' } });
+    expect(h.fansly.getMessagePage).not.toHaveBeenCalled();
+    expect(() => h.service.conversation(7, first.scanId, '999')).toThrow();
+  });
+  it('pauses an in-flight row and resumes the same scan without reloading followers', async () => {
+    const h = harness(true);
+    h.fansly.getMessagePage.mockImplementationOnce((...args) => new Promise((_resolve, reject) => {
+      const signal = (args as unknown[])[3] as AbortSignal;
+      signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+    }));
+    const first = await h.service.start(7, 48);
+    await vi.waitFor(() => expect(h.fansly.getMessagePage).toHaveBeenCalledOnce());
+    h.service.pause(7, first.scanId);
+    await vi.waitFor(() => expect(h.service.state(7, first.scanId).scanning).toBe(false));
+    expect(h.service.state(7, first.scanId)).toMatchObject({ canContinue: true, rows: [{ status: 'unknown' }] });
+    h.service.resume(7, first.scanId);
+    await vi.waitFor(() => expect(h.service.state(7, first.scanId).scanning).toBe(false));
+    expect(h.service.state(7, first.scanId)).toMatchObject({ canContinue: false, rows: [{ status: 'ready' }] });
+    expect(h.fansly.getFollowerPage).toHaveBeenCalledOnce();
+  });
+  it('runs 194 fans through the real paced transport, preserves all verdicts after 429 and logs every actual request', async () => {
+    vi.useFakeTimers();
+    const h = harness(true, true);
+    const firstId = BigInt(Date.now() - 3600_000 - 1561494360000) << 22n;
+    const fans = Array.from({ length: 194 }, (_, i) => ({ id: String(firstId - BigInt(i)), followerId: String(i + 2) }));
+    for (const fan of fans.slice(0, 11)) h.values[`chatgoose:followers:v1:personal:1:${fan.followerId}`] = { message: msg() };
+    const times: Array<{ path: string; at: number; status: number }> = [];
+    let limited = false;
+    vi.stubGlobal('fetch', vi.fn<typeof globalThis.fetch>(async (input, init) => {
+      expect(init?.method).toBe('GET');
+      const url = new URL(String(input));
+      let response: unknown;
+      let status = 200;
+      if (url.pathname.endsWith('/message/automated')) response = [{ messageTemplate: { content: 'auto welcome' } }];
+      else if (url.pathname.endsWith('/followersnew')) {
+        const page = url.searchParams.get('before') === '0' ? fans.slice(0, 100) : fans.slice(100);
+        response = { followers: page, aggregationData: { accounts: page.map((fan) => ({ id: fan.followerId, username: `fan${fan.followerId}`, notes: [] })) } };
+      } else if (url.pathname.endsWith('/messaging/groups')) {
+        const search = url.searchParams.get('search');
+        const matches = search ? fans.filter((fan) => `fan${fan.followerId}` === search && (Number(fan.followerId) < 157 || fan.followerId === '195')) : fans.slice(0, 100);
+        response = { data: matches.map((fan) => ({ groupId: String(Number(fan.followerId) + 1000), partnerAccountId: fan.followerId })) };
+      } else if (url.pathname.includes('/group/')) response = { users: [{ userId: '1' }, { userId: String(Number(url.pathname.split('/')[4]) - 1000) }] };
+      else if (url.pathname.endsWith('/message')) {
+        if (!limited) { limited = true; status = 429; }
+        const groupId = url.searchParams.get('groupId')!;
+        const fanId = String(Number(groupId) - 1000);
+        response = { messages: url.searchParams.get('before') ? [] : fanId === '195' ? [msg({ groupId, content: 'auto welcome' }), msg({ id: '41', groupId, senderId: fanId })] : [msg({ groupId })] };
+      } else throw new Error(`Unexpected route ${url.pathname}`);
+      times.push({ path: url.pathname, at: Date.now(), status });
+      return new Response(JSON.stringify({ success: true, response }), { status });
+    }));
+    const first = await h.service.start(7, 48);
+    await vi.advanceTimersByTimeAsync(2_000_000);
+    const final = h.service.state(7, first.scanId);
+    expect(final.scanning).toBe(false); expect(final.canContinue).toBe(false); expect(final.error).toBeUndefined();
+    expect(final.rows.filter((row) => row.status === 'contacted')).toHaveLength(155);
+    expect(final.rows.filter((row) => row.status === 'ready')).toHaveLength(38);
+    expect(final.rows.filter((row) => row.status === 'reply')).toHaveLength(1);
+    const limitIndex = times.findIndex((entry) => entry.status === 429);
+    expect(times[limitIndex + 1]!.at - times[limitIndex]!.at).toBeGreaterThanOrEqual(30_000);
+    for (let i = 1; i < times.length; i++) expect(times[i]!.at - times[i - 1]!.at).toBeGreaterThanOrEqual(1000);
+    const history = times.filter((entry) => entry.path === '/api/v1/message');
+    for (let i = 1; i < history.length; i++) expect(history[i]!.at - history[i - 1]!.at).toBeGreaterThanOrEqual(1500);
+    const report = h.service.traces.get(first.scanId)!.read();
+    expect(report.counters['http.start']).toBe(times.length);
+    expect(report.droppedEvents).toBe(0);
+    expect(report.events.some((event) => event.name === 'http.cooldown')).toBe(true);
+    expect(final.cutoff).toBe(final.startedAt! - 48 * 3600_000);
+    h.service.close(7);
   });
   it('explains welcome, automation and fan-first decisions with message IDs, never message text or session secrets', async () => {
     const h = harness(true);
@@ -303,7 +452,7 @@ describe('followers scan and one-attempt send', () => {
     expect((await h.start()).rows[0]?.status).toBe('uncertain');
     expect(h.fansly.sendFollowerMessage).not.toHaveBeenCalled();
   });
-  it('resumes only unfinished fans after a bounded pass, retaining scan identity and checked rows', async () => {
+  it('finishes a deliberately paced pass beyond three minutes without inventing failed rows', async () => {
     const h = harness(); let now = Date.now(); vi.spyOn(Date, 'now').mockImplementation(() => now);
     const ids = ['2', '3', '4', '5', '6', '7'];
     h.fansly.getFollowerPage.mockImplementation(async () => ({
@@ -317,9 +466,9 @@ describe('followers scan and one-attempt send', () => {
       return { users: [{ userId: '1' }, { userId: String(Number(group) - 100) }] };
     });
     const first = await h.start();
-    expect(first.canContinue).toBe(true);
-    expect(first.rows.filter((row) => row.status === 'ready')).toHaveLength(3);
-    expect(first.rows.filter((row) => row.status === 'unknown')).toHaveLength(3);
+    expect(first.canContinue).toBe(false);
+    expect(first.rows.filter((row) => row.status === 'ready')).toHaveLength(6);
+    expect(first.rows.filter((row) => row.status === 'unknown')).toHaveLength(0);
     h.service.resume(7, first.scanId);
     await vi.waitFor(() => expect(h.service.state(7, first.scanId).scanning).toBe(false));
     const completed = h.service.state(7, first.scanId);

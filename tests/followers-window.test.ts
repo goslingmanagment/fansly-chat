@@ -23,6 +23,47 @@ function harness() {
 
 describe('followers window human actions', () => {
   afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); document.body.replaceChildren(); });
+  it('keeps textarea identity, focus and selection when another fan leaves the pending list', async () => {
+    const h = harness(); h.window.close();
+    h.snapshot.scanning = true; h.snapshot.phase = 'checking'; h.snapshot.rows[1]!.status = 'checking';
+    h.window.open();
+    await vi.waitFor(() => expect(h.root.querySelector('textarea')).not.toBeNull());
+    const original = h.root.querySelector('textarea')!;
+    original.value = 'hello there'; original.dispatchEvent(new Event('input')); original.focus(); original.setSelectionRange(4, 4);
+    h.snapshot.rows[1]!.status = 'contacted';
+    await vi.waitFor(() => expect(h.root.querySelector('.pending')?.textContent).toBe('К обработке 1'), { timeout: 1500 });
+    expect(h.root.querySelector('textarea')).toBe(original);
+    expect(h.root.activeElement).toBe(original);
+    expect(original.selectionStart).toBe(4);
+    h.snapshot.scanning = false;
+    await vi.waitFor(() => expect(h.root.querySelector<HTMLButtonElement>('.pause')?.hidden).toBe(true), { timeout: 1500 });
+    expect(h.root.querySelector('textarea')).toBe(original);
+    expect(h.root.activeElement).toBe(original);
+    expect(original.selectionStart).toBe(4);
+    h.window.close();
+  });
+  it('opens the end of the first real chat after a proof-only placeholder', async () => {
+    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(function (this: HTMLElement) { return this.querySelectorAll('[data-message]').length * 70; });
+    const h = harness(); h.window.close();
+    h.snapshot.rows = [h.snapshot.rows[0]!];
+    const row = h.snapshot.rows[0]!;
+    row.status = 'contacted'; row.proof = { source: 'cache', message: { id: '40', own: true, automated: false, text: 'old proof' } };
+    h.sendMessage.mockImplementation(async (request) => {
+      if (request.action === 'conversation') row.conversation = { messages: [], loading: true, hasMore: true };
+      return { ok: true, snapshot: structuredClone(h.snapshot) };
+    });
+    h.window.open();
+    await vi.waitFor(() => expect(h.root.querySelector('.all')?.textContent).toBe('Все 1'));
+    h.root.querySelector<HTMLButtonElement>('.all')!.click();
+    await vi.waitFor(() => expect(row.conversation?.loading).toBe(true));
+    row.conversation = { messages: Array.from({ length: 25 }, (_, i) => ({ id: String(100 + i), own: true, automated: false, text: `recent ${i}` })), loading: false, hasMore: false, truncated: true };
+    await vi.waitFor(() => expect(h.root.querySelector('.history')?.textContent).toContain('recent 24'), { timeout: 1500 });
+    const history = h.root.querySelector<HTMLElement>('.history')!;
+    expect(history.scrollTop).toBe(history.scrollHeight);
+    expect(history.textContent).toContain('Более ранняя переписка доступна');
+    expect(history.textContent).not.toContain('Повторить загрузку');
+    h.window.close();
+  });
   it('shows the debug opener only for a traced run and opens that exact run', async () => {
     const h = harness();
     await vi.waitFor(() => expect(h.root.querySelector('textarea')).not.toBeNull());
@@ -78,6 +119,48 @@ describe('followers window human actions', () => {
     await vi.waitFor(() => expect(h.root.querySelector('.profile')?.textContent).toContain('Fan 3'));
     expect(h.sendMessage.mock.calls.filter(([r]) => r.action === 'generate')).toHaveLength(1);
     expect(h.sendMessage.mock.calls.find(([r]) => r.action === 'send')?.[0]).toMatchObject({ fanId: '2', text: 'edited greeting' });
+    h.window.close();
+  });
+  it('shows only the selected excluded conversation, preserves its proof, and reuses it on reselection', async () => {
+    const h = harness(); h.window.close();
+    h.snapshot.rows.forEach((row) => {
+      row.status = 'contacted'; row.proof = { source: 'cache', message: { id: '40', own: true, automated: false, text: 'earlier personal message', createdAt: 1789400000000 } };
+    });
+    h.sendMessage.mockImplementation(async (request) => {
+      if (request.action === 'conversation') h.snapshot.rows.find((row) => row.id === request.fanId)!.conversation = { messages: [{ id: '41', own: false, automated: false, text: '<img src=x> is text', createdAt: 1789401000000 }], loading: false, hasMore: false };
+      return { ok: true, snapshot: structuredClone(h.snapshot) };
+    });
+    h.window.open();
+    await vi.waitFor(() => expect(h.root.querySelector('.all')?.textContent).toBe('Все 2'));
+    expect(h.sendMessage.mock.calls.some(([r]) => r.action === 'conversation')).toBe(false);
+    h.root.querySelector<HTMLButtonElement>('.all')!.click();
+    await vi.waitFor(() => expect(h.root.querySelector('.history')?.textContent).toContain('<img src=x> is text'));
+    expect(h.root.querySelector('.proof')?.textContent).toContain('earlier personal message');
+    expect(h.root.querySelector('.message-time')?.textContent).toContain('2026');
+    expect(h.root.querySelector('.history img')).toBeNull();
+    h.root.querySelector<HTMLButtonElement>('[data-fan="2"]')!.click();
+    expect(h.sendMessage.mock.calls.filter(([r]) => r.action === 'conversation')).toHaveLength(1);
+    expect(h.sendMessage.mock.calls.find(([r]) => r.action === 'conversation')?.[0]).toMatchObject({ fanId: '2' });
+    expect(h.sendMessage.mock.calls.filter(([r]) => r.action === 'generate' || r.action === 'send')).toHaveLength(0);
+    h.window.close();
+  });
+  it('distinguishes an empty period from a completed contacted queue and keeps status filters usable', async () => {
+    const h = harness(); h.window.close();
+    h.snapshot.rows = []; h.window.open();
+    await vi.waitFor(() => expect(h.root.querySelector('.detail')?.textContent).toBe('За выбранный период новых фоловеров нет.'));
+    expect(h.root.querySelector('.progress')?.textContent).toBe('Новых фоловеров нет');
+    h.window.close();
+  });
+  it('explains discovery before counts are known and sends pause without restarting a scan', async () => {
+    const h = harness(); h.window.close();
+    h.snapshot.scanning = true; h.snapshot.phase = 'followers'; h.window.open();
+    await vi.waitFor(() => expect(h.root.querySelector('.progress')?.textContent).toBe('Загружаем фоловеров…'));
+    expect(h.root.querySelector<HTMLButtonElement>('.pause')?.hidden).toBe(true);
+    h.window.close();
+    h.snapshot.phase = 'checking'; h.window.open();
+    await vi.waitFor(() => expect(h.root.querySelector<HTMLButtonElement>('.pause')?.hidden).toBe(false));
+    h.root.querySelector<HTMLButtonElement>('.pause')!.click();
+    expect(h.sendMessage.mock.calls.at(-1)?.[0]).toMatchObject({ action: 'pause', scanId: h.snapshot.scanId });
     h.window.close();
   });
   it('drops a late generation after close/reopen instead of replacing a new draft', async () => {

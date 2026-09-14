@@ -1,3 +1,4 @@
+import { FollowerReadScheduler } from './follower-read-scheduler.js';
 import type { TraceScope } from './followers-trace.js';
 import {
   FANSLY_PAGINATION_DELAY_MS,
@@ -278,6 +279,21 @@ export class FanslyClient {
   private readonly subscriberSubscriptionCache = new Map<string, CachedSubscriberSubscription>();
   private readonly mediaPurchaseVerificationCache = new Map<string, CachedMediaPurchaseStatus>();
 
+  private readonly followerReads = new FollowerReadScheduler();
+  private readonly followerSessions = new WeakMap<SessionTemplate, (() => void) | undefined>();
+
+  /** An isolated identity snapshot explicitly opts this feature's reads into
+   * pacing; ordinary chat clients and all write paths keep their own policy. */
+  followerSession(session: SessionTemplate, validate?: () => void): SessionTemplate {
+    const copy = structuredClone(session);
+    this.followerSessions.set(copy, validate);
+    return copy;
+  }
+
+  followerReadStatus(session: SessionTemplate): { cooldownUntil: number; intervalMs: number } | undefined {
+    return this.followerReads.status(session.resolvedAccountId ?? session.accountId);
+  }
+
   constructor(private readonly sessionStore: SessionStore) {}
 
   private getSubscriberSubscriptionCacheKey(fanAccountId: string, session: SessionTemplate): string {
@@ -354,14 +370,24 @@ export class FanslyClient {
     // Iterative retry: each attempt scopes its own per-request timeout so they
     // don't stack across retries (the finally clears it before the next loop).
     for (let attempt = 0; ; attempt++) {
+      const permit = this.followerSessions.has(session)
+        ? await this.followerReads.acquire(session.resolvedAccountId ?? session.accountId, routeKey === 'message', signal, trace)
+        : undefined;
       const controller = new AbortController();
       const timeout = globalThis.setTimeout(() => controller.abort(), FANSLY_REQUEST_TIMEOUT_MS);
       const composite = AbortSignal.any([signal, controller.signal]);
       const requestTs = String(Date.now());
       const requestUrl = withNgswBypass(url);
-      const attemptTrace = trace?.start('http', { method: 'GET', path: requestUrl.pathname, query: requestUrl.search, attempt: attempt + 1, timeoutMs: FANSLY_REQUEST_TIMEOUT_MS });
+      let attemptTrace: ReturnType<TraceScope['start']> | undefined;
 
       try {
+        if (permit) {
+          signal.throwIfAborted();
+          this.followerSessions.get(session)?.();
+          const live = this.sessionStore.getSessionByAccount(session.accountId);
+          if (!live?.connected || live.authorization !== session.authorization || live.fanslySessionId !== session.fanslySessionId || live.resolvedAccountId !== session.resolvedAccountId) throw new ChatGooseError('chat_changed');
+        }
+        attemptTrace = trace?.start('http', { method: 'GET', path: requestUrl.pathname, query: requestUrl.search, attempt: attempt + 1, timeoutMs: FANSLY_REQUEST_TIMEOUT_MS });
         const headers = new Headers({
           authorization: session.authorization,
           'fansly-client-id': session.fanslyClientId,
@@ -391,19 +417,24 @@ export class FanslyClient {
           ? parseRetryAfterMs(response.headers.get('retry-after'))
           : undefined;
 
+        const sharedBackoff = response.status === 429 ? permit?.limited(retryAfterMs) : undefined;
         if ((response.status === 429 || response.status >= 500) && attempt < maxAttempts) {
-          const backoff = retryAfterMs !== undefined
+          const backoff = sharedBackoff ?? (retryAfterMs !== undefined
             ? Math.min(retryAfterMs, FANSLY_RETRY_MAX_BACKOFF_MS)
-            : FANSLY_RETRY_DELAYS_MS[attempt]!;
+            : FANSLY_RETRY_DELAYS_MS[attempt]!);
           attemptTrace?.event('http.retry', { status: response.status, backoffMs: backoff, retryAfterMs });
-          await delay(backoff, signal);
+          // The next permit observes the shared cooldown. Release first so
+          // cancellation and other windows do not get stuck behind this retry.
+          permit?.release();
+          if (sharedBackoff === undefined) await delay(backoff, signal);
           attemptTrace?.end({ outcome: 'retry', status: response.status });
           continue;
         }
 
         if (response.status === 429) {
-          const retryFields = retryAfterMs !== undefined
-            ? { retryAfterMs, retryAtMs: Date.now() + retryAfterMs }
+          const waitMs = sharedBackoff ?? retryAfterMs;
+          const retryFields = waitMs !== undefined
+            ? { retryAfterMs: waitMs, retryAtMs: Date.now() + waitMs }
             : {};
           throw new ChatGooseError('rate_limited', {
             details: { status: 429, ...retryFields },
@@ -444,6 +475,7 @@ export class FanslyClient {
         throw new ChatGooseError(optional ? 'unknown_error' : 'network_error');
       } finally {
         clearTimeout(timeout);
+        permit?.release();
       }
     }
   }
