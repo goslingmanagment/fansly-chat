@@ -3779,3 +3779,23 @@ busy state. Missing creator-only notes trigger one batched profile hydration.
 The first recent-inbox page resolves new-follower group ids in bulk; absence
 there never proves no history. The isolated UI bundle excludes background Zod
 validation (17.7 kB minified); the family stylesheet loads only on opening.
+
+E117 Fable follow-up: a definite dispatch denial or a local abort before the
+Hub dispatch request changes the local journal to aborted; a later explicit
+attempt may proceed after a fresh live check and a new shared reservation.
+Unknown Hub transitions and all issued Fansly POSTs retain permanent custody.
+A failed aborted-journal write also remains fail-closed. The small crash gap
+after shared dispatch custody remains deliberately non-retryable; no timeout
+can safely release an attempt that might already have sent a platform DM.
+
+Follower checks now run with separate 45-second row budgets, three workers,
+and a 180-second pass deadline. Continue resumes only unfinished rows, keeping
+the same scan, completed checks and drafts; it never re-fetches the follower
+list or generates a draft. Profile-batch and welcome-refresh failures are
+recoverable, and timeout copy is Russian. An empty message page remains the
+absence proof even though the requested message page size is currently 25.
+
+Avatar host/length validation matches Core. Signed avatar metadata is refreshed
+on the explicit generation click, with a text-profile fallback if unavailable;
+the AI request is never automatically retried. Generation context uses the last
+30 messages, matching the history shown to the chatter and bounding its cost.

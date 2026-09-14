@@ -31,6 +31,6 @@ describe('new follower eligibility', () => {
   });
   it('uses the small avatar rendition with signed metadata and refuses foreign URLs', () => {
     expect(fanslyAvatarUrl({ id: '1', avatar: { location: 'https://cdn3.fansly.com/full.jpg', variants: [{ width: 512, locations: [{ location: 'https://cdn3.fansly.com/small.jpg', metadata: { Signature: 'abc+' } }] }] } })).toBe('https://cdn3.fansly.com/small.jpg?Signature=abc%2B');
-    for (const location of ['javascript:alert(1)', 'https://evil.test/x', 'https://cdn.fansly.com.evil.test/x', 'https://u:p@cdn.fansly.com/x']) expect(fanslyAvatarUrl({ id: '1', avatar: { location } })).toBeNull();
+    for (const location of ['javascript:alert(1)', 'https://evil.test/x', 'https://nested.cdn.fansly.com/x', 'https://cdn.fansly.com.evil.test/x', 'https://u:p@cdn.fansly.com/x']) expect(fanslyAvatarUrl({ id: '1', avatar: { location } })).toBeNull();
   });
 });

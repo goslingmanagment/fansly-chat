@@ -22,6 +22,7 @@ export interface FollowersSnapshot {
   creatorName: string;
   hours: number;
   scanning: boolean;
+  canContinue?: boolean;
   rows: FollowerRow[];
   error?: string;
 }
@@ -77,10 +78,11 @@ export function fanslyAvatarUrl(account: FanslyAccountResponse): string | null {
     if (!raw) continue;
     try {
       const url = new URL(raw);
-      if (url.protocol !== 'https:' || !url.hostname.endsWith('.fansly.com') || url.username || url.password || url.port) continue;
+      if (url.protocol !== 'https:' || !/^[-a-z0-9]+\.fansly\.com$/i.test(url.hostname) || url.username || url.password || url.port) continue;
       for (const [key, value] of Object.entries(location?.metadata ?? {})) {
         if (['Key-Pair-Id', 'Policy', 'Signature'].includes(key) && typeof value === 'string') url.searchParams.set(key, value);
       }
+      if (url.href.length > 4096) continue;
       return url.href;
     } catch { /* A missing/broken avatar should use initials. */ }
   }

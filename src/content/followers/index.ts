@@ -73,7 +73,7 @@ export class FollowersWindow {
     }
     select.addEventListener('change', () => { this.hours = Number(select.value); void this.scan(); });
     this.node('.close').addEventListener('click', () => this.close());
-    this.node('.refresh').addEventListener('click', () => { void this.scan(); });
+    this.node('.refresh').addEventListener('click', () => { void (this.snapshot?.canContinue ? this.resume() : this.scan()); });
     this.node('.pending').addEventListener('click', () => { this.all = false; this.render(); });
     this.node('.all').addEventListener('click', () => { this.all = true; this.render(); });
     this.dialog.addEventListener('cancel', (event) => { event.preventDefault(); this.close(); });
@@ -131,6 +131,20 @@ export class FollowersWindow {
     } catch (error) { if (epoch === this.epoch) this.showError((error as Error).message); }
   }
 
+  private async resume(): Promise<void> {
+    if (!this.snapshot || this.snapshot.scanning || this.busy.size) return;
+    const epoch = this.epoch;
+    const operation = crypto.randomUUID();
+    this.busy.set('resume', operation);
+    try {
+      const response = await request({ type: 'followers', action: 'resume', scanId: this.snapshot.scanId });
+      if (epoch !== this.epoch) return;
+      this.snapshot = response.snapshot!;
+      this.render(); this.schedulePoll(epoch);
+    } catch (error) { if (epoch === this.epoch) this.showError((error as Error).message); }
+    finally { if (this.busy.get('resume') === operation) this.busy.delete('resume'); }
+  }
+
   private schedulePoll(epoch: number): void {
     if (!this.snapshot?.scanning || epoch !== this.epoch) return;
     this.poll = setTimeout(() => { void (async () => {
@@ -152,7 +166,13 @@ export class FollowersWindow {
     this.node('.all').textContent = `Все ${snapshot.rows.length}`;
     this.node('.pending').classList.toggle('active', !this.all);
     this.node('.all').classList.toggle('active', this.all);
-    this.node('.progress').textContent = snapshot.scanning ? `Проверено ${snapshot.rows.filter((r) => r.status !== 'checking').length} из ${snapshot.rows.length}` : `${pending.length} в очереди`;
+    const unchecked = snapshot.rows.filter((r) => ['checking', 'unknown'].includes(r.status)).length;
+    this.node('.progress').textContent = snapshot.scanning ? `Проверено ${snapshot.rows.length - unchecked} из ${snapshot.rows.length}` : snapshot.canContinue ? `Осталось проверить ${unchecked}` : `${pending.length} в очереди`;
+    const refresh = this.node<HTMLButtonElement>('.refresh');
+    refresh.textContent = snapshot.canContinue ? 'Продолжить' : '↻';
+    refresh.classList.toggle('resume', Boolean(snapshot.canContinue));
+    refresh.setAttribute('aria-label', snapshot.canContinue ? 'Продолжить проверку' : 'Обновить список');
+    refresh.disabled = snapshot.scanning;
     if (snapshot.error) this.showError(snapshot.error);
     if (!rows.some((row) => row.id === this.selected)) this.selected = rows.find(canCompose)?.id ?? rows[0]?.id ?? null;
     const list = this.node('.list');

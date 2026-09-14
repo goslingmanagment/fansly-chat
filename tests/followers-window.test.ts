@@ -39,6 +39,22 @@ describe('followers window human actions', () => {
     expect(h.sendMessage.mock.calls.filter(([r]) => r.action === 'send')).toHaveLength(0);
     h.window.close();
   });
+  it('continues the existing scan without regenerating or losing an edited draft', async () => {
+    const h = harness();
+    h.snapshot.canContinue = true;
+    await vi.waitFor(() => expect(h.root.querySelector('textarea')).not.toBeNull());
+    // Refresh once to pick up the paused snapshot returned by the transport.
+    h.root.querySelector<HTMLButtonElement>('.refresh')!.click();
+    await vi.waitFor(() => expect(h.root.querySelector('.refresh')?.textContent).toBe('Продолжить'));
+    const textarea = h.root.querySelector('textarea')!;
+    textarea.value = 'saved draft'; textarea.dispatchEvent(new Event('input'));
+    h.root.querySelector<HTMLButtonElement>('.refresh')!.click();
+    await vi.waitFor(() => expect(h.sendMessage.mock.calls.some(([r]) => r.action === 'resume')).toBe(true));
+    expect(h.sendMessage.mock.calls.find(([r]) => r.action === 'resume')?.[0]).toEqual({ type: 'followers', action: 'resume', scanId: h.snapshot.scanId });
+    expect(h.root.querySelector('textarea')?.value).toBe('saved draft');
+    expect(h.sendMessage.mock.calls.filter(([r]) => r.action === 'generate' || r.action === 'send')).toHaveLength(0);
+    h.window.close();
+  });
   it('generates only by button, sends edited text explicitly, and moves to the next fan', async () => {
     const h = harness();
     await vi.waitFor(() => expect(h.root.querySelector('textarea')).not.toBeNull());

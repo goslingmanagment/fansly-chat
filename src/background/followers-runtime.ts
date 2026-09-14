@@ -16,6 +16,7 @@ export function registerFollowersRuntime(service: FollowersService): void {
       try {
         switch (value.action) {
           case 'scan': return { ok: true, snapshot: await service.start(tabId, value.hours) };
+          case 'resume': return { ok: true, snapshot: service.resume(tabId, value.scanId) };
           case 'state': return { ok: true, snapshot: service.state(tabId, value.scanId) };
           case 'generate': return { ok: true, text: await service.generate(tabId, value.scanId, value.fanId) };
           case 'send': return { ok: true, snapshot: await service.send(tabId, value.scanId, value.fanId, value.text, value.historyRevision) };

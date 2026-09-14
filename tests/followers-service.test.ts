@@ -4,7 +4,7 @@ import type { FanslyClient } from '../src/background/fansly-client.js';
 import type { SessionStore } from '../src/background/session-store.js';
 import type { AgencyHubClient } from '../src/background/agency-hub-client.js';
 import type { KernelFeatureGateway } from '../src/background/kernel-feature-gateway.js';
-import type { FanslyMessage, PersistedState, SessionTemplate } from '../src/shared/types.js';
+import type { FanslyAccountResponse, FanslyMessage, PersistedState, SessionTemplate } from '../src/shared/types.js';
 import { createDefaultSettings } from '../src/shared/migrations.js';
 
 function harness() {
@@ -14,12 +14,12 @@ function harness() {
   let messages: FanslyMessage[] = [];
   const fansly = {
     getAuthenticatedAccount: vi.fn(async () => ({ id: '1', username: 'creator' })),
-    getFollowerPage: vi.fn(async () => ({ followers: [{ id: String(BigInt(Date.now() - 3600_000 - 1561494360000) << 22n), followerId: '2' }], aggregationData: { accounts: [{ id: '2', username: 'fan', notes: [{ contentType: 12002, note: 'Alex' }] }] } })),
+    getFollowerPage: vi.fn(async (): Promise<Awaited<ReturnType<FanslyClient['getFollowerPage']>>> => ({ followers: [{ id: String(BigInt(Date.now() - 3600_000 - 1561494360000) << 22n), followerId: '2' }], aggregationData: { accounts: [{ id: '2', username: 'fan', notes: [{ contentType: 12002, note: 'Alex' }] }] } })),
     getWelcomeDefinitions: vi.fn(async () => [{ messageTemplate: { content: 'auto welcome' } }]),
-    getAccountNames: vi.fn(async () => []),
+    getAccountNames: vi.fn(async (): Promise<FanslyAccountResponse[]> => []),
     listFanAccounts: vi.fn(async () => ({ fans: [{ groupId: '3', fanAccountId: '2' }], truncated: true })),
-    findFollowerGroup: vi.fn(async (): Promise<string | null> => '3'),
-    getGroup: vi.fn(async () => ({ users: [{ userId: '1' }, { userId: '2' }] })),
+    findFollowerGroup: vi.fn(async (_id: string): Promise<string | null> => '3'),
+    getGroup: vi.fn(async (_id: string) => ({ users: [{ userId: '1' }, { userId: '2' }] })),
     getMessagePage: vi.fn(async (_group: string, before: string | null) => ({ messages: before ? [] : messages, accountMedia: [], accountMediaBundles: [] })),
     createFollowerGroup: vi.fn(async () => '3'),
     sendFollowerMessage: vi.fn(async () => '99'),
@@ -28,7 +28,7 @@ function harness() {
     get: vi.fn(async (keys: string | string[]) => Object.fromEntries((Array.isArray(keys) ? keys : [keys]).map((key) => [key, values[key]]))),
     set: vi.fn(async (update: Record<string, unknown>) => { Object.assign(values, structuredClone(update)); }),
   };
-  const gateway = { streamFeature: vi.fn(async () => 'draft') };
+  const gateway = { streamFeature: vi.fn(async (..._args: Parameters<KernelFeatureGateway['streamFeature']>) => 'draft') };
   const hub = {
     resolvePageLabelForUsername: vi.fn(async () => 'creator-fs'),
     followerOutreachAttempt: vi.fn(async (_settings: unknown, _page: string, body: { action: string }) => ({ owned: true, state: body.action === 'reserve' ? 'reserved' : body.action === 'dispatch' ? 'dispatching' : 'sent' })),
@@ -39,7 +39,7 @@ function harness() {
     await vi.waitFor(() => expect(service.state(tab, snapshot.scanId).scanning).toBe(false));
     return service.state(tab, snapshot.scanId);
   };
-  return { service, start, values, session, fansly, gateway, hub, storage, setMessages: (value: FanslyMessage[]) => { messages = value; } };
+  return { service, start, values, state, session, fansly, gateway, hub, storage, setMessages: (value: FanslyMessage[]) => { messages = value; } };
 }
 const msg = (overrides: Partial<FanslyMessage> = {}): FanslyMessage => ({ id: '40', senderId: '1', groupId: '3', content: 'personal hello', type: 1, createdAt: 1, attachments: [], embeds: [], ...overrides });
 
@@ -108,6 +108,120 @@ describe('followers scan and one-attempt send', () => {
     h.setMessages([msg({ content: 'possibly a new welcome' })]);
     expect((await h.start()).rows[0]?.status).toBe('unknown');
     expect(h.values['chatgoose:followers:v1:personal:1:2']).toBeUndefined();
+  });
+  it.each([false, true])('refreshes avatar on click and bounds the draft to displayed history (image read fails: %s)', async (failImageRead) => {
+    const h = harness();
+    h.state.accountMappings = { '1': 'persona' };
+    h.state.personaCatalog = [{ key: 'persona', displayName: 'Persona', version: 1, definitionId: 'v1:persona-definition', status: 'active' }];
+    h.fansly.getFollowerPage.mockImplementation(async () => ({
+      followers: [{ id: String(BigInt(Date.now() - 3600_000 - 1561494360000) << 22n), followerId: '2' }],
+      aggregationData: { accounts: [{ id: '2', username: 'fan', notes: [], avatar: { location: 'https://cdn3.fansly.com/old.jpg' } }] },
+    }));
+    h.setMessages(Array.from({ length: 40 }, (_, index) => msg({ id: String(100 + index), createdAt: index + 1, senderId: '2', content: `incoming-${String(index).padStart(2, '0')}` })));
+    const snapshot = await h.start();
+    expect(h.gateway.streamFeature).not.toHaveBeenCalled();
+    if (failImageRead) h.fansly.getAccountNames.mockRejectedValueOnce(new Error('image unavailable'));
+    else h.fansly.getAccountNames.mockResolvedValueOnce([{ id: '2', avatar: { location: 'https://cdn3.fansly.com/fresh.jpg' } }]);
+    expect(await h.service.generate(7, snapshot.scanId, '2')).toBe('draft');
+    const request = h.gateway.streamFeature.mock.calls[0]![1];
+    expect(JSON.stringify(request.clientContext)).toContain('incoming-39');
+    expect(JSON.stringify(request.clientContext)).toContain('incoming-10');
+    expect(JSON.stringify(request.clientContext)).not.toContain('incoming-09');
+    expect(request.clientContext?.fanAvatarUrl).toBe(failImageRead ? undefined : 'https://cdn3.fansly.com/fresh.jpg');
+    expect(h.gateway.streamFeature).toHaveBeenCalledOnce();
+    expect(h.fansly.sendFollowerMessage).not.toHaveBeenCalled();
+  });
+  it('allows a new explicit attempt after a definite pre-dispatch denial', async () => {
+    const h = harness(); const snapshot = await h.start();
+    h.hub.followerOutreachAttempt
+      .mockResolvedValueOnce({ owned: true, state: 'reserved' })
+      .mockResolvedValueOnce({ owned: false, state: 'expired' });
+    await expect(h.service.send(7, snapshot.scanId, '2', 'hello')).rejects.toThrow('Резерв');
+    expect(h.fansly.sendFollowerMessage).not.toHaveBeenCalled();
+    expect(h.values['chatgoose:followers:v1:attempt:1:2']).toMatchObject({ state: 'aborted' });
+    const retry = await h.start();
+    expect(retry.rows[0]?.status).toBe('ready');
+    expect((await h.service.send(7, retry.scanId, '2', 'hello')).rows[0]?.status).toBe('sent');
+    expect(h.fansly.sendFollowerMessage).toHaveBeenCalledOnce();
+  });
+  it('abandons local custody if the session changes before requesting shared dispatch', async () => {
+    const h = harness(); const snapshot = await h.start();
+    h.storage.set.mockImplementationOnce(async (update) => {
+      Object.assign(h.values, structuredClone(update)); h.session.authorization = 'rotated';
+    });
+    await expect(h.service.send(7, snapshot.scanId, '2', 'hello')).rejects.toThrow();
+    expect(h.hub.followerOutreachAttempt.mock.calls.map((call) => call[2].action)).toEqual(['reserve']);
+    expect(h.fansly.sendFollowerMessage).not.toHaveBeenCalled();
+    expect(h.values['chatgoose:followers:v1:attempt:1:2']).toMatchObject({ state: 'aborted' });
+    h.session.authorization = 'secret';
+    expect((await h.start()).rows[0]?.status).toBe('ready');
+  });
+  it('keeps custody if persisting a definite abort fails', async () => {
+    const h = harness(); const snapshot = await h.start();
+    h.hub.followerOutreachAttempt
+      .mockResolvedValueOnce({ owned: true, state: 'reserved' })
+      .mockImplementationOnce(async () => {
+        h.storage.set.mockRejectedValueOnce(new Error('disk unavailable'));
+        return { owned: false, state: 'expired' };
+      });
+    await expect(h.service.send(7, snapshot.scanId, '2', 'hello')).rejects.toThrow('Резерв');
+    expect((await h.start()).rows[0]?.status).toBe('uncertain');
+    expect(h.fansly.sendFollowerMessage).not.toHaveBeenCalled();
+  });
+  it('resumes only unfinished fans after a bounded pass, retaining scan identity and checked rows', async () => {
+    const h = harness(); let now = Date.now(); vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const ids = ['2', '3', '4', '5', '6', '7'];
+    h.fansly.getFollowerPage.mockImplementation(async () => ({
+      followers: ids.map((id) => ({ id: String((BigInt(now - 3600_000 - 1561494360000) << 22n) + BigInt(id)), followerId: id })),
+      aggregationData: { accounts: ids.map((id) => ({ id, username: `fan${id}`, notes: [] })) },
+    }));
+    h.fansly.listFanAccounts.mockResolvedValue({ fans: [], truncated: false });
+    h.fansly.findFollowerGroup.mockImplementation(async (id: string) => String(Number(id) + 100));
+    h.fansly.getGroup.mockImplementation(async (group: string) => {
+      now += 65_000;
+      return { users: [{ userId: '1' }, { userId: String(Number(group) - 100) }] };
+    });
+    const first = await h.start();
+    expect(first.canContinue).toBe(true);
+    expect(first.rows.filter((row) => row.status === 'ready')).toHaveLength(3);
+    expect(first.rows.filter((row) => row.status === 'unknown')).toHaveLength(3);
+    h.service.resume(7, first.scanId);
+    await vi.waitFor(() => expect(h.service.state(7, first.scanId).scanning).toBe(false));
+    const completed = h.service.state(7, first.scanId);
+    expect(completed.rows.every((row) => row.status === 'ready')).toBe(true);
+    expect(completed.canContinue).toBe(false);
+    expect(h.fansly.getFollowerPage).toHaveBeenCalledOnce();
+    expect(h.fansly.getGroup).toHaveBeenCalledTimes(6);
+    expect(h.gateway.streamFeature).not.toHaveBeenCalled();
+    expect(h.fansly.sendFollowerMessage).not.toHaveBeenCalled();
+  });
+  it('recovers profile hydration on continue without restarting follower discovery', async () => {
+    const h = harness();
+    h.fansly.getFollowerPage.mockImplementation(async () => ({
+      followers: [{ id: String(BigInt(Date.now() - 3600_000 - 1561494360000) << 22n), followerId: '2' }],
+      aggregationData: { accounts: [{ id: '2', username: 'fan', notes: undefined }] },
+    }));
+    h.fansly.getAccountNames.mockRejectedValueOnce(new DOMException('The operation was aborted', 'TimeoutError'));
+    const first = await h.start();
+    expect(first.rows[0]).toMatchObject({ status: 'unknown', username: 'fan' });
+    expect(first.rows[0]?.detail).toContain('Не успели');
+    expect(first.canContinue).toBe(true);
+    h.service.resume(7, first.scanId);
+    await vi.waitFor(() => expect(h.service.state(7, first.scanId).scanning).toBe(false));
+    expect(h.service.state(7, first.scanId).rows[0]?.status).toBe('ready');
+    expect(h.fansly.getFollowerPage).toHaveBeenCalledOnce();
+  });
+  it('retries a transient welcome refresh failure on continuation', async () => {
+    const h = harness();
+    h.values['chatgoose:followers:v1:welcome:1:'] = { texts: ['auto welcome'], checkedAt: Date.now() - 1000 };
+    h.setMessages([msg()]);
+    h.fansly.getWelcomeDefinitions.mockRejectedValueOnce(new Error('offline'));
+    const first = await h.start();
+    expect(first.rows[0]?.status).toBe('unknown');
+    h.service.resume(7, first.scanId);
+    await vi.waitFor(() => expect(h.service.state(7, first.scanId).scanning).toBe(false));
+    expect(h.service.state(7, first.scanId).rows[0]?.status).toBe('contacted');
+    expect(h.fansly.getWelcomeDefinitions).toHaveBeenCalledTimes(2);
   });
   it('rechecks history before send and catches another chatter', async () => {
     const h = harness(); const snapshot = await h.start();

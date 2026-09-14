@@ -42,6 +42,7 @@ interface Options {
 const key = (kind: string, creator: string, fan = '') => `chatgoose:followers:v1:${kind}:${creator}:${fan}`;
 const ready = (row: FollowerRow) => row.status === 'ready' || row.status === 'reply';
 function errorText(error: unknown): string {
+  if (error instanceof Error && ['AbortError', 'TimeoutError'].includes(error.name)) return 'Не успели проверить Fansly. Продолжите проверку или обновите список.';
   return error instanceof ChatGooseError ? toUserError(error).message : error instanceof Error ? error.message : 'Не удалось проверить Fansly.';
 }
 
@@ -100,6 +101,10 @@ export class FollowersService {
     this.scans.set(tabId, scan);
     void this.run(scan).catch((error: unknown) => {
       scan.snapshot.error = errorText(error);
+      for (const row of scan.snapshot.rows) if (row.status === 'checking') {
+        row.status = 'unknown'; row.detail = scan.snapshot.error;
+      }
+      scan.snapshot.canContinue = scan.snapshot.rows.some((row) => row.status === 'unknown');
     }).finally(() => { scan.snapshot.scanning = false; });
     return structuredClone(scan.snapshot);
   }
@@ -139,6 +144,9 @@ export class FollowersService {
       this.assertCurrent(scan);
       scan.welcome = value.texts;
       scan.welcomeCheckedAt = value.checkedAt;
+    }).catch((error: unknown) => {
+      scan.welcomeRefresh = undefined;
+      throw error;
     });
     await scan.welcomeRefresh;
   }
@@ -173,13 +181,6 @@ export class FollowersService {
       before = next;
     }
     if (!complete) scan.snapshot.error = 'Показана часть списка: Fansly не дал дочитать выбранный период. Уменьшите период и обновите.';
-    // Profile aggregation already contains avatars/bio on Fansly. Batch hydrate
-    // only missing profiles; never N account calls for N followers.
-    const missing = scan.snapshot.rows.filter((row) => !scan.profiles.get(row.id)?.username || scan.profiles.get(row.id)?.notes === undefined);
-    for (let offset = 0; offset < missing.length; offset += 50) {
-      const accounts = await this.options.fansly.getAccountNames(missing.slice(offset, offset + 50).map((row) => row.id), scan.session, signal);
-      for (const account of accounts) scan.profiles.set(account.id, { ...scan.profiles.get(account.id), ...account });
-    }
     this.assertCurrent(scan);
     scan.snapshot.rows.sort((a, b) => b.followedAt - a.followedAt);
     // Most new followers with a welcome are already in the recent inbox.
@@ -194,20 +195,67 @@ export class FollowersService {
         }
       } catch { this.assertCurrent(scan); }
     }
-    const queue = [...scan.snapshot.rows];
-    await Promise.all(Array.from({ length: Math.min(3, queue.length) }, async () => {
-      for (let row = queue.shift(); row; row = queue.shift()) {
+    await this.checkRows(scan);
+  }
+
+  resume(tabId: number, scanId: string): FollowersSnapshot {
+    const scan = this.get(tabId, scanId);
+    if (scan.snapshot.scanning || !scan.snapshot.canContinue) return structuredClone(scan.snapshot);
+    scan.snapshot.scanning = true;
+    scan.snapshot.canContinue = false;
+    void this.checkRows(scan).catch((error: unknown) => {
+      scan.snapshot.error = errorText(error);
+    }).finally(() => { scan.snapshot.scanning = false; });
+    return structuredClone(scan.snapshot);
+  }
+
+  private async checkRows(scan: Scan): Promise<void> {
+    const rows = scan.snapshot.rows.filter((row) => ['checking', 'unknown'].includes(row.status));
+    const deadline = Date.now() + 180_000;
+    const signal = () => AbortSignal.any([scan.controller.signal, AbortSignal.timeout(45_000)]);
+    const skipped = new Set<string>();
+    for (const row of rows) { row.status = 'checking'; row.detail = undefined; }
+    // Batch profile hydration is optional for the other fans: one failed
+    // batch must not strand the whole queue in a permanent checking state.
+    const missing = rows.filter((row) => !scan.profiles.get(row.id)?.username || scan.profiles.get(row.id)?.notes === undefined);
+    for (let offset = 0; offset < missing.length; offset += 50) {
+      this.assertCurrent(scan);
+      if (Date.now() >= deadline) {
+        for (const row of missing.slice(offset)) skipped.add(row.id);
+        break;
+      }
+      const batch = missing.slice(offset, offset + 50);
+      try {
+        const accounts = await this.options.fansly.getAccountNames(batch.map((row) => row.id), scan.session, signal());
         this.assertCurrent(scan);
-        const profile = scan.profiles.get(row.id);
-        row.username = profile?.username ?? '';
-        row.displayName = profile?.displayName || row.username || row.id;
-        row.bio = profile?.about ?? '';
-        row.customName = profile ? customNameFromAccount(profile) : null;
-        row.avatarUrl = profile ? fanslyAvatarUrl(profile) : null;
-        try { await this.check(scan, row, signal); }
+        for (const account of accounts) scan.profiles.set(account.id, { ...scan.profiles.get(account.id), ...account });
+      } catch (error) {
+        this.assertCurrent(scan);
+        for (const row of batch) { skipped.add(row.id); row.status = 'unknown'; row.detail = errorText(error); }
+      }
+    }
+    for (const row of rows) {
+      const profile = scan.profiles.get(row.id);
+      row.username = profile?.username ?? '';
+      row.displayName = profile?.displayName || row.username || row.id;
+      row.bio = profile?.about ?? '';
+      row.customName = profile ? customNameFromAccount(profile) : null;
+      row.avatarUrl = profile ? fanslyAvatarUrl(profile) : null;
+    }
+    const queue = rows.filter((row) => !skipped.has(row.id));
+    await Promise.all(Array.from({ length: Math.min(3, queue.length) }, async () => {
+      while (Date.now() < deadline) {
+        this.assertCurrent(scan);
+        const row = queue.shift();
+        if (!row) return;
+        try { await this.check(scan, row, signal()); }
         catch (error) { row.status = 'unknown'; row.detail = errorText(error); }
       }
     }));
+    for (const row of rows) if (row.status === 'checking') {
+      row.status = 'unknown'; row.detail = 'Проверка приостановлена. Нажмите «Продолжить».';
+    }
+    scan.snapshot.canContinue = rows.some((row) => row.status === 'unknown');
   }
 
   private async check(scan: Scan, row: FollowerRow, signal: AbortSignal): Promise<void> {
@@ -264,8 +312,8 @@ export class FollowersService {
           await this.options.storage.set({ [personalKey]: { observedAt: Date.now(), message: { id, senderId, type, content, correlationId, inReplyTo } } });
           break;
         }
-        // FANSLY_PAGE_LIMIT is 100; an empty next page is the only absence
-        // proof needed here, independent of the server's current page size.
+        // Fansly currently requests 25 messages. Require an empty next page
+        // for absence proof: a short response alone does not prove exhaustion.
         if (page.messages.length === 0 || complete) { complete = true; break; }
         const next = page.messages.reduce((oldest, message) => BigInt(message.id) < BigInt(oldest) ? message.id : oldest, page.messages[0]!.id);
         if (next === before) break;
@@ -280,7 +328,7 @@ export class FollowersService {
     if (JSON.stringify(row.messages) !== JSON.stringify(displayMessages)) row.historyRevision = crypto.randomUUID();
     row.messages = displayMessages;
     if (row.status === 'contacted') return;
-    if (attempt) { row.status = 'uncertain'; row.detail = 'Результат прошлой отправки не подтверждён. Повтор заблокирован; обновление проверит историю.'; return; }
+    if (attempt && attempt.state !== 'aborted') { row.status = 'uncertain'; row.detail = 'Результат прошлой отправки не подтверждён. Повтор заблокирован; обновление проверит историю.'; return; }
     if (!complete) {
       row.status = 'unknown';
       throw new Error('История не дочитана. Отправка пока недоступна.');
@@ -315,8 +363,23 @@ export class FollowersService {
       };
       const pageLabel = await this.options.hub.resolvePageLabelForUsername(state.settings, scan.snapshot.creatorName, signal);
       if (!pageLabel) throw new ChatGooseError('hub_page_match_failed');
+      // Refresh signed avatar metadata at the explicit generation click. A
+      // missing/unavailable image may fall back to the verified text profile;
+      // never automatically retry the AI request after a provider error.
+      if (row.avatarUrl) {
+        try {
+          const profiles = await this.options.fansly.getAccountNames([fanId], scan.session, signal);
+          this.assertCurrent(scan);
+          const profile = profiles.find((value) => value.id === fanId);
+          row.avatarUrl = profile ? fanslyAvatarUrl(profile) : null;
+        } catch {
+          this.assertCurrent(scan);
+          row.avatarUrl = null;
+        }
+      }
       await assertPersona();
-      const history = scan.histories.get(fanId) ?? [];
+      // The draft uses the same bounded history the chatter can review.
+      const history = (scan.histories.get(fanId) ?? []).slice(-30);
       const transcript = formatTranscriptForKernel(history.map((message) => ({
         id: message.id, createdAt: message.createdAt, senderId: message.senderId,
         senderLabel: message.senderId === scan.snapshot.creatorId ? 'Model' : 'Fan', type: message.type,
@@ -355,6 +418,10 @@ export class FollowersService {
     this.locks.add(lock);
     let dispatched = false;
     let custodyPersisted = false;
+    let transitionStarted = false;
+    let transitionDenied = false;
+    const attemptKey = key('attempt', creator, fanId);
+    let journal: Record<string, unknown> | undefined;
     const previous = row.status;
     try {
       const signal = AbortSignal.timeout(60_000);
@@ -394,13 +461,17 @@ export class FollowersService {
       if (!ready(row)) return structuredClone(scan.snapshot);
       assertReviewed();
       await assertHub();
-      const attemptKey = key('attempt', creator, fanId);
       const attempt = { attemptId, createdAt: Date.now(), groupId, text, state: 'sending', pageLabel };
+      journal = attempt;
       await this.options.storage.set({ [attemptKey]: attempt });
       custodyPersisted = true;
       await assertHub();
+      transitionStarted = true;
       const custody = await this.options.hub.followerOutreachAttempt(state.settings, pageLabel, { fanRef: fanId, attemptId, action: 'dispatch' }, signal);
-      if (!custody.owned || custody.state !== 'dispatching') throw new Error('Резерв отправки истёк. Обновите список.');
+      if (!custody.owned || custody.state !== 'dispatching') {
+        transitionDenied = true;
+        throw new Error('Резерв отправки истёк. Обновите список.');
+      }
       await assertHub();
       row.status = 'sending';
       // No asynchronous work between the final identity check and dispatch.
@@ -414,6 +485,15 @@ export class FollowersService {
       void this.options.hub.followerOutreachAttempt(state.settings, pageLabel, { fanRef: fanId, attemptId, action: 'sent', messageRef: messageId }, AbortSignal.timeout(10_000)).catch(() => {});
       return structuredClone(scan.snapshot);
     } catch (error) {
+      // Only positive proof that shared dispatch custody was never acquired
+      // permits abandoning a local journal. Unknown Hub outcomes and every
+      // platform POST retain durable custody, even across reloads.
+      if (custodyPersisted && !dispatched && (!transitionStarted || transitionDenied)) {
+        try {
+          await this.options.storage.set({ [attemptKey]: { ...journal, state: 'aborted' } });
+          custodyPersisted = false;
+        } catch { /* A failed journal update must remain fail-closed. */ }
+      }
       if (dispatched || custodyPersisted) row.status = 'uncertain';
       else if (row.status === 'sending') row.status = previous;
       row.detail = dispatched || custodyPersisted ? 'Отправка не подтверждена. Повтор заблокирован. Обновите список для проверки.' : errorText(error);
