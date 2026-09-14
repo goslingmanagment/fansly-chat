@@ -296,6 +296,7 @@ describe('runtime-api message ownership', () => {
     await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn(async () => null) });
     const coreListener = onMessageListener!;
     expect(coreListener({ type: 'followers', action: 'scan', hours: 48 }, { tab: { id: 7 } })).toBeUndefined();
+    expect(coreListener({ type: 'followersDebug', action: 'list' }, { tab: { id: 7 } })).toBeUndefined();
 
     // Register the actual follower bridge beside the core bridge. In Firefox,
     // a Promise claims the response channel even when it resolves undefined.

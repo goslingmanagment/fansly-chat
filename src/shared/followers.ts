@@ -25,8 +25,9 @@ export interface FollowersSnapshot {
   canContinue?: boolean;
   rows: FollowerRow[];
   error?: string;
+  debug?: { traceId: string };
 }
-export type FollowersResponse = { ok: true; snapshot?: FollowersSnapshot; text?: string } | { ok: false; error: string };
+export type FollowersResponse = { ok: true; snapshot?: FollowersSnapshot; text?: string } | { ok: false; error: string; debug?: { traceId: string } };
 
 export function followedAtFromId(value: string, now = Date.now()): number {
   if (!/^\d{1,24}$/.test(value)) throw new Error('Некорректная дата подписки Fansly.');
@@ -45,9 +46,14 @@ export function normalizeWelcome(text: string): string {
 export type FollowerMessageEvidence = Pick<FanslyMessage, 'id' | 'senderId' | 'type' | 'content' | 'correlationId' | 'inReplyTo'>;
 
 export function isAutomatedMessage(message: FollowerMessageEvidence, welcome: ReadonlySet<string>): boolean {
-  return message.type === 2 ||
-    Boolean(message.correlationId && message.correlationId !== '0' && (!message.inReplyTo || message.inReplyTo === '0')) ||
-    Boolean(normalizeWelcome(message.content ?? '') && welcome.has(normalizeWelcome(message.content ?? '')));
+  return automationReason(message, welcome) !== null;
+}
+
+export function automationReason(message: FollowerMessageEvidence, welcome: ReadonlySet<string>): 'type-2' | 'non-reply-correlation' | 'welcome-text-match' | null {
+  if (message.type === 2) return 'type-2';
+  if (message.correlationId && message.correlationId !== '0' && (!message.inReplyTo || message.inReplyTo === '0')) return 'non-reply-correlation';
+  const normalized = normalizeWelcome(message.content ?? '');
+  return normalized && welcome.has(normalized) ? 'welcome-text-match' : null;
 }
 
 export function isPersonalMessage(message: FollowerMessageEvidence, creatorId: string, welcome: ReadonlySet<string>): boolean {

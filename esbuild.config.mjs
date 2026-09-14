@@ -15,6 +15,7 @@ const pageEntryPoints = {
   popup: path.join(root, 'src/popup/index.ts'),
   // E28: the extension-origin viewer for the kernel's assembled prompt.
   'debug-prompt': path.join(root, 'src/debug-prompt/index.ts'),
+  'debug-followers': path.join(root, 'src/debug-followers/index.ts'),
 };
 const contentBootstrapEntryPoints = {
   content: path.join(root, 'src/content/bootstrap.ts'),
@@ -81,15 +82,18 @@ async function ensureStaticFiles() {
   const optionsHtml = await readFile(path.join(root, 'src/options/index.html'), 'utf8');
   const popupHtml = await readFile(path.join(root, 'src/popup/index.html'), 'utf8');
   const debugPromptHtml = await readFile(path.join(root, 'src/debug-prompt/index.html'), 'utf8');
+  const debugFollowersHtml = await readFile(path.join(root, 'src/debug-followers/index.html'), 'utf8');
   const manifest = await readFile(path.join(root, 'manifest.json'), 'utf8');
 
   await writeFile(path.join(outdir, 'options.html'), optionsHtml);
   await writeFile(path.join(outdir, 'popup.html'), popupHtml);
   await writeFile(path.join(outdir, 'debug-prompt.html'), debugPromptHtml);
+  await writeFile(path.join(outdir, 'debug-followers.html'), debugFollowersHtml);
   await writeFile(path.join(outdir, 'manifest.json'), manifest);
   await cp(path.join(root, 'src/options/styles.css'), path.join(outdir, 'options.css'));
   await cp(path.join(root, 'src/popup/styles.css'), path.join(outdir, 'popup.css'));
   await cp(path.join(root, 'src/debug-prompt/styles.css'), path.join(outdir, 'debug-prompt.css'));
+  await cp(path.join(root, 'src/debug-followers/styles.css'), path.join(outdir, 'debug-followers.css'));
   await cp(path.join(root, 'src/content/styles.css'), path.join(outdir, 'content.css'));
   // E111: the vault panel's sheet ships apart from content.css and is fetched
   // only when the launcher is pressed.
@@ -226,6 +230,7 @@ if (!watchMode) {
       'src/options/styles.css',
       'src/popup/styles.css',
       'src/debug-prompt/styles.css',
+      'src/debug-followers/styles.css',
       'src/content/styles.css',
       'src/content/vault/vault.css',
     ].map((relativePath) => ({

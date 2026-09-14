@@ -107,6 +107,8 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E94 | 2026-09-07 | Rewrite the 2.0 walkthrough in conversational Russian around chatter situations; preserve Voice-first order, technical parameters, readiness and all page behavior |
 | E95 | 2026-09-07 | Restore the main landing's full product story: everyday writing, context and analysis, Spenders, then one compact 2.0 chapter; responsive writing examples replace the main Coach demo |
 | E96 | 2026-09-07 | Give 2.0 more presence alongside the full product: early announcement, a Voice-led release chapter after writing, and illustrated Coach/Recap stories before the remaining core sections |
+| E118 | 2026-09-14 | New-follower debug runs: scoped HTTP and decision timeline, extension-only viewer, bounded memory and full text export |
+| E119 | 2026-09-14 | Minor release 2.3.0 authorized after independent review, larger diagnostic retention and 700-follower coverage; Telegram announcement deferred |
 
 ## Entries
 
@@ -3799,3 +3801,52 @@ Avatar host/length validation matches Core. Signed avatar metadata is refreshed
 on the explicit generation click, with a text-profile fallback if unavailable;
 the AI request is never automatically retried. Generation context uses the last
 30 messages, matching the history shown to the chatter and bounding its cost.
+
+
+**E118 (2026-09-14).** The existing `debugMode` switch opts a new-follower
+scan into a per-run diagnostic trace at startup; normal snapshots carry only
+an optional run id. The explicit scope follows each Fansly call, including
+GET retries and the single POST attempt, so concurrent rows/tabs cannot capture
+one another's traffic. No requests are introduced by tracing. Runtime state
+polls do not generate trace events.
+
+The trace records the actual HTTP method/path/query, response status, retry
+backoff, timeout/abort taxonomy, parent/fan correlation, UTC start time and
+`performance.now()` offsets/durations. Service events explain follower cutoffs,
+profile hydration, welcome cache/single-flight/freshness, personal-proof
+revalidation, message classification by ID, group membership, history pagination
+and delta overlap, final eligibility, pass continuation, identity rejection,
+generation metadata and send custody. Hub spans describe whole client operations,
+not an HTTP wire capture. Raw messages, prompts, request/response bodies, session
+headers, signed avatar URLs and arbitrary exception text are not recorded.
+
+`Отладка ↗` opens `debug-followers.html`; only that exact extension protocol,
+host and path may read diagnostics, and current debug mode is rechecked on
+access. The viewer polls incremental events, preserves readable output through
+failures, filters by fan/text/error, and exports the complete retained run as
+plain text even while the screen is filtered. Start failures and closed runs
+remain inspectable. The background retains the newest eight runs, each bounded
+by 100,000 events and 20,000,000 serialized characters, dropping oldest events
+with an explicit omission count. This is volatile background memory, cleared
+on restart; users save a text report for later sessions. No settings schema,
+Fansly eligibility, retry policy, send authority or Hub contract changes are
+introduced. The owner requested the larger per-run budget before release so
+700-follower diagnostic sessions have room for individual message checks;
+the eight-run retention limit is independent of the number of followers.
+The viewer renders 2,000 events per page to avoid laying out the entire large
+log on each update. Its initial page follows the newest events; page navigation,
+whole-run filtering and full export preserve access to every retained event.
+Review follow-ups restore fan options when switching between repeated runs
+with identical fans and mark a closed paused scan as closed, since it can no
+longer be continued.
+
+**E119 (2026-09-14).** The owner authorizes minor release 2.3.0 with E118,
+requires an independent pre-release correctness/architecture/regression review,
+and explicitly defers the Telegram announcement. Use the normal signed-release
+path with `SKIP_ANNOUNCE=1`; CHANGELOG validation still runs before signing.
+The larger trace budget is covered by a 700-follower service scenario with
+50 messages each: all classifications and verdicts are retained, while debug
+on/off produce identical outcomes and Fansly call counts. No real fan DMs are
+sent in release verification; account-by-account acceptance is a later owner
+session. This entry records authorization and source scope, not proof of live
+publication: verify the signed feed and release tag for deployment evidence.

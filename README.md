@@ -69,6 +69,33 @@ OpenRouter, or other provider keys into the extension.
 
 ## Development
 
+### New-follower diagnostics
+
+Enable **Режим отладки** in **Генерация → Служебное**, then open **Новые**
+(or refresh an already open follower window). **Отладка ↗** opens that run's
+live text journal in an extension tab. Select a run/account or fan, search events,
+filter errors, and use **Копировать весь лог** or **Сохранить .txt**. Exports
+always include the full retained run, regardless of screen filters.
+The viewer shows 2,000 events per page, initially the latest page; use **Ранее**,
+**Позже** or **К последним** to navigate. Search and filters cover the whole run.
+
+The journal records UTC timestamps and monotonic millisecond offsets/durations,
+actual Fansly HTTP attempts/statuses/backoffs, pagination, cache use, welcome
+refreshes, message classification by ID, eligibility reasons, continuation,
+generation and send preflights/custody. Hub spans measure whole client calls;
+they do not claim to be an HTTP wire trace. Message bodies, signed image URLs,
+credentials and AI prompts are excluded. Generation and sending remain explicit.
+
+Tracing is selected when the scan starts. The last eight runs remain in background
+memory after closing the follower window; an extension/background restart clears
+them. Each run retains at most 100,000 events and 20,000,000 serialized characters
+(whichever limit is reached first), with older-event omissions counted visibly.
+Save `.txt` before restarting/reloading. A viewer that already loaded a report
+can still export its last received snapshot if the background becomes unavailable.
+No settings migration or additional Fansly requests are required for diagnostics.
+
+### Checks
+
 ```bash
 pnpm check      # typecheck + lint + architecture gates + tests + build
 pnpm watch      # rebuild on source changes
@@ -87,9 +114,9 @@ Important references:
 
 ## Release
 
-Release candidate 2.2.0 adds the **Новые** button for direct Fansly follower
-review, explicit draft generation and one-attempt sending. It requires the
-paired Hub new-follower support deployed first. Release 2.1.3 is dated
+Release 2.3.0 adds the opt-in new-follower diagnostic journal described above.
+Release 2.2.0 adds the **Новые** button for direct Fansly follower review, explicit
+draft generation and one-attempt sending, with the paired Hub new-follower support. Release 2.1.3 is dated
 2026-09-11 (Ping reads the fan's names and bio, no
 seeded opener); 2.1.2 (the settings cabinet's review-tail fixes), 2.1.1 (the
 vault uploader off the shared content path, UTF-8 bundles) and 2.1.0 (the vault

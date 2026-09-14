@@ -23,6 +23,17 @@ function harness() {
 
 describe('followers window human actions', () => {
   afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); document.body.replaceChildren(); });
+  it('shows the debug opener only for a traced run and opens that exact run', async () => {
+    const h = harness();
+    await vi.waitFor(() => expect(h.root.querySelector('textarea')).not.toBeNull());
+    expect(h.root.querySelector<HTMLButtonElement>('.debug')?.hidden).toBe(true);
+    h.snapshot.debug = { traceId: h.snapshot.scanId };
+    h.root.querySelector<HTMLButtonElement>('.refresh')!.click();
+    await vi.waitFor(() => expect(h.root.querySelector<HTMLButtonElement>('.debug')?.hidden).toBe(false));
+    h.root.querySelector<HTMLButtonElement>('.debug')!.click();
+    expect(h.sendMessage.mock.calls.at(-1)?.[0]).toEqual({ type: 'followers', action: 'openDebug', traceId: h.snapshot.scanId });
+    h.window.close();
+  });
   it('opening, selecting and refreshing never generate; edited drafts survive selection', async () => {
     const h = harness();
     await vi.waitFor(() => expect(h.root.querySelector('textarea')).not.toBeNull());

@@ -7,10 +7,11 @@ import type { KernelFeatureGateway } from '../src/background/kernel-feature-gate
 import type { FanslyAccountResponse, FanslyMessage, PersistedState, SessionTemplate } from '../src/shared/types.js';
 import { createDefaultSettings } from '../src/shared/migrations.js';
 
-function harness() {
+function harness(debugMode = false) {
   const values: Record<string, unknown> = {};
   const session: SessionTemplate = { accountId: '1', resolvedAccountId: '1', resolvedUsername: 'creator', resolvedDisplayName: 'Creator', authorization: 'secret', fanslySessionId: 'session', fanslyClientId: 'client', latestTs: '1', latestCheck: 'check', routeChecks: {}, lastSeenAt: Date.now(), connected: true };
   const state: PersistedState = { schemaVersion: 16, settings: createDefaultSettings(), personalities: [], personaCatalog: [], personaCatalogSource: null, personaCatalogFetchedAt: null, accountMappings: {}, accountAliases: {}, knownAccounts: [] };
+  state.settings.debugMode = debugMode;
   let messages: FanslyMessage[] = [];
   const fansly = {
     getAuthenticatedAccount: vi.fn(async () => ({ id: '1', username: 'creator' })),
@@ -45,6 +46,140 @@ const msg = (overrides: Partial<FanslyMessage> = {}): FanslyMessage => ({ id: '4
 
 describe('followers scan and one-attempt send', () => {
   afterEach(() => vi.restoreAllMocks());
+  it('allocates and exposes no diagnostic trace when debug mode is off', async () => {
+    const h = harness(); const snapshot = await h.start();
+    expect(snapshot.debug).toBeUndefined();
+    expect(h.service.traces.list()).toEqual([]);
+    expect(h.service.debugInfo(7)).toBeUndefined();
+    expect(h.fansly.getFollowerPage.mock.calls[0]?.at(-1)).toBeUndefined();
+  });
+  it('retains every check for 700 followers with 50 messages each without changing scan outcomes or request counts', async () => {
+    const outcomes = [];
+    const requests = [];
+    const firstRelation = BigInt(Date.now() - 3600_000 - 1561494360000) << 22n;
+    const followers = Array.from({ length: 700 }, (_, i) => ({ id: String(firstRelation - BigInt(i)), followerId: String(i + 2) }));
+    for (const debugMode of [false, true]) {
+      const h = harness(debugMode);
+      for (let offset = 0; offset < followers.length; offset += 100) {
+        const page = followers.slice(offset, offset + 100);
+        h.fansly.getFollowerPage.mockResolvedValueOnce({ followers: page, aggregationData: { accounts: page.map(({ followerId }) => ({ id: followerId, username: `fan_${followerId}`, notes: [] })) } });
+      }
+      h.fansly.getFollowerPage.mockResolvedValue({ followers: [] });
+      h.fansly.listFanAccounts.mockResolvedValue({ fans: followers.slice(0, 100).map(({ followerId }) => ({ groupId: followerId, fanAccountId: followerId })), truncated: true });
+      h.fansly.findFollowerGroup.mockImplementation(async (fanId) => fanId);
+      h.fansly.getGroup.mockImplementation(async (groupId) => ({ users: [{ userId: '1' }, { userId: groupId }] }));
+      h.fansly.getMessagePage.mockImplementation(async (groupId, before) => ({
+        messages: before === '1' ? [] : Array.from({ length: 25 }, (_, i) => msg({ id: String((before ? 25 : 50) - i), groupId, content: 'auto welcome' })),
+        accountMedia: [], accountMediaBundles: [],
+      }));
+      const started = await h.service.start(7, 48);
+      await vi.waitFor(() => expect(h.service.state(7, started.scanId).scanning).toBe(false), { timeout: 5000 });
+      const snapshot = h.service.state(7, started.scanId);
+      expect(snapshot.error).toBeUndefined();
+      expect(snapshot.canContinue).toBe(false);
+      expect(snapshot.rows).toHaveLength(700);
+      expect(snapshot.rows.every((row) => row.status === 'ready')).toBe(true);
+      outcomes.push(snapshot.rows.map(({ id, status, messages }) => ({ id, status, messages })));
+      requests.push(Object.values(h.fansly).map((method) => method.mock.calls.length));
+      if (debugMode) {
+        const report = h.service.traces.get(snapshot.debug!.traceId)!.read();
+        expect(report.state).toBe('completed');
+        expect(report.droppedEvents).toBe(0);
+        expect(report.eventCount).toBeGreaterThan(20_000);
+        expect(report.events[0]?.seq).toBe(1);
+        expect(report.events.at(-1)?.name).toBe('scan.result');
+        const classified = new Map<string, number>();
+        for (const event of report.events) if (event.name === 'message.classify') classified.set(event.fanId!, (classified.get(event.fanId!) ?? 0) + 1);
+        expect(classified.size).toBe(700);
+        expect([...classified.values()].every((count) => count === 50)).toBe(true);
+        expect(report.counters['verdict.ready']).toBe(700);
+      }
+      expect(h.gateway.streamFeature).not.toHaveBeenCalled();
+      expect(h.fansly.sendFollowerMessage).not.toHaveBeenCalled();
+      h.service.close(7);
+    }
+    expect(outcomes[1]).toEqual(outcomes[0]);
+    expect(requests[1]).toEqual(requests[0]);
+  });
+  it('explains welcome, automation and fan-first decisions with message IDs, never message text or session secrets', async () => {
+    const h = harness(true);
+    h.setMessages([
+      msg({ content: 'auto welcome' }),
+      msg({ id: '41', type: 2, content: 'private mass message' }),
+      msg({ id: '42', correlationId: '100', content: 'private automation' }),
+      msg({ id: '43', senderId: '2', content: 'private fan question' }),
+    ]);
+    const snapshot = await h.start();
+    const trace = h.service.traces.get(snapshot.debug!.traceId)!;
+    const report = trace.read();
+    expect(report).toMatchObject({ id: snapshot.scanId, creatorId: '1', creatorName: 'creator', hours: 48, state: 'completed' });
+    expect(report.events.filter((event) => event.name === 'message.classify').map((event) => [event.fanId, event.data.messageId, event.data.reason])).toEqual([
+      ['2', '40', 'welcome-text-match'], ['2', '41', 'type-2'], ['2', '42', 'non-reply-correlation'], ['2', '43', 'fan-message'],
+    ]);
+    expect(report.events).toContainEqual(expect.objectContaining({ name: 'row.verdict', data: { status: 'reply', reason: 'fan-message-without-personal-dm' } }));
+    expect(report.events).toContainEqual(expect.objectContaining({ name: 'history.stop', data: { reason: 'empty-page' } }));
+    for (const text of ['auto welcome', 'private mass message', 'private automation', 'private fan question', 'secret', 'authorization']) expect(JSON.stringify(report)).not.toContain(text);
+    h.service.close(7);
+    expect(h.service.traces.get(snapshot.debug!.traceId)?.read().events.at(-1)?.name).toBe('window.close');
+    expect(h.gateway.streamFeature).not.toHaveBeenCalled();
+    expect(h.fansly.sendFollowerMessage).not.toHaveBeenCalled();
+  });
+  it('preserves a failed launch for inspection and recovers a failed row in the same trace', async () => {
+    const h = harness(true);
+    h.fansly.getAuthenticatedAccount.mockRejectedValueOnce(new Error('private upstream failure'));
+    await expect(h.service.start(7, 48)).rejects.toThrow();
+    const failed = h.service.traces.get(h.service.debugInfo(7)!.traceId)!;
+    expect(failed.info().state).toBe('error');
+    expect(failed.read().events).toContainEqual(expect.objectContaining({ name: 'identity.resolve', phase: 'error' }));
+    h.fansly.getMessagePage.mockRejectedValueOnce(new DOMException('timeout', 'TimeoutError'));
+    const snapshot = await h.start();
+    const trace = h.service.traces.get(snapshot.debug!.traceId)!;
+    expect(trace.info().state).toBe('paused');
+    expect(trace.read().events).toContainEqual(expect.objectContaining({ name: 'row.check', phase: 'error', fanId: '2', data: expect.objectContaining({ errorType: 'TimeoutError' }) }));
+    h.service.resume(7, snapshot.scanId);
+    await vi.waitFor(() => expect(h.service.state(7, snapshot.scanId).scanning).toBe(false));
+    expect(trace.info().state).toBe('completed');
+    expect(trace.read().events.filter((event) => event.name === 'scan.pass' && event.phase === 'start').map((event) => event.data.kind)).toEqual(['initial', 'continue']);
+    expect(h.fansly.getFollowerPage).toHaveBeenCalledOnce();
+    expect(h.service.traces.list()).toHaveLength(2);
+  });
+  it('keeps account runs separate and does not turn UI polling into trace events or requests', async () => {
+    const h = harness(true); const first = await h.start();
+    const firstTrace = h.service.traces.get(first.debug!.traceId)!;
+    const count = firstTrace.info().eventCount;
+    for (let i = 0; i < 5; i += 1) h.service.state(7, first.scanId);
+    expect(firstTrace.info().eventCount).toBe(count);
+    expect(h.fansly.getFollowerPage).toHaveBeenCalledOnce();
+    h.session.resolvedAccountId = '10'; h.session.resolvedUsername = 'other_creator';
+    h.fansly.getAuthenticatedAccount.mockResolvedValue({ id: '10', username: 'other_creator' });
+    h.fansly.getGroup.mockResolvedValue({ users: [{ userId: '10' }, { userId: '2' }] });
+    const second = await h.start(8);
+    expect(h.service.traces.get(second.debug!.traceId)?.info()).toMatchObject({ tabId: 8, creatorId: '10', creatorName: 'other_creator' });
+    expect(firstTrace.info()).toMatchObject({ tabId: 7, creatorId: '1', creatorName: 'creator', eventCount: count });
+    expect(JSON.stringify(firstTrace.read())).not.toContain('other_creator');
+    expect(second.debug!.traceId).not.toBe(first.debug!.traceId);
+  });
+  it('marks a closed paused trace as closed instead of offering continuation', async () => {
+    const h = harness(true);
+    h.fansly.getMessagePage.mockRejectedValueOnce(new DOMException('timeout', 'TimeoutError'));
+    const snapshot = await h.start();
+    const trace = h.service.traces.get(snapshot.debug!.traceId)!;
+    expect(trace.info().state).toBe('paused');
+    h.service.close(7);
+    expect(trace.info().state).toBe('closed');
+    expect(trace.read().events.at(-1)).toMatchObject({ name: 'window.close', data: { previous: 'paused' } });
+    expect(() => h.service.resume(7, snapshot.scanId)).toThrow();
+  });
+  it('records every send preflight and the ambiguous outcome without retrying a write', async () => {
+    const h = harness(true); const snapshot = await h.start();
+    h.fansly.sendFollowerMessage.mockRejectedValueOnce(new Error('connection lost'));
+    expect((await h.service.send(7, snapshot.scanId, '2', 'private draft')).rows[0]?.status).toBe('uncertain');
+    const report = h.service.traces.get(snapshot.debug!.traceId)!.read();
+    expect(report.events.filter((event) => event.name === 'row.check' && event.phase === 'start').map((event) => event.data.reason)).toEqual(['scan', 'before-send', 'after-reservation']);
+    expect(report.events).toContainEqual(expect.objectContaining({ name: 'send.result', data: expect.objectContaining({ status: 'uncertain', dispatched: true, custodyPersisted: true }) }));
+    expect(JSON.stringify(report)).not.toContain('private draft');
+    expect(h.fansly.sendFollowerMessage).toHaveBeenCalledOnce();
+  });
   it('scans on open without generating; a fan-first message becomes a reply', async () => {
     const h = harness(); h.setMessages([msg({ content: 'auto welcome' }), msg({ id: '41', senderId: '2', content: 'hey!' })]);
     const snapshot = await h.start();

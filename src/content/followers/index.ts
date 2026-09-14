@@ -8,9 +8,13 @@ const LABEL: Record<FollowerStatus, string> = {
 const canCompose = (row: FollowerRow) => row.status === 'ready' || row.status === 'reply';
 const draftKey = (creator: string, fan: string) => `chatgoose:followers:draft:v1:${creator}:${fan}`;
 
+class FollowersRequestError extends Error {
+  constructor(message: string, readonly debug?: { traceId: string }) { super(message); }
+}
+
 async function request(value: FollowersRequest): Promise<FollowersResponse & { ok: true }> {
   const response = await browser.runtime.sendMessage(value) as FollowersResponse;
-  if (!response?.ok) throw new Error(response?.error || 'Соединение с расширением прервалось. Откройте окно заново.');
+  if (!response?.ok) throw new FollowersRequestError(response?.error || 'Соединение с расширением прервалось. Откройте окно заново.', response?.debug);
   return response;
 }
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text?: string): HTMLElementTagNameMap[K] {
@@ -52,6 +56,7 @@ export class FollowersWindow {
   private detailKey = '';
   private previousFocus: Element | null = null;
   private readonly writes = new Map<string, Promise<void>>();
+  private debugTraceId: string | null = null;
 
   constructor() {
     const sheet = element('style', '');
@@ -60,7 +65,7 @@ export class FollowersWindow {
     this.dialog = element('dialog', 'window');
     // Static skeleton only; every platform/model string is assigned via textContent/value.
     this.dialog.innerHTML = `<header><div><h1>Новые фоловеры</h1><span class="creator"></span></div><button class="close icon" aria-label="Закрыть">×</button></header>
-      <div class="toolbar"><label>За <select aria-label="Период"></select></label><span class="progress" role="status"></span><button class="refresh icon" aria-label="Обновить список">↻</button></div>
+      <div class="toolbar"><label>За <select aria-label="Период"></select></label><button class="debug" hidden>Отладка ↗</button><span class="progress" role="status"></span><button class="refresh icon" aria-label="Обновить список">↻</button></div>
       <div class="error" role="alert" hidden></div><main><aside><nav><button class="pending active">Не писали</button><button class="all">Все</button></nav><div class="list" aria-label="Фоловеры"></div></aside><section class="detail"></section></main>`;
     this.dialog.setAttribute('aria-label', 'Новые фоловеры');
     this.shadow.append(this.dialog);
@@ -74,6 +79,9 @@ export class FollowersWindow {
     select.addEventListener('change', () => { this.hours = Number(select.value); void this.scan(); });
     this.node('.close').addEventListener('click', () => this.close());
     this.node('.refresh').addEventListener('click', () => { void (this.snapshot?.canContinue ? this.resume() : this.scan()); });
+    this.node('.debug').addEventListener('click', () => {
+      if (this.debugTraceId) void request({ type: 'followers', action: 'openDebug', traceId: this.debugTraceId }).catch((error: unknown) => this.showError((error as Error).message));
+    });
     this.node('.pending').addEventListener('click', () => { this.all = false; this.render(); });
     this.node('.all').addEventListener('click', () => { this.all = true; this.render(); });
     this.dialog.addEventListener('cancel', (event) => { event.preventDefault(); this.close(); });
@@ -112,11 +120,17 @@ export class FollowersWindow {
     const node = this.node('.error'); node.textContent = text; node.hidden = !text;
   }
 
+  private renderDebug(debug?: { traceId: string }): void {
+    this.debugTraceId = debug?.traceId ?? null;
+    this.node('.debug').hidden = !debug;
+  }
+
   private async scan(): Promise<void> {
     if (this.busy.size) { this.showError('Дождитесь текущей генерации или отправки.'); return; }
     const epoch = ++this.epoch;
     if (this.poll) clearTimeout(this.poll);
     this.snapshot = null; this.detailKey = ''; this.showError();
+    this.renderDebug();
     this.node('.creator').textContent = '';
     this.node('.progress').textContent = 'Подключаемся к Fansly…';
     this.node('.list').replaceChildren();
@@ -128,7 +142,7 @@ export class FollowersWindow {
       this.selected = null;
       this.render();
       this.schedulePoll(epoch);
-    } catch (error) { if (epoch === this.epoch) this.showError((error as Error).message); }
+    } catch (error) { if (epoch === this.epoch) { this.showError((error as Error).message); if (error instanceof FollowersRequestError) this.renderDebug(error.debug); } }
   }
 
   private async resume(): Promise<void> {
@@ -159,6 +173,7 @@ export class FollowersWindow {
   private render(): void {
     const snapshot = this.snapshot;
     if (!snapshot) return;
+    this.renderDebug(snapshot.debug);
     const pending = snapshot.rows.filter((row) => !['contacted', 'sent'].includes(row.status));
     const rows = this.all ? snapshot.rows : pending;
     this.node('.creator').textContent = `@${snapshot.creatorName}`;

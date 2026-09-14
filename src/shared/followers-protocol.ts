@@ -9,5 +9,11 @@ export const followersRequestSchema = z.discriminatedUnion('action', [
   z.object({ type: z.literal('followers'), action: z.literal('generate'), scanId: z.string().uuid(), fanId: id }).strict(),
   z.object({ type: z.literal('followers'), action: z.literal('send'), scanId: z.string().uuid(), fanId: id, historyRevision: z.string().uuid(), text: z.string().trim().min(1).max(5000) }).strict(),
   z.object({ type: z.literal('followers'), action: z.literal('close') }).strict(),
+  z.object({ type: z.literal('followers'), action: z.literal('openDebug'), traceId: z.string().uuid() }).strict(),
 ]);
 export type FollowersRequest = z.infer<typeof followersRequestSchema>;
+
+export const followersDebugRequestSchema = z.discriminatedUnion('action', [
+  z.object({ type: z.literal('followersDebug'), action: z.literal('list') }).strict(),
+  z.object({ type: z.literal('followersDebug'), action: z.literal('read'), traceId: z.string().uuid(), afterSeq: z.number().int().min(0).optional() }).strict(),
+]);

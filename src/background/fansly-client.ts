@@ -1,3 +1,4 @@
+import type { TraceScope } from './followers-trace.js';
 import {
   FANSLY_PAGINATION_DELAY_MS,
   FANSLY_MEDIA_PURCHASE_VERIFICATION_CACHE_TTL_MS,
@@ -346,6 +347,7 @@ export class FanslyClient {
     signal: AbortSignal,
     optional = false,
     retryPolicy: 'default' | 'none' = 'default',
+    trace?: TraceScope,
   ): Promise<T> {
     const maxAttempts = retryPolicy === 'none' ? 0 : FANSLY_RETRY_DELAYS_MS.length;
 
@@ -356,6 +358,8 @@ export class FanslyClient {
       const timeout = globalThis.setTimeout(() => controller.abort(), FANSLY_REQUEST_TIMEOUT_MS);
       const composite = AbortSignal.any([signal, controller.signal]);
       const requestTs = String(Date.now());
+      const requestUrl = withNgswBypass(url);
+      const attemptTrace = trace?.start('http', { method: 'GET', path: requestUrl.pathname, query: requestUrl.search, attempt: attempt + 1, timeoutMs: FANSLY_REQUEST_TIMEOUT_MS });
 
       try {
         const headers = new Headers({
@@ -370,12 +374,13 @@ export class FanslyClient {
           headers.set('fansly-client-check', routeCheck);
         }
 
-        const response = await fetch(withNgswBypass(url), {
+        const response = await fetch(requestUrl, {
           method: 'GET',
           headers,
           signal: composite,
           credentials: 'omit',
         });
+        attemptTrace?.event('http.response', { status: response.status });
 
         if (response.status === 401 || response.status === 403) {
           this.sessionStore.markDisconnected(session.accountId);
@@ -390,7 +395,9 @@ export class FanslyClient {
           const backoff = retryAfterMs !== undefined
             ? Math.min(retryAfterMs, FANSLY_RETRY_MAX_BACKOFF_MS)
             : FANSLY_RETRY_DELAYS_MS[attempt]!;
+          attemptTrace?.event('http.retry', { status: response.status, backoffMs: backoff, retryAfterMs });
           await delay(backoff, signal);
+          attemptTrace?.end({ outcome: 'retry', status: response.status });
           continue;
         }
 
@@ -424,8 +431,10 @@ export class FanslyClient {
           throw new ChatGooseError('fansly_server_error');
         }
 
+        attemptTrace?.end({ status: response.status, outcome: 'success' });
         return data.response;
       } catch (error) {
+        attemptTrace?.fail(error, { callerAborted: signal.aborted, requestTimedOut: controller.signal.aborted });
         if (error instanceof ChatGooseError) {
           throw error;
         }
@@ -443,6 +452,7 @@ export class FanslyClient {
     groupId: string,
     session: SessionTemplate,
     signal: AbortSignal,
+    trace?: TraceScope,
   ): Promise<{ users?: Array<{ userId: string }> }> {
     return this.fetchEnvelope<{ users?: Array<{ userId: string }> }>(
       new URL(`https://apiv3.fansly.com/api/v1/group/${groupId}/`),
@@ -450,34 +460,37 @@ export class FanslyClient {
       'group',
       signal,
       true,
+      'default',
+      trace,
     );
   }
 
-  async getFollowerPage(creatorId: string, before: string, session: SessionTemplate, signal: AbortSignal): Promise<{
+  async getFollowerPage(creatorId: string, before: string, session: SessionTemplate, signal: AbortSignal, trace?: TraceScope): Promise<{
     followers: Array<{ id: string; followerId: string }>;
     aggregationData?: { accounts?: FanslyAccountResponse[] };
   }> {
     const url = new URL(`https://apiv3.fansly.com/api/v1/account/${creatorId}/followersnew`);
     for (const [key, value] of Object.entries({ before, after: '0', limit: '100', offset: '0', search: '', lastSeenAfter: '' })) url.searchParams.set(key, value);
-    const result = await this.fetchEnvelope<{ followers: Array<{ id: string; followerId: string }>; aggregationData?: { accounts?: FanslyAccountResponse[] } }>(url, session, 'account', signal);
+    const result = await this.fetchEnvelope<{ followers: Array<{ id: string; followerId: string }>; aggregationData?: { accounts?: FanslyAccountResponse[] } }>(url, session, 'account', signal, false, 'default', trace);
     if (!Array.isArray(result.followers) || result.followers.some((v) => !v || !/^\d{1,24}$/.test(v.id) || !/^\d{1,24}$/.test(v.followerId))) throw new ChatGooseError('fansly_server_error');
     return result;
   }
 
-  async getWelcomeDefinitions(session: SessionTemplate, signal: AbortSignal): Promise<unknown> {
-    return this.fetchEnvelope<unknown>(new URL('https://apiv3.fansly.com/api/v1/message/automated'), session, 'message', signal);
+  async getWelcomeDefinitions(session: SessionTemplate, signal: AbortSignal, trace?: TraceScope): Promise<unknown> {
+    return this.fetchEnvelope<unknown>(new URL('https://apiv3.fansly.com/api/v1/message/automated'), session, 'message', signal, false, 'default', trace);
   }
 
   /** Complete native inbox search; malformed or bounded results are not absence. */
-  async findFollowerGroup(fanId: string, username: string, session: SessionTemplate, signal: AbortSignal): Promise<string | null> {
+  async findFollowerGroup(fanId: string, username: string, session: SessionTemplate, signal: AbortSignal, trace?: TraceScope): Promise<string | null> {
     if (!username.trim()) throw new ChatGooseError('fansly_server_error');
     const seen = new Set<string>();
     for (let offset = 0; offset < 2000; offset += 100) {
       const url = new URL('https://apiv3.fansly.com/api/v1/messaging/groups');
       for (const [key, value] of Object.entries({ sortOrder: '1', flags: '0', subscriptionTierId: '', listIds: '', search: username, limit: '100', offset: String(offset) })) url.searchParams.set(key, value);
-      const response = await this.fetchEnvelope<FanslyMessagingGroupsResponse>(url, session, 'messagingGroups', signal);
+      const response = await this.fetchEnvelope<FanslyMessagingGroupsResponse>(url, session, 'messagingGroups', signal, false, 'default', trace);
       if (!Array.isArray(response.data)) throw new ChatGooseError('fansly_server_error');
       const match = response.data.find((entry) => entry.partnerAccountId === fanId);
+      trace?.event('group.search-page', { offset, count: response.data.length, match: match?.groupId ?? null });
       if (match?.groupId && /^\d{1,24}$/.test(match.groupId)) return match.groupId;
       if (response.data.length < 100) return null;
       const cursor = response.data.at(-1)?.groupId;
@@ -489,7 +502,7 @@ export class FanslyClient {
 
   /** Writes never enter fetchEnvelope's read retry loop. Any failure after
    * dispatch is ambiguous to the caller and must remain in its durable journal. */
-  private async postOnce<T>(path: 'group' | 'message', body: unknown, session: SessionTemplate, signal: AbortSignal): Promise<T> {
+  private async postOnce<T>(path: 'group' | 'message', body: unknown, session: SessionTemplate, signal: AbortSignal, trace?: TraceScope): Promise<T> {
     const headers = new Headers({
       authorization: session.authorization,
       'fansly-client-id': session.fanslyClientId,
@@ -499,29 +512,35 @@ export class FanslyClient {
     });
     const check = session.routeChecks[path] ?? session.latestCheck;
     if (check) headers.set('fansly-client-check', check);
-    const response = await fetch(withNgswBypass(new URL(`https://apiv3.fansly.com/api/v1/${path}`)), {
-      method: 'POST', headers, body: JSON.stringify(body), credentials: 'omit',
-      signal: AbortSignal.any([signal, AbortSignal.timeout(FANSLY_REQUEST_TIMEOUT_MS)]),
-    });
-    if (!response.ok) throw new ChatGooseError('fansly_server_error');
-    const envelope = await response.json() as { success?: boolean; response?: T };
-    if (envelope.success !== true || !envelope.response) throw new ChatGooseError('fansly_server_error');
-    return envelope.response;
+    const requestUrl = withNgswBypass(new URL(`https://apiv3.fansly.com/api/v1/${path}`));
+    const attemptTrace = trace?.start('http', { method: 'POST', path: requestUrl.pathname, query: requestUrl.search, attempt: 1, retry: false, timeoutMs: FANSLY_REQUEST_TIMEOUT_MS });
+    try {
+      const response = await fetch(requestUrl, {
+        method: 'POST', headers, body: JSON.stringify(body), credentials: 'omit',
+        signal: AbortSignal.any([signal, AbortSignal.timeout(FANSLY_REQUEST_TIMEOUT_MS)]),
+      });
+      attemptTrace?.event('http.response', { status: response.status });
+      if (!response.ok) throw new ChatGooseError('fansly_server_error');
+      const envelope = await response.json() as { success?: boolean; response?: T };
+      if (envelope.success !== true || !envelope.response) throw new ChatGooseError('fansly_server_error');
+      attemptTrace?.end({ status: response.status, outcome: 'success' });
+      return envelope.response;
+    } catch (error) { attemptTrace?.fail(error); throw error; }
   }
 
-  async createFollowerGroup(fanId: string, creatorId: string, session: SessionTemplate, signal: AbortSignal): Promise<string> {
+  async createFollowerGroup(fanId: string, creatorId: string, session: SessionTemplate, signal: AbortSignal, trace?: TraceScope): Promise<string> {
     const group = await this.postOnce<{ id?: string; users?: Array<{ userId: string }> }>('group', {
       users: [{ userId: fanId, permissionFlags: 0 }, { userId: creatorId, permissionFlags: 0 }],
       recipients: [], lastMessage: null, userSettings: null, type: 1,
-    }, session, signal);
+    }, session, signal, trace);
     if (!group.id || !/^\d{1,24}$/.test(group.id) || group.users?.length !== 2 || !group.users.some((v) => v.userId === fanId) || !group.users.some((v) => v.userId === creatorId)) throw new ChatGooseError('fansly_server_error');
     return group.id;
   }
 
-  async sendFollowerMessage(groupId: string, text: string, creatorId: string, session: SessionTemplate, signal: AbortSignal): Promise<string> {
+  async sendFollowerMessage(groupId: string, text: string, creatorId: string, session: SessionTemplate, signal: AbortSignal, trace?: TraceScope): Promise<string> {
     const message = await this.postOnce<FanslyMessage>('message', {
       type: 1, content: text, groupId, attachments: [], likes: [], scheduledFor: 0, inReplyTo: null, createdAt: Date.now(),
-    }, session, signal);
+    }, session, signal, trace);
     if (!message.id || !/^\d{1,24}$/.test(message.id) || message.groupId !== groupId || message.senderId !== creatorId) throw new ChatGooseError('fansly_server_error');
     return message.id;
   }
@@ -534,11 +553,13 @@ export class FanslyClient {
   async getAuthenticatedAccount(
     session: SessionTemplate,
     signal: AbortSignal,
+    trace?: TraceScope,
   ): Promise<FanslyAccountResponse> {
     if (
       session.resolvedAccountId &&
       (session.resolvedUsername !== null || session.resolvedDisplayName !== null)
     ) {
+      trace?.event('identity.cache-hit', { creatorId: session.resolvedAccountId });
       return {
         id: session.resolvedAccountId,
         username: session.resolvedUsername,
@@ -551,6 +572,7 @@ export class FanslyClient {
       session,
       'account',
       signal,
+      false, 'default', trace,
     );
     const accountId = response.account?.id?.trim();
 
@@ -585,6 +607,7 @@ export class FanslyClient {
     before: string | null,
     session: SessionTemplate,
     signal: AbortSignal,
+    trace?: TraceScope,
   ): Promise<FanslyMessagePageResponse> {
     const url = new URL('https://apiv3.fansly.com/api/v1/message');
     url.searchParams.set('groupId', groupId);
@@ -592,7 +615,7 @@ export class FanslyClient {
     if (before) {
       url.searchParams.set('before', before);
     }
-    return this.fetchEnvelope<FanslyMessagePageResponse>(url, session, 'message', signal);
+    return this.fetchEnvelope<FanslyMessagePageResponse>(url, session, 'message', signal, false, 'default', trace);
   }
 
   private async getMediaOrderHistory(
@@ -722,6 +745,7 @@ export class FanslyClient {
     session: SessionTemplate,
     signal: AbortSignal,
     retryPolicy: 'default' | 'none' = 'default',
+    trace?: TraceScope,
   ): Promise<FanslyAccountResponse[]> {
     const url = new URL('https://apiv3.fansly.com/api/v1/account');
     url.searchParams.set('ids', ids.join(','));
@@ -732,6 +756,7 @@ export class FanslyClient {
       signal,
       true,
       retryPolicy,
+      trace,
     );
 
     if (Array.isArray(response)) {
@@ -782,6 +807,7 @@ export class FanslyClient {
     maxFans: number,
     session: SessionTemplate,
     signal: AbortSignal,
+    trace?: TraceScope,
   ): Promise<{ fans: Array<{ groupId: string; fanAccountId: string }>; truncated: boolean }> {
     const fans: Array<{ groupId: string; fanAccountId: string }> = [];
     const seen = new Set<string>();
@@ -802,8 +828,10 @@ export class FanslyClient {
         session,
         'messagingGroups',
         signal,
+        false, 'default', trace,
       );
       const groups = Array.isArray(response.data) ? response.data : [];
+      trace?.event('inbox.page', { offset, count: groups.length });
 
       for (const entry of groups) {
         const fanAccountId = entry.partnerAccountId;
@@ -824,6 +852,7 @@ export class FanslyClient {
       }
 
       offset += MESSAGING_GROUPS_PAGE_SIZE;
+      trace?.event('inbox.delay', { delayMs: FANSLY_PAGINATION_DELAY_MS });
       await delay(FANSLY_PAGINATION_DELAY_MS, signal);
     }
 

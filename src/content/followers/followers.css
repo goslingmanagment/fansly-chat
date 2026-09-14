@@ -54,3 +54,6 @@ nav button.active { color: #b95434; border-color: #d97757; }
 @media (max-width: 650px) { .window { max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); height: 720px; } main { grid-template-columns: 1fr; grid-template-rows: 180px 1fr; } aside { border-right: 0; border-bottom: 1px solid var(--line); } nav button { padding-top: 7px; padding-bottom: 5px; } .row { padding: 8px 16px; } .row-copy { flex: 1; } .profile, .composer { padding-left: 16px; padding-right: 16px; } .bio { margin: 0 16px 6px; max-height: 36px; } .history { padding: 8px 16px; } header { padding: 12px 16px; } }
 
 .refresh.resume { width: auto; padding: 0 8px; font-size: 12px; }
+.debug { font-size: 12px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; white-space: nowrap; }
+.debug[hidden] { display: none; }
+@media (max-width: 650px) { .toolbar { flex-wrap: wrap; gap: 6px; padding-left: 16px; } }
