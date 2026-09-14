@@ -109,6 +109,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E96 | 2026-09-07 | Give 2.0 more presence alongside the full product: early announcement, a Voice-led release chapter after writing, and illustrated Coach/Recap stories before the remaining core sections |
 | E118 | 2026-09-14 | New-follower debug runs: scoped HTTP and decision timeline, extension-only viewer, bounded memory and full text export |
 | E119 | 2026-09-14 | Minor release 2.3.0 authorized after independent review, larger diagnostic retention and 700-follower coverage; Telegram announcement deferred |
+| E120 | 2026-09-14 | Owner corrects release numbering to patch 2.2.1; withdraw 2.3.0 from update discovery, preserve the complete logger and release history |
 
 ## Entries
 
@@ -3850,3 +3851,26 @@ on/off produce identical outcomes and Fansly call counts. No real fan DMs are
 sent in release verification; account-by-account acceptance is a later owner
 session. This entry records authorization and source scope, not proof of live
 publication: verify the signed feed and release tag for deployment evidence.
+
+
+**E120 (2026-09-14).** The owner clarifies that the requested small release
+was patch 2.2.1 and explicitly authorizes correcting the published 2.3.0 number
+while keeping every implementation change. E119 incorrectly attributed the
+agent's SemVer interpretation to the owner; this entry corrects that record.
+
+The 2.3.0 tag and signed artifact remain immutable evidence. Its changelog entry
+is marked withdrawn, with the same implementation released as 2.2.1. Runtime,
+debug limits, settings schema, Kernel SDK, and send behavior do not change.
+Telegram posting remains prohibited for this release operation.
+
+To stop further discovery of the withdrawn number while awaiting a new Mozilla
+signature, restore the verified signed 2.2.0 package to the update feed and
+latest alias, after backing up the published feed/package/pages outside the
+web root. The owner-authorized withdrawal is separate from publishing 2.2.1;
+the normal deploy.sh path then sees 2.2.0 < 2.2.1 and retains every preflight,
+signing, hash, served-version, clean-main and tag check unchanged.
+Firefox does not automatically downgrade an installed 2.3.0; that installation
+would need a manual move to the corrected release. Pre-withdrawal server-log
+inspection saw only curl/Python verification downloads, which is evidence of
+requests, not an installation inventory. Verify the final feed and tag before
+calling the correction published.
