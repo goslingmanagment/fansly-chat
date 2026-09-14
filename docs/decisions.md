@@ -3750,7 +3750,7 @@ that reaches the page cap becomes unknown and cannot turn into a complete
 history merely by overlapping its own partial head on another send attempt.
 
 Generation is explicit only, over the Hub hi-greeting feature lane's scoped
-new-follower mode (Core 332). It produces one draft using profile values and an
+new-follower mode (Core 333). It produces one draft using profile values and an
 avatar image; legacy Hi remains three variants. No local prompt/vendor keys.
 Drafts are per creator/fan and persist on selection and window changes.
 
@@ -3764,7 +3764,7 @@ responses block replay; no auto-retry. Old clients/native Fansly/Fbuddy do not
 participate in the shared lock, so a final live check reduces but cannot remove
 that external race. Operational cache/custody keys do not change settings.
 
-Release candidate 2.2.0 requires Core 332 deployed first. No real fan DM is sent
+Release candidate 2.2.0 requires Core 333 deployed first. No real fan DM is sent
 by the automated tests or release verification.
 
 The shared runtime listener declines foreign and invalid message families
