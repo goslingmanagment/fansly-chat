@@ -291,6 +291,30 @@ async function installRuntimeApiHarness(fanslyClient: {
   };
 }
 
+describe('runtime-api message ownership', () => {
+  it('declines follower requests synchronously so their dedicated listener can respond', async () => {
+    await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn(async () => null) });
+    const coreListener = onMessageListener!;
+    expect(coreListener({ type: 'followers', action: 'scan', hours: 48 }, { tab: { id: 7 } })).toBeUndefined();
+
+    // Register the actual follower bridge beside the core bridge. In Firefox,
+    // a Promise claims the response channel even when it resolves undefined.
+    const { registerFollowersRuntime } = await import('../src/background/followers-runtime.js');
+    Object.assign(browser.runtime, { id: 'chatgoose@test' });
+    Object.assign(browser.tabs, { onRemoved: { addListener: vi.fn() } });
+    const snapshot = { scanId: '11111111-1111-4111-8111-111111111111' };
+    const start = vi.fn(async () => snapshot);
+    registerFollowersRuntime({ start } as never);
+    const followersListener = onMessageListener!;
+    const sender = { id: 'chatgoose@test', frameId: 0, tab: { id: 7 }, url: 'https://fansly.com/' };
+    const responses = [coreListener, followersListener].map((listener) => listener({ type: 'followers', action: 'scan', hours: 48 }, sender)).filter((response) => response !== undefined);
+    expect(responses).toHaveLength(1);
+    await expect(responses[0]).resolves.toEqual({ ok: true, snapshot });
+    expect(start).toHaveBeenCalledWith(7, 48);
+    expect(followersListener({ type: 'getSessionsSnapshot' }, sender)).toBeUndefined();
+  });
+});
+
 describe('runtime-api storage readiness barrier', () => {
   beforeEach(() => {
     mockStorage = {};
@@ -430,8 +454,8 @@ describe('runtime-api boundary guard', () => {
 
     const { tabsGet, tabsQuery } = await installRuntimeApiHarness(fanslyClient);
 
-    await expect(onMessageListener?.({ type: 'unknown' })).resolves.toBeUndefined();
-    await expect(onMessageListener?.({ type: 'getPopupStatus', tabId: '1' })).resolves.toBeUndefined();
+    expect(onMessageListener?.({ type: 'unknown' })).toBeUndefined();
+    expect(onMessageListener?.({ type: 'getPopupStatus', tabId: '1' })).toBeUndefined();
 
     expect(tabsGet).not.toHaveBeenCalled();
     expect(tabsQuery).not.toHaveBeenCalled();
@@ -2903,9 +2927,9 @@ describe('runtime-api accounts view', () => {
     });
 
     // An unroutable request is dropped by the protocol guard, not half-applied.
-    await expect(
+    expect(
       harness.send({ type: 'setAccountLabel', accountId: '   ', label: 'x' }),
-    ).resolves.toBeUndefined();
+    ).toBeUndefined();
     // The settings blob is untouched by any of this: labels are operational.
     expect((mockStorage.settings as Record<string, unknown>).accountLabels).toBeUndefined();
   });

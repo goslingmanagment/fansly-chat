@@ -49,6 +49,7 @@ import type {
   FanslyMediaOrderHistoryResponse,
   FanslyMessagingGroupsResponse,
   FanslyMessagePageResponse,
+  FanslyMessage,
   FanslySubscriberSubscriptionRecord,
   FanslySubscribersResponse,
   FanSubscriptionContext,
@@ -450,6 +451,79 @@ export class FanslyClient {
       signal,
       true,
     );
+  }
+
+  async getFollowerPage(creatorId: string, before: string, session: SessionTemplate, signal: AbortSignal): Promise<{
+    followers: Array<{ id: string; followerId: string }>;
+    aggregationData?: { accounts?: FanslyAccountResponse[] };
+  }> {
+    const url = new URL(`https://apiv3.fansly.com/api/v1/account/${creatorId}/followersnew`);
+    for (const [key, value] of Object.entries({ before, after: '0', limit: '100', offset: '0', search: '', lastSeenAfter: '' })) url.searchParams.set(key, value);
+    const result = await this.fetchEnvelope<{ followers: Array<{ id: string; followerId: string }>; aggregationData?: { accounts?: FanslyAccountResponse[] } }>(url, session, 'account', signal);
+    if (!Array.isArray(result.followers) || result.followers.some((v) => !v || !/^\d{1,24}$/.test(v.id) || !/^\d{1,24}$/.test(v.followerId))) throw new ChatGooseError('fansly_server_error');
+    return result;
+  }
+
+  async getWelcomeDefinitions(session: SessionTemplate, signal: AbortSignal): Promise<unknown> {
+    return this.fetchEnvelope<unknown>(new URL('https://apiv3.fansly.com/api/v1/message/automated'), session, 'message', signal);
+  }
+
+  /** Complete native inbox search; malformed or bounded results are not absence. */
+  async findFollowerGroup(fanId: string, username: string, session: SessionTemplate, signal: AbortSignal): Promise<string | null> {
+    if (!username.trim()) throw new ChatGooseError('fansly_server_error');
+    const seen = new Set<string>();
+    for (let offset = 0; offset < 2000; offset += 100) {
+      const url = new URL('https://apiv3.fansly.com/api/v1/messaging/groups');
+      for (const [key, value] of Object.entries({ sortOrder: '1', flags: '0', subscriptionTierId: '', listIds: '', search: username, limit: '100', offset: String(offset) })) url.searchParams.set(key, value);
+      const response = await this.fetchEnvelope<FanslyMessagingGroupsResponse>(url, session, 'messagingGroups', signal);
+      if (!Array.isArray(response.data)) throw new ChatGooseError('fansly_server_error');
+      const match = response.data.find((entry) => entry.partnerAccountId === fanId);
+      if (match?.groupId && /^\d{1,24}$/.test(match.groupId)) return match.groupId;
+      if (response.data.length < 100) return null;
+      const cursor = response.data.at(-1)?.groupId;
+      if (!cursor || seen.has(cursor)) break;
+      seen.add(cursor);
+    }
+    throw new ChatGooseError('fansly_server_error');
+  }
+
+  /** Writes never enter fetchEnvelope's read retry loop. Any failure after
+   * dispatch is ambiguous to the caller and must remain in its durable journal. */
+  private async postOnce<T>(path: 'group' | 'message', body: unknown, session: SessionTemplate, signal: AbortSignal): Promise<T> {
+    const headers = new Headers({
+      authorization: session.authorization,
+      'fansly-client-id': session.fanslyClientId,
+      'fansly-client-ts': String(Date.now()),
+      'fansly-session-id': session.fanslySessionId,
+      'content-type': 'application/json',
+    });
+    const check = session.routeChecks[path] ?? session.latestCheck;
+    if (check) headers.set('fansly-client-check', check);
+    const response = await fetch(withNgswBypass(new URL(`https://apiv3.fansly.com/api/v1/${path}`)), {
+      method: 'POST', headers, body: JSON.stringify(body), credentials: 'omit',
+      signal: AbortSignal.any([signal, AbortSignal.timeout(FANSLY_REQUEST_TIMEOUT_MS)]),
+    });
+    if (!response.ok) throw new ChatGooseError('fansly_server_error');
+    const envelope = await response.json() as { success?: boolean; response?: T };
+    if (envelope.success !== true || !envelope.response) throw new ChatGooseError('fansly_server_error');
+    return envelope.response;
+  }
+
+  async createFollowerGroup(fanId: string, creatorId: string, session: SessionTemplate, signal: AbortSignal): Promise<string> {
+    const group = await this.postOnce<{ id?: string; users?: Array<{ userId: string }> }>('group', {
+      users: [{ userId: fanId, permissionFlags: 0 }, { userId: creatorId, permissionFlags: 0 }],
+      recipients: [], lastMessage: null, userSettings: null, type: 1,
+    }, session, signal);
+    if (!group.id || !/^\d{1,24}$/.test(group.id) || group.users?.length !== 2 || !group.users.some((v) => v.userId === fanId) || !group.users.some((v) => v.userId === creatorId)) throw new ChatGooseError('fansly_server_error');
+    return group.id;
+  }
+
+  async sendFollowerMessage(groupId: string, text: string, creatorId: string, session: SessionTemplate, signal: AbortSignal): Promise<string> {
+    const message = await this.postOnce<FanslyMessage>('message', {
+      type: 1, content: text, groupId, attachments: [], likes: [], scheduledFor: 0, inReplyTo: null, createdAt: Date.now(),
+    }, session, signal);
+    if (!message.id || !/^\d{1,24}$/.test(message.id) || message.groupId !== groupId || message.senderId !== creatorId) throw new ChatGooseError('fansly_server_error');
+    return message.id;
   }
 
   async getAuthenticatedAccountId(session: SessionTemplate, signal: AbortSignal): Promise<string> {

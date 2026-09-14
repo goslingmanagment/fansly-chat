@@ -363,6 +363,8 @@ export interface FanslyMessage {
   attachments: FanslyAttachment[];
   embeds: unknown[];
   totalTipAmount?: number;
+  correlationId?: string | null;
+  inReplyTo?: string | null;
 }
 
 export interface FanslyMediaPermissionFlag {
@@ -465,10 +467,18 @@ export interface FanslyAccountResponse {
   username?: string | null;
   displayName?: string | null;
   about?: string | null;
+  avatar?: FanslyAvatar | null;
   /** Creator-session account notes. contentType 12002 carries the creator's
    * custom display name for this fan (Fansly's native "change display names —
    * it's for your eyes only" rename); the note text IS the name. */
   notes?: FanslyAccountNote[] | null;
+}
+
+export interface FanslyAvatar {
+  width?: number;
+  location?: string | null;
+  locations?: Array<{ location: string; metadata?: Record<string, unknown> | null }>;
+  variants?: FanslyAvatar[];
 }
 
 // ─── Earnings ────────────────────────────────────────────────────────────

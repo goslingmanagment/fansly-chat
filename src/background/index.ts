@@ -22,6 +22,8 @@ import { VoiceAttemptRepository } from './voice-attempt-store.js';
 import { VoiceService } from './voice-service.js';
 import { VOICE_CAPABILITY_BUDGET_MS } from '../shared/constants.js';
 import { readStorageState } from '../shared/storage.js';
+import { FollowersService } from './followers-service.js';
+import { registerFollowersRuntime } from './followers-runtime.js';
 
 // ─── Composition Root (DI, no module-level mutable state) ───────────────
 
@@ -60,6 +62,10 @@ const kernelGateway = createKernelFeatureGateway(
   undefined,
   () => personaCatalog.refresh(),
 );
+registerFollowersRuntime(new FollowersService({
+  fansly: fanslyClient, sessions: sessionStore, gateway: kernelGateway, hub: agencyHubClient,
+  readState: readStorageState, storage: browser.storage.local,
+}));
 const voiceService = new VoiceService({
   kernelGateway,
   agencyHubClient,

@@ -244,6 +244,17 @@ export class AgencyHubClient {
     return createClient(this.sdkOptions(baseUrl, bearer, signal));
   }
 
+  async followerOutreachAttempt(settings: Settings, pageLabel: string, body: {
+    fanRef: string; attemptId: string; action: 'reserve' | 'dispatch' | 'sent'; messageRef?: string;
+  }, signal: AbortSignal) {
+    const baseUrl = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
+    const bearer = resolveHubBearer(settings);
+    if (!baseUrl || !bearer) throw new ChatGooseError('hub_missing_api_key');
+    try {
+      return await this.sdkFor(baseUrl, bearer, signal).followerOutreachAttempt({ params: { pageLabel }, body });
+    } catch (error) { throw this.toHubError(error, 'follower outreach'); }
+  }
+
   /** Map SDK failures back onto the public contract the callers already
    * handle: HTTP errors become ChatGooseError keys, aborts resurface as
    * AbortError DOMExceptions, and plain network failures rethrow as bare
