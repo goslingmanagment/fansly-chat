@@ -5,7 +5,7 @@ import { ChatGooseError, toUserError } from '../shared/errors.js';
 import { formatTranscriptForKernel } from '../shared/transcript.js';
 import {
   automationReason, fanslyAvatarUrl, followedAtFromId, isAutomatedMessage, isPersonalMessage,
-  normalizeWelcome, welcomeTexts, type FollowerMessageEvidence, type FollowerRow, type FollowersSnapshot,
+  normalizeWelcome, welcomeTexts, type FollowerDisplayMessage, type FollowerMessageEvidence, type FollowerRow, type FollowersSnapshot,
 } from '../shared/followers.js';
 import type { FanslyAccountResponse, FanslyMessage, PersistedState, SessionTemplate } from '../shared/types.js';
 import type { AgencyHubClient } from './agency-hub-client.js';
@@ -22,6 +22,8 @@ interface Scan {
   session: SessionTemplate;
   snapshot: FollowersSnapshot;
   controller: AbortController;
+  passController: AbortController;
+  conversationCursors: Map<string, string | null>;
   profiles: Map<string, FanslyAccountResponse>;
   histories: Map<string, FanslyMessage[]>;
   groups: Map<string, string | null>;
@@ -87,6 +89,8 @@ export class FollowersService {
       current.accountId !== scan.session.accountId || current.resolvedAccountId !== scan.snapshot.creatorId ||
       current.authorization !== scan.session.authorization || current.fanslySessionId !== scan.session.fanslySessionId) {
       scan.trace?.event('identity.rejected', { currentScan: this.scans.get(scan.tabId) === scan, connected: current?.connected ?? false, sameAccount: current?.accountId === scan.session.accountId, sameCreator: current?.resolvedAccountId === scan.snapshot.creatorId, sameAuthorization: current?.authorization === scan.session.authorization, sameSession: current?.fanslySessionId === scan.session.fanslySessionId });
+      scan.controller.abort();
+      if (scan.trace && ['starting', 'scanning', 'paused'].includes(scan.trace.info().state)) scan.trace.update({ state: 'closed' });
       throw new ChatGooseError('chat_changed');
     }
     scan.controller.signal.throwIfAborted();
@@ -100,7 +104,9 @@ export class FollowersService {
   }
 
   state(tabId: number, scanId: string): FollowersSnapshot {
-    return structuredClone(this.get(tabId, scanId).snapshot);
+    const scan = this.get(tabId, scanId);
+    scan.snapshot.pacing = this.options.fansly.followerReadStatus(scan.session);
+    return structuredClone(scan.snapshot);
   }
 
   async start(tabId: number, hours: number): Promise<FollowersSnapshot> {
@@ -120,12 +126,13 @@ export class FollowersService {
       const auth = session.authorization;
       const creator = await traced(opening, 'identity.resolve', (scope) => this.options.fansly.getAuthenticatedAccount(session, AbortSignal.timeout(20_000), scope));
       if (this.starts.get(tabId) !== start || this.options.sessions.getSessionForTab(tabId) !== session || session.authorization !== auth) throw new ChatGooseError('chat_changed');
+      const startedAt = Date.now();
       const scan: Scan = {
         trace,
-        tabId, session: structuredClone(session), controller: new AbortController(),
+        tabId, session: this.options.fansly.followerSession(session, () => this.assertCurrent(scan)), controller: new AbortController(), passController: new AbortController(), conversationCursors: new Map(),
         profiles: new Map(), histories: new Map(), groups: new Map(), completeHistories: new Set(), welcome: new Set(),
-        startedAt: Date.now(), welcomeCheckedAt: 0,
-        snapshot: { scanId, creatorId: creator.id, creatorName: creator.username || creator.displayName || creator.id, hours, scanning: true, rows: [], ...(trace ? { debug: { traceId: scanId } } : {}) },
+        startedAt, welcomeCheckedAt: 0,
+        snapshot: { scanId, creatorId: creator.id, creatorName: creator.username || creator.displayName || creator.id, hours, scanning: true, phase: 'welcome', startedAt, rows: [], ...(trace ? { debug: { traceId: scanId } } : {}) },
       };
       this.scans.set(tabId, scan);
       trace?.update({ creatorId: creator.id, creatorName: scan.snapshot.creatorName, state: 'scanning' });
@@ -180,7 +187,7 @@ export class FollowersService {
       // Account-scoped single-flight is independent of an individual window's
       // cancellation. A closed tab must not poison another tab's welcome read.
       const work = (async () => {
-        const raw = await this.options.fansly.getWelcomeDefinitions(scan.session, AbortSignal.timeout(30_000), scope);
+        const raw = await this.options.fansly.getWelcomeDefinitions(this.options.fansly.followerSession(scan.session), new AbortController().signal, scope);
         const texts = [...new Set([...old, ...welcomeTexts(raw)])];
         const checkedAt = Date.now();
         await traced(scope, 'welcome.cache-write', () => this.options.storage.set({ [storageKey]: { texts, checkedAt } }), { count: texts.length });
@@ -199,7 +206,7 @@ export class FollowersService {
     }, { fresh });
   }
 
-  private async ensureFreshWelcome(scan: Scan, scope?: TraceScope): Promise<void> {
+  private async ensureFreshWelcome(scan: Scan, scope?: TraceScope, signal = scan.controller.signal): Promise<void> {
     if (scan.welcomeCheckedAt >= scan.startedAt) { scope?.event('welcome.already-fresh', { checkedAt: scan.welcomeCheckedAt }); return; }
     scope?.event('welcome.refresh-required', { joining: Boolean(scan.welcomeRefresh) });
     scan.welcomeRefresh ??= this.loadWelcome(scan, true, scope).then((value) => {
@@ -210,7 +217,12 @@ export class FollowersService {
       scan.welcomeRefresh = undefined;
       throw error;
     });
-    await scan.welcomeRefresh;
+    await new Promise<void>((resolve, reject) => {
+      const aborted = () => { signal.removeEventListener('abort', aborted); reject(signal.reason); };
+      signal.addEventListener('abort', aborted, { once: true });
+      void scan.welcomeRefresh!.then(() => { signal.removeEventListener('abort', aborted); resolve(); }, (error: unknown) => { signal.removeEventListener('abort', aborted); reject(error); });
+      if (signal.aborted) aborted();
+    });
   }
 
   private async run(scan: Scan): Promise<void> {
@@ -218,9 +230,11 @@ export class FollowersService {
     scan.welcome = welcome.texts;
     scan.welcomeCheckedAt = welcome.checkedAt;
     this.assertCurrent(scan);
-    const signal = AbortSignal.any([scan.controller.signal, AbortSignal.timeout(180_000)]);
-    const cutoff = Date.now() - scan.snapshot.hours * 3600_000;
-    scan.trace?.event('followers.discovery', { cutoff, maxPages: 20, pageSize: 100, timeoutMs: 180_000 });
+    const signal = scan.controller.signal;
+    const cutoff = scan.startedAt - scan.snapshot.hours * 3600_000;
+    scan.snapshot.cutoff = cutoff;
+    scan.snapshot.phase = 'followers';
+    scan.trace?.event('followers.discovery', { cutoff, until: scan.startedAt, maxPages: 20, pageSize: 100 });
     let before = '0';
     const cursors = new Set<string>();
     const fans = new Set<string>();
@@ -234,8 +248,8 @@ export class FollowersService {
       for (const relation of page.followers) {
         const followedAt = followedAtFromId(relation.id);
         oldest = Math.min(oldest, followedAt);
-        scan.trace?.event('followers.relation', { fanId: relation.followerId, relationId: relation.id, followedAt, decision: followedAt < cutoff ? 'outside-period' : fans.has(relation.followerId) ? 'duplicate' : 'check' });
-        if (followedAt < cutoff || fans.has(relation.followerId)) continue;
+        scan.trace?.event('followers.relation', { fanId: relation.followerId, relationId: relation.id, followedAt, decision: followedAt < cutoff ? 'outside-period' : followedAt > scan.startedAt ? 'after-scan-start' : fans.has(relation.followerId) ? 'duplicate' : 'check' });
+        if (followedAt < cutoff || followedAt > scan.startedAt || fans.has(relation.followerId)) continue;
         fans.add(relation.followerId);
         scan.snapshot.rows.push({ id: relation.followerId, followedAt, username: '', displayName: relation.followerId, customName: null, avatarUrl: null, bio: '', status: 'checking', historyRevision: crypto.randomUUID(), messages: [] });
       }
@@ -263,7 +277,12 @@ export class FollowersService {
           if (fans.has(fan.fanAccountId)) scan.groups.set(fan.fanAccountId, fan.groupId);
         }
         scan.trace?.event('inbox.index-result', { count: recent.fans.length, matched: scan.groups.size, truncated: recent.truncated });
-      } catch { scan.trace?.event('inbox.fallback', { reason: 'index-unavailable', next: 'per-fan-search' }); this.assertCurrent(scan); }
+      } catch (error) {
+        this.assertCurrent(scan);
+        const limited = error instanceof ChatGooseError && error.key === 'rate_limited';
+        scan.trace?.event('inbox.fallback', { reason: limited ? 'rate-limit-exhausted' : 'index-unavailable', next: limited ? 'pause' : 'per-fan-search' });
+        if (limited) scan.passController.abort();
+      }
     }
     await this.checkRows(scan);
   }
@@ -271,6 +290,7 @@ export class FollowersService {
   resume(tabId: number, scanId: string): FollowersSnapshot {
     const scan = this.get(tabId, scanId);
     if (scan.snapshot.scanning || !scan.snapshot.canContinue) return structuredClone(scan.snapshot);
+    scan.passController = new AbortController();
     scan.snapshot.scanning = true;
     scan.snapshot.canContinue = false;
     scan.trace?.update({ state: 'scanning' });
@@ -282,11 +302,22 @@ export class FollowersService {
     return structuredClone(scan.snapshot);
   }
 
+  pause(tabId: number, scanId: string): FollowersSnapshot {
+    const scan = this.get(tabId, scanId);
+    if (scan.snapshot.scanning && ['profiles', 'checking'].includes(scan.snapshot.phase ?? '')) {
+      scan.trace?.event('scan.pause', { reason: 'human-action' });
+      scan.passController.abort();
+    }
+    return this.state(tabId, scanId);
+  }
+
   private async checkRows(scan: Scan): Promise<void> {
     const rows = scan.snapshot.rows.filter((row) => ['checking', 'unknown'].includes(row.status));
-    const deadline = Date.now() + 180_000;
-    scan.trace?.event('rows.queue', { count: rows.length, workers: 3, rowTimeoutMs: 45_000, passBudgetMs: 180_000 });
-    const signal = () => AbortSignal.any([scan.controller.signal, AbortSignal.timeout(45_000)]);
+    scan.snapshot.phase = 'profiles';
+    scan.trace?.event('rows.queue', { count: rows.length, workers: 3, requestPacing: 'creator-fifo', pause: 'human-action' });
+    // Queue spacing/cooldowns are not failed checks. Each actual HTTP attempt
+    // still has its own timeout; pagination is bounded, and the user can pause.
+    const signal = AbortSignal.any([scan.controller.signal, scan.passController.signal]);
     const skipped = new Set<string>();
     for (const row of rows) { row.status = 'checking'; row.detail = undefined; }
     // Batch profile hydration is optional for the other fans: one failed
@@ -295,19 +326,20 @@ export class FollowersService {
     scan.trace?.event('profiles.plan', { hydrated: rows.length - missing.length, missing: missing.length, batchSize: 50 });
     for (let offset = 0; offset < missing.length; offset += 50) {
       this.assertCurrent(scan);
-      if (Date.now() >= deadline) {
+      if (signal.aborted) {
         for (const row of missing.slice(offset)) skipped.add(row.id);
         break;
       }
       const batch = missing.slice(offset, offset + 50);
       try {
-        const accounts = await traced(scan.trace, 'profiles.batch', (scope) => this.options.fansly.getAccountNames(batch.map((row) => row.id), scan.session, signal(), 'default', scope), { offset, count: batch.length });
+        const accounts = await traced(scan.trace, 'profiles.batch', (scope) => this.options.fansly.getAccountNames(batch.map((row) => row.id), scan.session, signal, 'default', scope), { offset, count: batch.length });
         this.assertCurrent(scan);
         for (const account of accounts) scan.profiles.set(account.id, { ...scan.profiles.get(account.id), ...account });
         scan.trace?.event('profiles.batch-result', { requested: batch.length, returned: accounts.length });
       } catch (error) {
         this.assertCurrent(scan);
         for (const row of batch) { skipped.add(row.id); row.status = 'unknown'; row.detail = errorText(error); scan.trace?.event('row.verdict', { fanId: row.id, status: row.status, reason: 'profile-read-failed' }); }
+        if (error instanceof ChatGooseError && error.key === 'rate_limited') scan.passController.abort();
       }
     }
     for (const row of rows) {
@@ -318,19 +350,26 @@ export class FollowersService {
       row.customName = profile ? customNameFromAccount(profile) : null;
       row.avatarUrl = profile ? fanslyAvatarUrl(profile) : null;
     }
+    scan.snapshot.phase = 'checking';
     const queue = rows.filter((row) => !skipped.has(row.id));
     await Promise.all(Array.from({ length: Math.min(3, queue.length) }, async () => {
-      while (Date.now() < deadline) {
+      while (!signal.aborted) {
         this.assertCurrent(scan);
         const row = queue.shift();
         if (!row) return;
-        try { await this.check(scan, row, signal()); }
-        catch (error) { row.status = 'unknown'; row.detail = errorText(error); scan.trace?.event('row.verdict', { fanId: row.id, status: row.status, reason: 'check-failed' }); }
+        try { await this.check(scan, row, signal); }
+        catch (error) {
+          row.status = 'unknown'; row.detail = signal.aborted ? 'Проверка на паузе. Нажмите «Продолжить».' : errorText(error);
+          scan.trace?.event('row.verdict', { fanId: row.id, status: row.status, reason: signal.aborted ? 'paused' : 'check-failed' });
+          // Repeated throttling stops the pass instead of spending the same
+          // exhausted retry budget on every remaining fan.
+          if (error instanceof ChatGooseError && error.key === 'rate_limited') scan.passController.abort();
+        }
       }
     }));
     for (const row of rows) if (row.status === 'checking') {
       row.status = 'unknown'; row.detail = 'Проверка приостановлена. Нажмите «Продолжить».';
-      scan.trace?.event('row.verdict', { fanId: row.id, status: row.status, reason: 'pass-deadline' });
+      scan.trace?.event('row.verdict', { fanId: row.id, status: row.status, reason: 'paused' });
     }
     scan.snapshot.canContinue = rows.some((row) => row.status === 'unknown');
   }
@@ -354,6 +393,69 @@ export class FollowersService {
     });
   }
 
+  private displayMessage(scan: Scan, message: FollowerMessageEvidence & Partial<Pick<FanslyMessage, 'attachments'>>): FollowerDisplayMessage {
+    let createdAt = message.createdAt ? message.createdAt * 1000 : undefined;
+    if (!createdAt) {
+      try { createdAt = followedAtFromId(message.id); } catch { /* Old proof formats may have no usable date. */ }
+    }
+    return {
+      id: message.id, own: message.senderId === scan.snapshot.creatorId,
+      automated: message.senderId === scan.snapshot.creatorId && isAutomatedMessage(message, scan.welcome),
+      text: message.content || (message.attachments?.length ? '[Медиа]' : '[Системное сообщение]'), createdAt,
+    };
+  }
+
+  /** A read-only conversation preview for excluded fans. It cannot change
+   * eligibility, completeness evidence, reviewed revisions or send custody. */
+  conversation(tabId: number, scanId: string, fanId: string, older = false): FollowersSnapshot {
+    const scan = this.get(tabId, scanId);
+    const row = scan.snapshot.rows.find((value) => value.id === fanId);
+    if (!row || !['contacted', 'sent'].includes(row.status)) throw new Error('Дождитесь окончания проверки этого фана.');
+    if (row.conversation?.loading || (row.conversation?.messages.length ?? 0) >= 750 || (row.conversation && !row.conversation.error && (!older || !row.conversation.hasMore))) return this.state(tabId, scanId);
+    row.conversation ??= { messages: [], loading: false, hasMore: true };
+    const view = row.conversation;
+    view.loading = true; view.error = undefined;
+    void traced(scan.trace, 'conversation', async (scope) => {
+      const before = older ? scan.conversationCursors.get(fanId) ?? null : null;
+      const cached = (scan.histories.get(fanId) ?? []).filter((message) => !before || BigInt(message.id) < BigInt(before));
+      let messages: FanslyMessage[];
+      let hasMore: boolean;
+      if (cached.length) {
+        messages = cached.slice(-30);
+        hasMore = cached.length > messages.length || !scan.completeHistories.has(fanId);
+        view.groupId = scan.groups.get(fanId) ?? undefined;
+        scope?.event('conversation.reuse', { count: messages.length, hasMore });
+      } else {
+        const signal = scan.controller.signal;
+        const groupId = scan.groups.get(fanId) ?? await traced(scope, 'group.search', (request) => this.options.fansly.findFollowerGroup(fanId, row.username, scan.session, signal, request));
+        this.assertCurrent(scan);
+        scan.groups.set(fanId, groupId);
+        messages = [];
+        if (groupId) {
+          const group = await traced(scope, 'group.verify', (request) => this.options.fansly.getGroup(groupId, scan.session, signal, request));
+          this.assertCurrent(scan);
+          if (group.users?.length !== 2 || !group.users.some((v) => v.userId === scan.snapshot.creatorId) || !group.users.some((v) => v.userId === fanId)) throw new Error('Не удалось подтвердить участников чата.');
+          view.groupId = groupId;
+          const page = await traced(scope, 'conversation.page', (request) => this.options.fansly.getMessagePage(groupId, before, scan.session, signal, request), { before });
+          this.assertCurrent(scan);
+          if (!Array.isArray(page.messages) || page.messages.some((message) => !/^\d{1,24}$/.test(message.id) || message.groupId !== groupId || ![scan.snapshot.creatorId, fanId].includes(message.senderId))) throw new Error('Не удалось подтвердить историю чата.');
+          if (before && page.messages.some((message) => BigInt(message.id) >= BigInt(before))) throw new Error('Fansly повторил страницу истории. Более старые сообщения пока недоступны.');
+          messages = page.messages;
+        }
+        hasMore = messages.length > 0;
+        scope?.event('conversation.loaded', { count: messages.length, hasMore, noGroup: !groupId });
+      }
+      this.assertCurrent(scan);
+      const combined = new Map((older ? view.messages : cached.length ? row.messages : []).map((message) => [message.id, message]));
+      for (const message of messages) combined.set(message.id, this.displayMessage(scan, message));
+      view.messages = [...combined.values()].sort((a, b) => BigInt(a.id) < BigInt(b.id) ? -1 : 1).slice(-750);
+      scan.conversationCursors.set(fanId, view.messages[0]?.id ?? null);
+      view.hasMore = hasMore && view.messages.length < 750;
+      view.truncated = hasMore && view.messages.length >= 750;
+    }, { older }, fanId).catch((error: unknown) => { view.error = errorText(error); }).finally(() => { view.loading = false; });
+    return this.state(tabId, scanId);
+  }
+
   private async checkRow(scan: Scan, row: FollowerRow, signal: AbortSignal, scope?: TraceScope): Promise<void> {
     const verdict = (status: FollowerRow['status'], reason: string) => {
       row.status = status;
@@ -367,16 +469,20 @@ export class FollowersService {
     const attempt = saved[attemptKey] as { state?: string } | undefined;
     scope?.event('custody.local-read', { state: attempt?.state ?? 'absent' });
     if (attempt?.state === 'sent') { verdict('sent', 'confirmed-local-send'); return; }
-    const evidence = saved[personalKey] as { message?: FollowerMessageEvidence } | undefined;
+    const evidence = saved[personalKey] as { message?: FollowerMessageEvidence; observedAt?: number } | undefined;
     if (evidence?.message) {
       scope?.event('personal.cache-hit', { messageId: evidence.message.id });
-      await this.ensureFreshWelcome(scan, scope);
+      await this.ensureFreshWelcome(scan, scope, signal);
       if (scope) this.traceMessage(scope, scan, evidence.message, 'persistent-proof');
-      if (isPersonalMessage(evidence.message, creator, scan.welcome)) { verdict('contacted', 'cached-personal-proof-revalidated'); return; }
+      if (isPersonalMessage(evidence.message, creator, scan.welcome)) {
+        row.proof = { message: this.displayMessage(scan, evidence.message), source: 'cache', observedAt: evidence.observedAt };
+        verdict('contacted', 'cached-personal-proof-revalidated'); return;
+      }
       // A later welcome edit can invalidate previously observed personal proof.
       // Re-read the complete history, including older possible personal DMs.
       await traced(scope, 'personal.cache-invalidate', () => this.options.storage.set({ [personalKey]: null }));
       scan.completeHistories.delete(row.id);
+      row.proof = undefined; row.conversation = undefined;
     }
     scope?.event('group.lookup', { source: scan.groups.get(row.id) ? 'scan-cache' : 'native-search', groupId: scan.groups.get(row.id) ?? null });
     const groupId = scan.groups.get(row.id) ?? await traced(scope, 'group.search', (request) => this.options.fansly.findFollowerGroup(row.id, row.username, scan.session, signal, request));
@@ -387,6 +493,7 @@ export class FollowersService {
     const previousIds = new Set(previous.map((message) => message.id));
     scope?.event('history.plan', { groupId, previousComplete: scan.completeHistories.has(row.id), cachedMessages: previous.length, maxPages: 30 });
     let complete = groupId === null;
+    let personalFound = false;
     if (groupId) {
       const group = await traced(scope, 'group.verify', (request) => this.options.fansly.getGroup(groupId, scan.session, signal, request));
       scope?.event('group.participants', { count: group.users?.length, creatorPresent: group.users?.some((v) => v.userId === creator), fanPresent: group.users?.some((v) => v.userId === row.id) });
@@ -419,13 +526,14 @@ export class FollowersService {
           complete = true;
           scope?.event('history.delta-overlap', { oldestFresh: String(oldestFresh), mergedCount: messages.length, previousCount: previous.length });
         }
-        if (messages.some((message) => isPersonalMessage(message, creator, scan.welcome))) await this.ensureFreshWelcome(scan, scope);
+        if (messages.some((message) => isPersonalMessage(message, creator, scan.welcome))) await this.ensureFreshWelcome(scan, scope, signal);
         if (scope) for (const message of page.messages) this.traceMessage(scope, scan, message, 'live-page');
         const personal = messages.find((message) => isPersonalMessage(message, creator, scan.welcome));
         if (personal) {
-          verdict('contacted', 'live-personal-proof');
-          const { id, senderId, type, content, correlationId, inReplyTo } = personal;
-          await traced(scope, 'personal.cache-write', () => this.options.storage.set({ [personalKey]: { observedAt: Date.now(), message: { id, senderId, type, content, correlationId, inReplyTo } } }), { messageId: id });
+          row.proof = { message: this.displayMessage(scan, personal), source: 'live', observedAt: Date.now() };
+          personalFound = true;
+          const { id, senderId, type, content, correlationId, inReplyTo, createdAt } = personal;
+          await traced(scope, 'personal.cache-write', () => this.options.storage.set({ [personalKey]: { observedAt: Date.now(), message: { id, senderId, type, content, correlationId, inReplyTo, createdAt } } }), { messageId: id });
           break;
         }
         // Fansly currently requests 25 messages. Require an empty next page
@@ -441,13 +549,13 @@ export class FollowersService {
     scope?.event('history.result', { complete, count: messages.length, noGroup: groupId === null });
     scan.completeHistories.delete(row.id);
     if (complete && groupId) scan.completeHistories.add(row.id);
-    const displayMessages = messages.slice(-30).map((message) => ({ id: message.id, own: message.senderId === creator, automated: message.senderId === creator && isAutomatedMessage(message, scan.welcome), text: message.content || (message.attachments?.length ? '[Медиа]' : '[Системное сообщение]') }));
+    const displayMessages = messages.slice(-30).map((message) => this.displayMessage(scan, message));
     if (JSON.stringify(row.messages) !== JSON.stringify(displayMessages)) {
       row.historyRevision = crypto.randomUUID();
       scope?.event('history.revision-changed', { revision: row.historyRevision, displayed: displayMessages.length });
     }
     row.messages = displayMessages;
-    if (row.status === 'contacted') return;
+    if (personalFound) { verdict('contacted', 'live-personal-proof'); return; }
     if (attempt && attempt.state !== 'aborted') { verdict('uncertain', 'unconfirmed-local-custody'); row.detail = 'Результат прошлой отправки не подтверждён. Повтор заблокирован; обновление проверит историю.'; return; }
     if (!complete) {
       verdict('unknown', 'incomplete-history');
@@ -627,7 +735,7 @@ export class FollowersService {
       const messageId = await this.options.fansly.sendFollowerMessage(groupId, text, creator, scan.session, signal, scope);
       await traced(scope, 'custody.confirm', () => this.options.storage.set({ [attemptKey]: { ...attempt, state: 'sent', messageId }, [key('personal', creator, fanId)]: { observedAt: Date.now(), messageId } }), { messageId });
       row.status = 'sent';
-      row.messages.push({ id: messageId, own: true, automated: false, text });
+      row.messages.push({ id: messageId, own: true, automated: false, text, createdAt: Date.now() });
       // Delivery is already confirmed. A missing Hub acknowledgement cannot
       // turn it into a retryable send; dispatch custody continues to protect it.
       scope?.event('send.result', { status: 'sent', messageId });

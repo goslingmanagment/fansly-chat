@@ -3,6 +3,15 @@ import type { FanslyAccountResponse, FanslyMessage } from './types.js';
 export const FOLLOWER_HOURS = [1, 3, 6, 12, 24, 48, 72, 168, 336, 720] as const;
 export type { FollowersRequest } from './followers-protocol.js';
 export type FollowerStatus = 'checking' | 'ready' | 'reply' | 'contacted' | 'unknown' | 'sending' | 'uncertain' | 'sent';
+export interface FollowerDisplayMessage { id: string; own: boolean; automated: boolean; text: string; createdAt?: number }
+export interface FollowerConversation {
+  groupId?: string;
+  messages: FollowerDisplayMessage[];
+  loading: boolean;
+  hasMore: boolean;
+  truncated?: boolean;
+  error?: string;
+}
 export interface FollowerRow {
   id: string;
   followedAt: number;
@@ -14,7 +23,9 @@ export interface FollowerRow {
   status: FollowerStatus;
   historyRevision: string;
   detail?: string;
-  messages: Array<{ id: string; own: boolean; automated: boolean; text: string }>;
+  messages: FollowerDisplayMessage[];
+  proof?: { message: FollowerDisplayMessage; source: 'cache' | 'live'; observedAt?: number };
+  conversation?: FollowerConversation;
 }
 export interface FollowersSnapshot {
   scanId: string;
@@ -23,6 +34,10 @@ export interface FollowersSnapshot {
   hours: number;
   scanning: boolean;
   canContinue?: boolean;
+  phase?: 'welcome' | 'followers' | 'profiles' | 'checking';
+  cutoff?: number;
+  startedAt?: number;
+  pacing?: { cooldownUntil: number; intervalMs: number };
   rows: FollowerRow[];
   error?: string;
   debug?: { traceId: string };
@@ -43,7 +58,7 @@ export function normalizeWelcome(text: string): string {
   return text.replace(/\s+/gu, ' ').trim();
 }
 
-export type FollowerMessageEvidence = Pick<FanslyMessage, 'id' | 'senderId' | 'type' | 'content' | 'correlationId' | 'inReplyTo'>;
+export type FollowerMessageEvidence = Pick<FanslyMessage, 'id' | 'senderId' | 'type' | 'content' | 'correlationId' | 'inReplyTo'> & Partial<Pick<FanslyMessage, 'createdAt'>>;
 
 export function isAutomatedMessage(message: FollowerMessageEvidence, welcome: ReadonlySet<string>): boolean {
   return automationReason(message, welcome) !== null;
