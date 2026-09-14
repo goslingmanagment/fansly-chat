@@ -20,6 +20,7 @@ const contentBootstrapEntryPoints = {
   content: path.join(root, 'src/content/bootstrap.ts'),
 };
 const contentAppEntryPoints = {
+  'content-followers': path.join(root, 'src/content/followers/index.ts'),
   'content-chat': path.join(root, 'src/content/index.ts'),
   // E109: the vault uploader is its own lazy ESM — loaded from the launcher on
   // /creator/vault, never bundled into the conversation app.

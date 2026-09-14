@@ -87,7 +87,10 @@ Important references:
 
 ## Release
 
-Release 2.1.3 is dated 2026-09-11 (Ping reads the fan's names and bio, no
+Release candidate 2.2.0 adds the **Новые** button for direct Fansly follower
+review, explicit draft generation and one-attempt sending. It requires the
+paired Hub new-follower support deployed first. Release 2.1.3 is dated
+2026-09-11 (Ping reads the fan's names and bio, no
 seeded opener); 2.1.2 (the settings cabinet's review-tail fixes), 2.1.1 (the
 vault uploader off the shared content path, UTF-8 bundles) and 2.1.0 (the vault
 uploader and the scoped Coach Cyrillic guard) are dated 2026-09-10; 2.0.0 is

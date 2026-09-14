@@ -23,6 +23,8 @@ export interface KernelFeatureClientContext {
   fanSpendingData: string;
   fanSubscriptionData: string;
   fanBio?: string;
+  fanUsername?: string;
+  fanAvatarUrl?: string;
   /** The chatter's saved name for the fan (Fansly rename, E115 / Core
    * Decision 290); read by the ping template. Absent when never renamed. */
   fanCustomName?: string;
@@ -72,6 +74,7 @@ export interface KernelFeatureRequest {
   /** fan-summary: sent ONLY as 'short' (a full run omits it — an old kernel
    * then never sees the field, keeping rollback safe). */
   summaryMode?: 'short';
+  greetingMode?: 'new-follower';
   /** The REQUESTED transcript window (deepMessageCount for a full recap, the
    * short const for a short recap, the quick window otherwise) — distinct from
    * `clientContext.messageCount` (the KEPT count). The kernel records it as the
@@ -439,6 +442,7 @@ export function createKernelFeatureGateway(
             // Only ever 'short'; a full recap omits the field entirely so an old
             // kernel (which never learned it) still runs a legacy full summary.
             ...(request.summaryMode === 'short' ? { summaryMode: 'short' } : {}),
+            ...(request.greetingMode ? { greetingMode: request.greetingMode } : {}),
             // Top-level REQUESTED window (kernel records it as requestedCount);
             // clientContext.messageCount below is the KEPT count.
             ...(request.messageCount !== undefined
@@ -449,6 +453,8 @@ export function createKernelFeatureGateway(
               transcript: request.clientContext.transcript,
               messageCount: request.clientContext.messageCount,
               fanDisplayName: request.clientContext.fanDisplayName,
+              ...(request.clientContext.fanUsername !== undefined ? { fanUsername: request.clientContext.fanUsername } : {}),
+              ...(request.clientContext.fanAvatarUrl ? { fanAvatarUrl: request.clientContext.fanAvatarUrl } : {}),
               fanSpendingData: request.clientContext.fanSpendingData,
               fanSubscriptionData: request.clientContext.fanSubscriptionData,
               ...(request.clientContext.fanBio !== undefined

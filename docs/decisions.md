@@ -3716,3 +3716,61 @@ announce; changelog.html the matching block above 2.1.2, whose badge drops
 (the saved name and bio ride the account lookup every generation already
 made). Live acceptance: the reporting chatter's next pings after the update.
 
+
+
+**E117 (2026-09-14).** New followers: owner-selected variant 2, compact queue
+left and chat/composer right. Defaults to 48 hours (1/3/6/12/24/48/72/168/336/720).
+Followers, avatar, bio, username, custom name (in parentheses), native inbox
+search and history come directly from the current Fansly session. Follow age
+comes from the follow RELATION snowflake, always shown in hours. No group is
+created during a scan. Unknown/incomplete reads are not eligible for sending.
+
+Welcome definitions are creator-scoped, single-flight, cached 24 hours in
+storage.local with older text versions retained. Owner ruling: nonempty exact
+text after whitespace normalization is sufficient to exclude a welcome;
+manual identical text is excluded too. Type 2 and non-reply correlation IDs
+exclude automation/mass messages. Type 1 alone is not proof of a personal DM.
+Positive personal evidence is durable; negative history is reused only within
+a scan after a live delta overlaps previously examined history. Fan-first
+conversations produce replies. Missing old welcome versions cannot be inferred.
+
+Before excluding a fan on text-based personal proof, refresh definitions once
+per scan (creator-scoped single-flight); unavailable fresh definitions leave
+that ambiguous case unknown. Retain the message classification fields, not a
+boolean verdict, and reevaluate them against the refreshed welcome set. If an
+old proof becomes a welcome, reread the full history for other personal DMs.
+This repairs a definition edit racing the preceding scan. The 24-hour cache
+still serves rows that carry independent automation markers or known welcomes.
+Within-scan delta overlap retains only cached messages older than the freshly
+read range; absent messages inside that range are removed and change the
+review revision. Arbitrary deletions in the untouched older tail require a new
+full scan.
+Replacing a cached history replaces its completeness proof too. A refresh
+that reaches the page cap becomes unknown and cannot turn into a complete
+history merely by overlapping its own partial head on another send attempt.
+
+Generation is explicit only, over the Hub hi-greeting feature lane's scoped
+new-follower mode (Core 323). It produces one draft using profile values and an
+avatar image; legacy Hi remains three variants. No local prompt/vendor keys.
+Drafts are per creator/fan and persist on selection and window changes.
+
+Sending is one direct session POST, using the Fbuddy group/message mechanism.
+The background owns recipients and eligibility; content supplies an opaque
+scan id. Session and Hub identity are fenced across async work. History is
+rechecked before sending and after the shared Hub reservation. Hub holds only
+send custody, not the follower list: reserved expires after 60s; dispatching
+and sent never expire. Local custody is acknowledged before dispatch. Unknown
+responses block replay; no auto-retry. Old clients/native Fansly/Fbuddy do not
+participate in the shared lock, so a final live check reduces but cannot remove
+that external race. Operational cache/custody keys do not change settings.
+
+Release candidate 2.2.0 requires Core 323 deployed first. No real fan DM is sent
+by the automated tests or release verification.
+
+E117 review follow-up: send carries the history revision actually shown to the
+chatter; newly arrived messages stop delivery and refresh the chat while keeping
+the draft. Closing/reopening fences late generation results and operation-owned
+busy state. Missing creator-only notes trigger one batched profile hydration.
+The first recent-inbox page resolves new-follower group ids in bulk; absence
+there never proves no history. The isolated UI bundle excludes background Zod
+validation (17.7 kB minified); the family stylesheet loads only on opening.

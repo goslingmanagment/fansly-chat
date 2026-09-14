@@ -92,6 +92,27 @@ installContentStyles(bootstrapStyles, 'chatgoose-bootstrap-style');
 // refresh loop is useful during long Fansly shifts even before a chat opens.
 // This raw port has no protocol/controller graph; the full app replaces it.
 const bootstrapKeepalive = startBootstrapKeepalive();
+// The followers window stays independent of native chat routing. Its module
+// (and styles) load only when the chatter opens it.
+const followersButton = document.createElement('button');
+followersButton.type = 'button';
+followersButton.id = 'chatgoose-followers-launcher';
+followersButton.className = 'chatgoose-launcher';
+followersButton.textContent = 'Новые';
+followersButton.title = 'Новые фоловеры';
+followersButton.setAttribute('aria-label', 'Открыть новых фоловеров');
+document.body.append(followersButton);
+let followersModule: Promise<typeof import('./followers/index.js')> | null = null;
+let followersLoadAttempt = 0;
+followersButton.addEventListener('click', () => {
+  followersButton.disabled = true;
+  const attempt = followersLoadAttempt++;
+  followersModule ??= import(`${browser.runtime.getURL('content-followers.js')}?attempt=${attempt}`)
+    .catch((error: unknown) => { followersModule = null; throw error; });
+  void Promise.all([followersModule, ensureContentAppStyles()]).then(([module]) => { clearBootstrapStatus(); module.toggleFollowers(); })
+    .catch(() => showBootstrapLoadError(() => followersButton.click()))
+    .finally(() => { followersButton.disabled = false; });
+});
 void readUiThemeSetting()
   .then((setting) => installUiTheme(setting))
   .catch(() => {});

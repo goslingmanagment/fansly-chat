@@ -43,7 +43,7 @@ describe('two-stage content bootstrap build contract', () => {
       /const contentBootstrapEntryPoints = \{\s*content: path\.join\(root, 'src\/content\/bootstrap\.ts'\),?\s*\};/,
     );
     expect(build).toMatch(
-      /const contentAppEntryPoints = \{\s*'content-chat': path\.join\(root, 'src\/content\/index\.ts'\),\s*(?:\/\/[^\n]*\n\s*)*'content-vault': path\.join\(root, 'src\/content\/vault\/index\.ts'\),?\s*\};/,
+      /const contentAppEntryPoints = \{\s*'content-followers': path\.join\(root, 'src\/content\/followers\/index\.ts'\),\s*'content-chat': path\.join\(root, 'src\/content\/index\.ts'\),\s*(?:\/\/[^\n]*\n\s*)*'content-vault': path\.join\(root, 'src\/content\/vault\/index\.ts'\),?\s*\};/,
     );
     expect(build).toMatch(
       /entryPoints: contentBootstrapEntryPoints,\s*format: 'iife'/,
