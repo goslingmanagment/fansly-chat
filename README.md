@@ -114,7 +114,9 @@ Important references:
 
 ## Release
 
-Release 2.3.0 adds the opt-in new-follower diagnostic journal described above.
+Release 2.2.1 adds the opt-in new-follower diagnostic journal described above.
+The accidentally assigned 2.3.0 number was withdrawn and is retained only in
+release history; its implementation is preserved in 2.2.1.
 Release 2.2.0 adds the **Новые** button for direct Fansly follower review, explicit
 draft generation and one-attempt sending, with the paired Hub new-follower support. Release 2.1.3 is dated
 2026-09-11 (Ping reads the fan's names and bio, no
