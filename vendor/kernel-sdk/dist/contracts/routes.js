@@ -272,13 +272,19 @@ export const fanProfileVersionParamsSchema = pageFanParamsSchema.extend({
 export const pageConversationProfileParamsSchema = pageParamsSchema.extend({
     conversationId: z.string().min(1),
 });
+// Request instants must include a timezone; the legacy isoTimestamp response
+// primitive is intentionally permissive and must not validate query bounds.
+export const revenueInstantSchema = z.iso.datetime({ offset: true })
+    .refine((value) => Number.isFinite(Date.parse(value)), "Invalid timestamp");
 const standardRevenueQuerySchema = z.object({
     period: nonCustomPeriodEnum,
+    windowAt: revenueInstantSchema.optional(),
     from: businessDate.optional(),
     to: businessDate.optional(),
 });
 const customRevenueQuerySchema = z.object({
     period: z.literal("custom"),
+    windowAt: revenueInstantSchema.optional(),
     from: businessDate,
     to: businessDate,
 }).refine((value) => value.from <= value.to, {
@@ -553,9 +559,18 @@ export const revenueComparisonSchema = z.object({
     totalNetMills: mills,
     deltaNetMills: mills,
     deltaPct: z.number().nullable(),
+    sources: z.array(z.object({
+        canonicalType: transactionTypeEnum,
+        bucket: transactionReportingBucketEnum,
+        currentNetMills: mills,
+        previousNetMills: mills,
+        deltaNetMills: mills,
+        deltaPct: z.number().nullable(),
+    })).optional().describe("Union of reportable sources in both windows; monetary deltas are server-computed."),
 });
 export const revenueWindowSchema = revenueSummarySchema.extend({
     period: periodEnum,
+    windowAt: isoTimestamp.optional().describe("Clock used to resolve calendar windows, not a capture watermark or database snapshot."),
     from: isoTimestamp.nullable().describe("Window start. For mixed-platform scopes, this is the earliest included platform-local start."),
     to: isoTimestamp.nullable().describe("Window end. For mixed-platform scopes, this is the latest included platform-local end."),
     currency: z.literal("USD"),
@@ -570,6 +585,10 @@ export const pageRevenueItemSchema = z.object({
     modelName: z.string(),
     netEarningsMills: mills,
     totalNetMills: mills,
+    previousNetEarningsMills: mills.nullable().optional().describe("Overview only: earnings for this page's platform-specific comparison window. Null for all time; absent on older servers. Includes retired pages and the same reporting buckets as netEarningsMills."),
+    deltaNetMills: mills.nullable().optional(),
+    deltaPct: z.number().nullable().optional(),
+    platform: platformEnum.optional(),
     // W7.2 (A33, decision #131): revenue rollups include tombstoned pages —
     // historical attribution is permanent. Optional (additive).
     status: z.enum(["active", "deleted"]).optional(),
@@ -581,6 +600,9 @@ export const modelRevenueItemSchema = z.object({
     pageCount: z.number().int(),
     netEarningsMills: mills,
     totalNetMills: mills,
+    previousNetEarningsMills: mills.nullable().optional(),
+    deltaNetMills: mills.nullable().optional(),
+    deltaPct: z.number().nullable().optional(),
     // W7.2 (A33): 'retired' = every page of the model is tombstoned.
     status: z.enum(["active", "retired"]).optional(),
 });
@@ -1430,6 +1452,7 @@ export const overviewResponseSchema = z.object({
     }),
 });
 export const revenueDailyQuerySchema = z.object({
+    windowAt: revenueInstantSchema.optional(),
     period: periodEnum.default("30d"),
     from: businessDate.optional(),
     to: businessDate.optional(),
@@ -1455,6 +1478,7 @@ export const revenueDailyResponseSchema = z.object({
 // series in one call (the dashboard's "By model" comparison view).
 export const revenueByModelQuerySchema = z.object({
     period: periodEnum.default("30d"),
+    windowAt: revenueInstantSchema.optional(),
     from: businessDate.optional(),
     to: businessDate.optional(),
 });
@@ -1489,12 +1513,35 @@ export const crossPageTransactionListQuerySchema = paginationQuerySchema.extend(
     state: transactionStateEnum.optional(),
     sortBy: transactionSortByEnum.default("occurredAt"),
     sortDir: sortDirEnum.default("desc"),
+    from: revenueInstantSchema.optional(),
+    to: revenueInstantSchema.optional(),
+    reportableOnly: queryBooleanSchema.default(false),
+}).superRefine((value, context) => {
+    if (Boolean(value.from) !== Boolean(value.to)) {
+        context.addIssue({ code: "custom", path: [value.from ? "to" : "from"], message: "Both from and to are required" });
+    }
+    else if (value.from && value.to && Date.parse(value.from) >= Date.parse(value.to)) {
+        context.addIssue({ code: "custom", path: ["to"], message: "from must be before to (exclusive upper bound)" });
+    }
 });
 export const crossPageTransactionListResponseSchema = z.object({
     items: z.array(crossPageTransactionItemSchema),
     limit: z.number().int(),
     offset: z.number().int(),
     total: z.number().int(),
+    summary: z.object({
+        netAmountMills: mills,
+        currency: z.literal("USD"),
+        readAt: isoTimestamp,
+    }).optional(),
+    scope: z.object({
+        pageLabel: z.string().nullable(),
+        from: isoTimestamp.nullable(),
+        to: isoTimestamp.nullable(),
+        type: transactionTypeEnum.nullable(),
+        state: transactionStateEnum.nullable(),
+        reportableOnly: z.boolean(),
+    }).optional().describe("Echo of the applied filter; old servers without exact drilldown support omit this."),
 });
 export const fanTransactionItemSchema = z.object({
     transactionId: z.string(),
@@ -1601,6 +1648,11 @@ export const aiGatewayPromptBlockSchema = z.object({
     text: z.string().min(1).max(100_000),
     cache: aiGatewayPromptCacheTtlSchema,
 }).strict();
+// A single profile image supplied by the live Fansly client. The kernel never
+// fetches the platform URL: providers receive it as image input through the
+// existing gateway. Reject credentials, custom ports and non-platform hosts.
+export const fanslyAvatarUrlSchema = z.string().max(4096).regex(/^https:\/\/[a-z0-9-]+\.fansly\.com\//);
+export const aiGatewayImagesSchema = z.array(z.object({ url: fanslyAvatarUrlSchema }).strict()).max(1);
 // Feature-lane-only debug echo. Deliberately separate from the raw gateway
 // prompt-block schema (100k): an assembled block is much larger than the wire
 // values it carries. clientContext admits a 300k transcript, the builder places
@@ -1618,6 +1670,7 @@ export const aiFeatureDebugInputFrameSchema = z.object({
     systemBlocks: z.array(aiFeatureDebugPromptBlockSchema).min(1).max(64),
     userBlocks: z.array(aiFeatureDebugPromptBlockSchema).min(1).max(64),
     contextManifest: z.record(z.string(), z.unknown()).nullable(),
+    images: aiGatewayImagesSchema.optional(),
 }).strict();
 export const aiGatewayStreamBodySchema = z.object({
     clientRequestId: z.string().uuid(),
@@ -1634,6 +1687,7 @@ export const aiGatewayStreamBodySchema = z.object({
     prompt: z.object({
         systemBlocks: z.array(aiGatewayPromptBlockSchema).min(1).max(64),
         userBlocks: z.array(aiGatewayPromptBlockSchema).min(1).max(64),
+        images: aiGatewayImagesSchema.optional(),
     }).strict(),
 }).strict();
 export const aiGatewayUsageSchema = z.object({
@@ -1881,6 +1935,7 @@ export const aiFeatureStreamBodySchema = z.object({
     // chatterQuestion field is absent or whitespace-only.
     preset: z.literal("situation").optional(),
     summaryMode: z.literal("short").optional(),
+    greetingMode: z.literal("new-follower").optional(),
     // Stage 32: client-loaded context for platforms whose kernel archive is
     // pull-cadenced (Fansly: dm_conversations 30 min / dm_messages 24 h — no
     // webhook lane), where the client reads the conversation live at
@@ -1899,6 +1954,8 @@ export const aiFeatureStreamBodySchema = z.object({
         // account note contentType 12002). Read by the ping template today;
         // optional for clients released before it.
         fanCustomName: z.string().max(200).optional(),
+        fanUsername: z.string().max(200).optional(),
+        fanAvatarUrl: fanslyAvatarUrlSchema.optional(),
         pingSegment: z.enum(["segment-a", "segment-b", "active"]).optional(),
         // Whole days since the fan's latest text message, computed from the same
         // analysis (and clock) that selected pingSegment. Ping only; optional for
@@ -6231,6 +6288,22 @@ const baseRouteSchemas = {
             401: errorResponseSchema,
             403: errorResponseSchema,
             404: errorResponseSchema,
+        },
+    },
+    followerOutreachAttempt: {
+        auth: { kind: "any", scope: "page" },
+        tags: ["conversations"],
+        summary: "Reserve and record one human-triggered follower greeting send",
+        params: pageParamsSchema,
+        body: z.object({
+            fanRef: z.string().regex(/^\d{1,24}$/),
+            attemptId: z.string().uuid(),
+            action: z.enum(["reserve", "dispatch", "sent"]),
+            messageRef: z.string().regex(/^\d{1,24}$/).optional(),
+        }).strict(),
+        response: {
+            200: z.object({ owned: z.boolean(), state: z.enum(["reserved", "dispatching", "sent", "expired"]), expiresAt: isoTimestamp.nullable() }).strict(),
+            400: errorResponseSchema, 401: errorResponseSchema, 403: errorResponseSchema, 404: errorResponseSchema,
         },
     },
     workboardV2Unclaim: {

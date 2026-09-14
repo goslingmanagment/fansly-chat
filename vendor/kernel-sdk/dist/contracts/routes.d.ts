@@ -339,6 +339,7 @@ export declare const pageConversationProfileParamsSchema: z.ZodObject<{
     pageLabel: z.ZodString;
     conversationId: z.ZodString;
 }, z.core.$strip>;
+export declare const revenueInstantSchema: z.ZodISODateTime;
 export declare const revenueQuerySchema: z.ZodUnion<readonly [z.ZodObject<{
     period: z.ZodEnum<{
         today: "today";
@@ -346,10 +347,12 @@ export declare const revenueQuerySchema: z.ZodUnion<readonly [z.ZodObject<{
         "30d": "30d";
         all: "all";
     }>;
+    windowAt: z.ZodOptional<z.ZodISODateTime>;
     from: z.ZodOptional<z.ZodString>;
     to: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>, z.ZodObject<{
     period: z.ZodLiteral<"custom">;
+    windowAt: z.ZodOptional<z.ZodISODateTime>;
     from: z.ZodString;
     to: z.ZodString;
 }, z.core.$strip>]>;
@@ -716,6 +719,29 @@ export declare const revenueComparisonSchema: z.ZodObject<{
     totalNetMills: z.ZodNumber;
     deltaNetMills: z.ZodNumber;
     deltaPct: z.ZodNullable<z.ZodNumber>;
+    sources: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        canonicalType: z.ZodEnum<{
+            subscription: "subscription";
+            tip: "tip";
+            message_purchase: "message_purchase";
+            post_purchase: "post_purchase";
+            stream_tip: "stream_tip";
+            chargeback: "chargeback";
+            refund: "refund";
+            payout_reversal: "payout_reversal";
+            other: "other";
+        }>;
+        bucket: z.ZodEnum<{
+            revenue: "revenue";
+            adjustment: "adjustment";
+            unclassified: "unclassified";
+            excluded: "excluded";
+        }>;
+        currentNetMills: z.ZodNumber;
+        previousNetMills: z.ZodNumber;
+        deltaNetMills: z.ZodNumber;
+        deltaPct: z.ZodNullable<z.ZodNumber>;
+    }, z.core.$strip>>>;
 }, z.core.$strip>;
 export declare const revenueWindowSchema: z.ZodObject<{
     revenueMills: z.ZodNumber;
@@ -730,6 +756,7 @@ export declare const revenueWindowSchema: z.ZodObject<{
         all: "all";
         custom: "custom";
     }>;
+    windowAt: z.ZodOptional<z.ZodString>;
     from: z.ZodNullable<z.ZodString>;
     to: z.ZodNullable<z.ZodString>;
     currency: z.ZodLiteral<"USD">;
@@ -760,6 +787,29 @@ export declare const revenueWindowSchema: z.ZodObject<{
         totalNetMills: z.ZodNumber;
         deltaNetMills: z.ZodNumber;
         deltaPct: z.ZodNullable<z.ZodNumber>;
+        sources: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            canonicalType: z.ZodEnum<{
+                subscription: "subscription";
+                tip: "tip";
+                message_purchase: "message_purchase";
+                post_purchase: "post_purchase";
+                stream_tip: "stream_tip";
+                chargeback: "chargeback";
+                refund: "refund";
+                payout_reversal: "payout_reversal";
+                other: "other";
+            }>;
+            bucket: z.ZodEnum<{
+                revenue: "revenue";
+                adjustment: "adjustment";
+                unclassified: "unclassified";
+                excluded: "excluded";
+            }>;
+            currentNetMills: z.ZodNumber;
+            previousNetMills: z.ZodNumber;
+            deltaNetMills: z.ZodNumber;
+            deltaPct: z.ZodNullable<z.ZodNumber>;
+        }, z.core.$strip>>>;
     }, z.core.$strip>>;
     platformWindows: z.ZodArray<z.ZodObject<{
         platform: z.ZodEnum<{
@@ -779,6 +829,13 @@ export declare const pageRevenueItemSchema: z.ZodObject<{
     modelName: z.ZodString;
     netEarningsMills: z.ZodNumber;
     totalNetMills: z.ZodNumber;
+    previousNetEarningsMills: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+    deltaNetMills: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+    deltaPct: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+    platform: z.ZodOptional<z.ZodEnum<{
+        fansly: "fansly";
+        onlyfans: "onlyfans";
+    }>>;
     status: z.ZodOptional<z.ZodEnum<{
         active: "active";
         deleted: "deleted";
@@ -791,6 +848,9 @@ export declare const modelRevenueItemSchema: z.ZodObject<{
     pageCount: z.ZodNumber;
     netEarningsMills: z.ZodNumber;
     totalNetMills: z.ZodNumber;
+    previousNetEarningsMills: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+    deltaNetMills: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+    deltaPct: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
     status: z.ZodOptional<z.ZodEnum<{
         active: "active";
         retired: "retired";
@@ -809,6 +869,7 @@ export declare const overviewRevenueResponseSchema: z.ZodObject<{
         all: "all";
         custom: "custom";
     }>;
+    windowAt: z.ZodOptional<z.ZodString>;
     from: z.ZodNullable<z.ZodString>;
     to: z.ZodNullable<z.ZodString>;
     currency: z.ZodLiteral<"USD">;
@@ -839,6 +900,29 @@ export declare const overviewRevenueResponseSchema: z.ZodObject<{
         totalNetMills: z.ZodNumber;
         deltaNetMills: z.ZodNumber;
         deltaPct: z.ZodNullable<z.ZodNumber>;
+        sources: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            canonicalType: z.ZodEnum<{
+                subscription: "subscription";
+                tip: "tip";
+                message_purchase: "message_purchase";
+                post_purchase: "post_purchase";
+                stream_tip: "stream_tip";
+                chargeback: "chargeback";
+                refund: "refund";
+                payout_reversal: "payout_reversal";
+                other: "other";
+            }>;
+            bucket: z.ZodEnum<{
+                revenue: "revenue";
+                adjustment: "adjustment";
+                unclassified: "unclassified";
+                excluded: "excluded";
+            }>;
+            currentNetMills: z.ZodNumber;
+            previousNetMills: z.ZodNumber;
+            deltaNetMills: z.ZodNumber;
+            deltaPct: z.ZodNullable<z.ZodNumber>;
+        }, z.core.$strip>>>;
     }, z.core.$strip>>;
     platformWindows: z.ZodArray<z.ZodObject<{
         platform: z.ZodEnum<{
@@ -857,6 +941,9 @@ export declare const overviewRevenueResponseSchema: z.ZodObject<{
         pageCount: z.ZodNumber;
         netEarningsMills: z.ZodNumber;
         totalNetMills: z.ZodNumber;
+        previousNetEarningsMills: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+        deltaNetMills: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+        deltaPct: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
         status: z.ZodOptional<z.ZodEnum<{
             active: "active";
             retired: "retired";
@@ -869,6 +956,13 @@ export declare const overviewRevenueResponseSchema: z.ZodObject<{
         modelName: z.ZodString;
         netEarningsMills: z.ZodNumber;
         totalNetMills: z.ZodNumber;
+        previousNetEarningsMills: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+        deltaNetMills: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+        deltaPct: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+        platform: z.ZodOptional<z.ZodEnum<{
+            fansly: "fansly";
+            onlyfans: "onlyfans";
+        }>>;
         status: z.ZodOptional<z.ZodEnum<{
             active: "active";
             deleted: "deleted";
@@ -895,6 +989,7 @@ export declare const modelRevenueResponseSchema: z.ZodObject<{
         all: "all";
         custom: "custom";
     }>;
+    windowAt: z.ZodOptional<z.ZodString>;
     from: z.ZodNullable<z.ZodString>;
     to: z.ZodNullable<z.ZodString>;
     currency: z.ZodLiteral<"USD">;
@@ -925,6 +1020,29 @@ export declare const modelRevenueResponseSchema: z.ZodObject<{
         totalNetMills: z.ZodNumber;
         deltaNetMills: z.ZodNumber;
         deltaPct: z.ZodNullable<z.ZodNumber>;
+        sources: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            canonicalType: z.ZodEnum<{
+                subscription: "subscription";
+                tip: "tip";
+                message_purchase: "message_purchase";
+                post_purchase: "post_purchase";
+                stream_tip: "stream_tip";
+                chargeback: "chargeback";
+                refund: "refund";
+                payout_reversal: "payout_reversal";
+                other: "other";
+            }>;
+            bucket: z.ZodEnum<{
+                revenue: "revenue";
+                adjustment: "adjustment";
+                unclassified: "unclassified";
+                excluded: "excluded";
+            }>;
+            currentNetMills: z.ZodNumber;
+            previousNetMills: z.ZodNumber;
+            deltaNetMills: z.ZodNumber;
+            deltaPct: z.ZodNullable<z.ZodNumber>;
+        }, z.core.$strip>>>;
     }, z.core.$strip>>;
     platformWindows: z.ZodArray<z.ZodObject<{
         platform: z.ZodEnum<{
@@ -949,6 +1067,13 @@ export declare const modelRevenueResponseSchema: z.ZodObject<{
         modelName: z.ZodString;
         netEarningsMills: z.ZodNumber;
         totalNetMills: z.ZodNumber;
+        previousNetEarningsMills: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+        deltaNetMills: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+        deltaPct: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+        platform: z.ZodOptional<z.ZodEnum<{
+            fansly: "fansly";
+            onlyfans: "onlyfans";
+        }>>;
         status: z.ZodOptional<z.ZodEnum<{
             active: "active";
             deleted: "deleted";
@@ -968,6 +1093,7 @@ export declare const pageRevenueResponseSchema: z.ZodObject<{
         all: "all";
         custom: "custom";
     }>;
+    windowAt: z.ZodOptional<z.ZodString>;
     from: z.ZodNullable<z.ZodString>;
     to: z.ZodNullable<z.ZodString>;
     currency: z.ZodLiteral<"USD">;
@@ -998,6 +1124,29 @@ export declare const pageRevenueResponseSchema: z.ZodObject<{
         totalNetMills: z.ZodNumber;
         deltaNetMills: z.ZodNumber;
         deltaPct: z.ZodNullable<z.ZodNumber>;
+        sources: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            canonicalType: z.ZodEnum<{
+                subscription: "subscription";
+                tip: "tip";
+                message_purchase: "message_purchase";
+                post_purchase: "post_purchase";
+                stream_tip: "stream_tip";
+                chargeback: "chargeback";
+                refund: "refund";
+                payout_reversal: "payout_reversal";
+                other: "other";
+            }>;
+            bucket: z.ZodEnum<{
+                revenue: "revenue";
+                adjustment: "adjustment";
+                unclassified: "unclassified";
+                excluded: "excluded";
+            }>;
+            currentNetMills: z.ZodNumber;
+            previousNetMills: z.ZodNumber;
+            deltaNetMills: z.ZodNumber;
+            deltaPct: z.ZodNullable<z.ZodNumber>;
+        }, z.core.$strip>>>;
     }, z.core.$strip>>;
     platformWindows: z.ZodArray<z.ZodObject<{
         platform: z.ZodEnum<{
@@ -3362,6 +3511,7 @@ export declare const overviewResponseSchema: z.ZodObject<{
     }, z.core.$strip>;
 }, z.core.$strip>;
 export declare const revenueDailyQuerySchema: z.ZodObject<{
+    windowAt: z.ZodOptional<z.ZodISODateTime>;
     period: z.ZodDefault<z.ZodEnum<{
         today: "today";
         "7d": "7d";
@@ -3420,6 +3570,7 @@ export declare const revenueByModelQuerySchema: z.ZodObject<{
         all: "all";
         custom: "custom";
     }>>;
+    windowAt: z.ZodOptional<z.ZodISODateTime>;
     from: z.ZodOptional<z.ZodString>;
     to: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>;
@@ -3513,6 +3664,9 @@ export declare const crossPageTransactionListQuerySchema: z.ZodObject<{
         asc: "asc";
         desc: "desc";
     }>>;
+    from: z.ZodOptional<z.ZodISODateTime>;
+    to: z.ZodOptional<z.ZodISODateTime>;
+    reportableOnly: z.ZodDefault<z.ZodPipe<z.ZodTransform<unknown, unknown>, z.ZodBoolean>>;
 }, z.core.$strip>;
 export declare const crossPageTransactionListResponseSchema: z.ZodObject<{
     items: z.ZodArray<z.ZodObject<{
@@ -3553,6 +3707,33 @@ export declare const crossPageTransactionListResponseSchema: z.ZodObject<{
     limit: z.ZodNumber;
     offset: z.ZodNumber;
     total: z.ZodNumber;
+    summary: z.ZodOptional<z.ZodObject<{
+        netAmountMills: z.ZodNumber;
+        currency: z.ZodLiteral<"USD">;
+        readAt: z.ZodString;
+    }, z.core.$strip>>;
+    scope: z.ZodOptional<z.ZodObject<{
+        pageLabel: z.ZodNullable<z.ZodString>;
+        from: z.ZodNullable<z.ZodString>;
+        to: z.ZodNullable<z.ZodString>;
+        type: z.ZodNullable<z.ZodEnum<{
+            subscription: "subscription";
+            tip: "tip";
+            message_purchase: "message_purchase";
+            post_purchase: "post_purchase";
+            stream_tip: "stream_tip";
+            chargeback: "chargeback";
+            refund: "refund";
+            payout_reversal: "payout_reversal";
+            other: "other";
+        }>>;
+        state: z.ZodNullable<z.ZodEnum<{
+            pending: "pending";
+            posted: "posted";
+            unknown: "unknown";
+        }>>;
+        reportableOnly: z.ZodBoolean;
+    }, z.core.$strip>>;
 }, z.core.$strip>;
 export declare const fanTransactionItemSchema: z.ZodObject<{
     transactionId: z.ZodString;
@@ -3807,6 +3988,10 @@ export declare const aiGatewayPromptBlockSchema: z.ZodObject<{
         "5m": "5m";
     }>;
 }, z.core.$strict>;
+export declare const fanslyAvatarUrlSchema: z.ZodString;
+export declare const aiGatewayImagesSchema: z.ZodArray<z.ZodObject<{
+    url: z.ZodString;
+}, z.core.$strict>>;
 export declare const AI_FEATURE_DEBUG_PROMPT_BLOCK_MAX_CHARS = 2500000;
 export declare const aiFeatureDebugPromptBlockSchema: z.ZodObject<{
     text: z.ZodString;
@@ -3835,6 +4020,9 @@ export declare const aiFeatureDebugInputFrameSchema: z.ZodObject<{
         }>;
     }, z.core.$strict>>;
     contextManifest: z.ZodNullable<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+    images: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        url: z.ZodString;
+    }, z.core.$strict>>>;
 }, z.core.$strict>;
 export declare const aiGatewayStreamBodySchema: z.ZodObject<{
     clientRequestId: z.ZodString;
@@ -3886,6 +4074,9 @@ export declare const aiGatewayStreamBodySchema: z.ZodObject<{
                 "5m": "5m";
             }>;
         }, z.core.$strict>>;
+        images: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            url: z.ZodString;
+        }, z.core.$strict>>>;
     }, z.core.$strict>;
 }, z.core.$strict>;
 export declare const aiGatewayUsageSchema: z.ZodObject<{
@@ -4065,6 +4256,9 @@ export declare const aiFeatureStreamFrameSchema: z.ZodUnion<readonly [z.ZodDiscr
         }>;
     }, z.core.$strict>>;
     contextManifest: z.ZodNullable<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+    images: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        url: z.ZodString;
+    }, z.core.$strict>>>;
 }, z.core.$strict>]>;
 export declare const aiPersonaSchema: z.ZodObject<{
     key: z.ZodString;
@@ -4229,6 +4423,7 @@ export declare const aiFeatureStreamBodySchema: z.ZodObject<{
     }, z.core.$strict>>>;
     preset: z.ZodOptional<z.ZodLiteral<"situation">>;
     summaryMode: z.ZodOptional<z.ZodLiteral<"short">>;
+    greetingMode: z.ZodOptional<z.ZodLiteral<"new-follower">>;
     clientContext: z.ZodOptional<z.ZodObject<{
         transcript: z.ZodString;
         messageCount: z.ZodNumber;
@@ -4237,6 +4432,8 @@ export declare const aiFeatureStreamBodySchema: z.ZodObject<{
         fanSubscriptionData: z.ZodDefault<z.ZodString>;
         fanBio: z.ZodOptional<z.ZodString>;
         fanCustomName: z.ZodOptional<z.ZodString>;
+        fanUsername: z.ZodOptional<z.ZodString>;
+        fanAvatarUrl: z.ZodOptional<z.ZodString>;
         pingSegment: z.ZodOptional<z.ZodEnum<{
             active: "active";
             "segment-a": "segment-a";
@@ -12082,6 +12279,9 @@ declare const baseRouteSchemas: {
                         "5m": "5m";
                     }>;
                 }, z.core.$strict>>;
+                images: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                    url: z.ZodString;
+                }, z.core.$strict>>>;
             }, z.core.$strict>;
         }, z.core.$strict>;
         readonly response: {
@@ -15293,10 +15493,12 @@ declare const baseRouteSchemas: {
                 "30d": "30d";
                 all: "all";
             }>;
+            windowAt: z.ZodOptional<z.ZodISODateTime>;
             from: z.ZodOptional<z.ZodString>;
             to: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>, z.ZodObject<{
             period: z.ZodLiteral<"custom">;
+            windowAt: z.ZodOptional<z.ZodISODateTime>;
             from: z.ZodString;
             to: z.ZodString;
         }, z.core.$strip>]>;
@@ -15314,6 +15516,7 @@ declare const baseRouteSchemas: {
                     all: "all";
                     custom: "custom";
                 }>;
+                windowAt: z.ZodOptional<z.ZodString>;
                 from: z.ZodNullable<z.ZodString>;
                 to: z.ZodNullable<z.ZodString>;
                 currency: z.ZodLiteral<"USD">;
@@ -15344,6 +15547,29 @@ declare const baseRouteSchemas: {
                     totalNetMills: z.ZodNumber;
                     deltaNetMills: z.ZodNumber;
                     deltaPct: z.ZodNullable<z.ZodNumber>;
+                    sources: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        canonicalType: z.ZodEnum<{
+                            subscription: "subscription";
+                            tip: "tip";
+                            message_purchase: "message_purchase";
+                            post_purchase: "post_purchase";
+                            stream_tip: "stream_tip";
+                            chargeback: "chargeback";
+                            refund: "refund";
+                            payout_reversal: "payout_reversal";
+                            other: "other";
+                        }>;
+                        bucket: z.ZodEnum<{
+                            revenue: "revenue";
+                            adjustment: "adjustment";
+                            unclassified: "unclassified";
+                            excluded: "excluded";
+                        }>;
+                        currentNetMills: z.ZodNumber;
+                        previousNetMills: z.ZodNumber;
+                        deltaNetMills: z.ZodNumber;
+                        deltaPct: z.ZodNullable<z.ZodNumber>;
+                    }, z.core.$strip>>>;
                 }, z.core.$strip>>;
                 platformWindows: z.ZodArray<z.ZodObject<{
                     platform: z.ZodEnum<{
@@ -15362,6 +15588,9 @@ declare const baseRouteSchemas: {
                     pageCount: z.ZodNumber;
                     netEarningsMills: z.ZodNumber;
                     totalNetMills: z.ZodNumber;
+                    previousNetEarningsMills: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+                    deltaNetMills: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+                    deltaPct: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
                     status: z.ZodOptional<z.ZodEnum<{
                         active: "active";
                         retired: "retired";
@@ -15374,6 +15603,13 @@ declare const baseRouteSchemas: {
                     modelName: z.ZodString;
                     netEarningsMills: z.ZodNumber;
                     totalNetMills: z.ZodNumber;
+                    previousNetEarningsMills: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+                    deltaNetMills: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+                    deltaPct: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+                    platform: z.ZodOptional<z.ZodEnum<{
+                        fansly: "fansly";
+                        onlyfans: "onlyfans";
+                    }>>;
                     status: z.ZodOptional<z.ZodEnum<{
                         active: "active";
                         deleted: "deleted";
@@ -15405,10 +15641,12 @@ declare const baseRouteSchemas: {
                 "30d": "30d";
                 all: "all";
             }>;
+            windowAt: z.ZodOptional<z.ZodISODateTime>;
             from: z.ZodOptional<z.ZodString>;
             to: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>, z.ZodObject<{
             period: z.ZodLiteral<"custom">;
+            windowAt: z.ZodOptional<z.ZodISODateTime>;
             from: z.ZodString;
             to: z.ZodString;
         }, z.core.$strip>]>;
@@ -15448,10 +15686,12 @@ declare const baseRouteSchemas: {
                 "30d": "30d";
                 all: "all";
             }>;
+            windowAt: z.ZodOptional<z.ZodISODateTime>;
             from: z.ZodOptional<z.ZodString>;
             to: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>, z.ZodObject<{
             period: z.ZodLiteral<"custom">;
+            windowAt: z.ZodOptional<z.ZodISODateTime>;
             from: z.ZodString;
             to: z.ZodString;
         }, z.core.$strip>]>;
@@ -15469,6 +15709,7 @@ declare const baseRouteSchemas: {
                     all: "all";
                     custom: "custom";
                 }>;
+                windowAt: z.ZodOptional<z.ZodString>;
                 from: z.ZodNullable<z.ZodString>;
                 to: z.ZodNullable<z.ZodString>;
                 currency: z.ZodLiteral<"USD">;
@@ -15499,6 +15740,29 @@ declare const baseRouteSchemas: {
                     totalNetMills: z.ZodNumber;
                     deltaNetMills: z.ZodNumber;
                     deltaPct: z.ZodNullable<z.ZodNumber>;
+                    sources: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        canonicalType: z.ZodEnum<{
+                            subscription: "subscription";
+                            tip: "tip";
+                            message_purchase: "message_purchase";
+                            post_purchase: "post_purchase";
+                            stream_tip: "stream_tip";
+                            chargeback: "chargeback";
+                            refund: "refund";
+                            payout_reversal: "payout_reversal";
+                            other: "other";
+                        }>;
+                        bucket: z.ZodEnum<{
+                            revenue: "revenue";
+                            adjustment: "adjustment";
+                            unclassified: "unclassified";
+                            excluded: "excluded";
+                        }>;
+                        currentNetMills: z.ZodNumber;
+                        previousNetMills: z.ZodNumber;
+                        deltaNetMills: z.ZodNumber;
+                        deltaPct: z.ZodNullable<z.ZodNumber>;
+                    }, z.core.$strip>>>;
                 }, z.core.$strip>>;
                 platformWindows: z.ZodArray<z.ZodObject<{
                     platform: z.ZodEnum<{
@@ -15523,6 +15787,13 @@ declare const baseRouteSchemas: {
                     modelName: z.ZodString;
                     netEarningsMills: z.ZodNumber;
                     totalNetMills: z.ZodNumber;
+                    previousNetEarningsMills: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+                    deltaNetMills: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+                    deltaPct: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+                    platform: z.ZodOptional<z.ZodEnum<{
+                        fansly: "fansly";
+                        onlyfans: "onlyfans";
+                    }>>;
                     status: z.ZodOptional<z.ZodEnum<{
                         active: "active";
                         deleted: "deleted";
@@ -15563,10 +15834,12 @@ declare const baseRouteSchemas: {
                 "30d": "30d";
                 all: "all";
             }>;
+            windowAt: z.ZodOptional<z.ZodISODateTime>;
             from: z.ZodOptional<z.ZodString>;
             to: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>, z.ZodObject<{
             period: z.ZodLiteral<"custom">;
+            windowAt: z.ZodOptional<z.ZodISODateTime>;
             from: z.ZodString;
             to: z.ZodString;
         }, z.core.$strip>]>;
@@ -15584,6 +15857,7 @@ declare const baseRouteSchemas: {
                     all: "all";
                     custom: "custom";
                 }>;
+                windowAt: z.ZodOptional<z.ZodString>;
                 from: z.ZodNullable<z.ZodString>;
                 to: z.ZodNullable<z.ZodString>;
                 currency: z.ZodLiteral<"USD">;
@@ -15614,6 +15888,29 @@ declare const baseRouteSchemas: {
                     totalNetMills: z.ZodNumber;
                     deltaNetMills: z.ZodNumber;
                     deltaPct: z.ZodNullable<z.ZodNumber>;
+                    sources: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        canonicalType: z.ZodEnum<{
+                            subscription: "subscription";
+                            tip: "tip";
+                            message_purchase: "message_purchase";
+                            post_purchase: "post_purchase";
+                            stream_tip: "stream_tip";
+                            chargeback: "chargeback";
+                            refund: "refund";
+                            payout_reversal: "payout_reversal";
+                            other: "other";
+                        }>;
+                        bucket: z.ZodEnum<{
+                            revenue: "revenue";
+                            adjustment: "adjustment";
+                            unclassified: "unclassified";
+                            excluded: "excluded";
+                        }>;
+                        currentNetMills: z.ZodNumber;
+                        previousNetMills: z.ZodNumber;
+                        deltaNetMills: z.ZodNumber;
+                        deltaPct: z.ZodNullable<z.ZodNumber>;
+                    }, z.core.$strip>>>;
                 }, z.core.$strip>>;
                 platformWindows: z.ZodArray<z.ZodObject<{
                     platform: z.ZodEnum<{
@@ -15877,10 +16174,12 @@ declare const baseRouteSchemas: {
                 "30d": "30d";
                 all: "all";
             }>;
+            windowAt: z.ZodOptional<z.ZodISODateTime>;
             from: z.ZodOptional<z.ZodString>;
             to: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>, z.ZodObject<{
             period: z.ZodLiteral<"custom">;
+            windowAt: z.ZodOptional<z.ZodISODateTime>;
             from: z.ZodString;
             to: z.ZodString;
         }, z.core.$strip>]>;
@@ -16053,10 +16352,12 @@ declare const baseRouteSchemas: {
                 "30d": "30d";
                 all: "all";
             }>;
+            windowAt: z.ZodOptional<z.ZodISODateTime>;
             from: z.ZodOptional<z.ZodString>;
             to: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>, z.ZodObject<{
             period: z.ZodLiteral<"custom">;
+            windowAt: z.ZodOptional<z.ZodISODateTime>;
             from: z.ZodString;
             to: z.ZodString;
         }, z.core.$strip>]>;
@@ -18484,6 +18785,59 @@ declare const baseRouteSchemas: {
                 ok: z.ZodLiteral<true>;
                 fanId: z.ZodNumber;
                 expiresAt: z.ZodString;
+            }, z.core.$strip>;
+            readonly 401: z.ZodObject<{
+                error: z.ZodString;
+                message: z.ZodString;
+                statusCode: z.ZodNumber;
+            }, z.core.$strip>;
+            readonly 403: z.ZodObject<{
+                error: z.ZodString;
+                message: z.ZodString;
+                statusCode: z.ZodNumber;
+            }, z.core.$strip>;
+            readonly 404: z.ZodObject<{
+                error: z.ZodString;
+                message: z.ZodString;
+                statusCode: z.ZodNumber;
+            }, z.core.$strip>;
+        };
+    };
+    readonly followerOutreachAttempt: {
+        readonly auth: {
+            readonly kind: "any";
+            readonly scope: "page";
+        };
+        readonly tags: readonly ["conversations"];
+        readonly summary: "Reserve and record one human-triggered follower greeting send";
+        readonly params: z.ZodObject<{
+            pageLabel: z.ZodString;
+        }, z.core.$strip>;
+        readonly body: z.ZodObject<{
+            fanRef: z.ZodString;
+            attemptId: z.ZodString;
+            action: z.ZodEnum<{
+                dispatch: "dispatch";
+                sent: "sent";
+                reserve: "reserve";
+            }>;
+            messageRef: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>;
+        readonly response: {
+            readonly 200: z.ZodObject<{
+                owned: z.ZodBoolean;
+                state: z.ZodEnum<{
+                    expired: "expired";
+                    dispatching: "dispatching";
+                    sent: "sent";
+                    reserved: "reserved";
+                }>;
+                expiresAt: z.ZodNullable<z.ZodString>;
+            }, z.core.$strict>;
+            readonly 400: z.ZodObject<{
+                error: z.ZodString;
+                message: z.ZodString;
+                statusCode: z.ZodNumber;
             }, z.core.$strip>;
             readonly 401: z.ZodObject<{
                 error: z.ZodString;
@@ -21052,6 +21406,7 @@ declare const baseRouteSchemas: {
         readonly tags: readonly ["dashboard"];
         readonly summary: "Get agency-wide revenue daily series";
         readonly querystring: z.ZodObject<{
+            windowAt: z.ZodOptional<z.ZodISODateTime>;
             period: z.ZodDefault<z.ZodEnum<{
                 today: "today";
                 "7d": "7d";
@@ -21108,6 +21463,7 @@ declare const baseRouteSchemas: {
                 all: "all";
                 custom: "custom";
             }>>;
+            windowAt: z.ZodOptional<z.ZodISODateTime>;
             from: z.ZodOptional<z.ZodString>;
             to: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>;
@@ -21149,6 +21505,7 @@ declare const baseRouteSchemas: {
             pageLabel: z.ZodString;
         }, z.core.$strip>;
         readonly querystring: z.ZodObject<{
+            windowAt: z.ZodOptional<z.ZodISODateTime>;
             period: z.ZodDefault<z.ZodEnum<{
                 today: "today";
                 "7d": "7d";
@@ -21206,6 +21563,7 @@ declare const baseRouteSchemas: {
             modelSlug: z.ZodString;
         }, z.core.$strip>;
         readonly querystring: z.ZodObject<{
+            windowAt: z.ZodOptional<z.ZodISODateTime>;
             period: z.ZodDefault<z.ZodEnum<{
                 today: "today";
                 "7d": "7d";
@@ -21288,6 +21646,9 @@ declare const baseRouteSchemas: {
                 asc: "asc";
                 desc: "desc";
             }>>;
+            from: z.ZodOptional<z.ZodISODateTime>;
+            to: z.ZodOptional<z.ZodISODateTime>;
+            reportableOnly: z.ZodDefault<z.ZodPipe<z.ZodTransform<unknown, unknown>, z.ZodBoolean>>;
         }, z.core.$strip>;
         readonly response: {
             readonly 200: z.ZodObject<{
@@ -21329,6 +21690,33 @@ declare const baseRouteSchemas: {
                 limit: z.ZodNumber;
                 offset: z.ZodNumber;
                 total: z.ZodNumber;
+                summary: z.ZodOptional<z.ZodObject<{
+                    netAmountMills: z.ZodNumber;
+                    currency: z.ZodLiteral<"USD">;
+                    readAt: z.ZodString;
+                }, z.core.$strip>>;
+                scope: z.ZodOptional<z.ZodObject<{
+                    pageLabel: z.ZodNullable<z.ZodString>;
+                    from: z.ZodNullable<z.ZodString>;
+                    to: z.ZodNullable<z.ZodString>;
+                    type: z.ZodNullable<z.ZodEnum<{
+                        subscription: "subscription";
+                        tip: "tip";
+                        message_purchase: "message_purchase";
+                        post_purchase: "post_purchase";
+                        stream_tip: "stream_tip";
+                        chargeback: "chargeback";
+                        refund: "refund";
+                        payout_reversal: "payout_reversal";
+                        other: "other";
+                    }>>;
+                    state: z.ZodNullable<z.ZodEnum<{
+                        pending: "pending";
+                        posted: "posted";
+                        unknown: "unknown";
+                    }>>;
+                    reportableOnly: z.ZodBoolean;
+                }, z.core.$strip>>;
             }, z.core.$strip>;
             readonly 401: z.ZodObject<{
                 error: z.ZodString;
@@ -22042,6 +22430,7 @@ declare const baseRouteSchemas: {
             }, z.core.$strict>>>;
             preset: z.ZodOptional<z.ZodLiteral<"situation">>;
             summaryMode: z.ZodOptional<z.ZodLiteral<"short">>;
+            greetingMode: z.ZodOptional<z.ZodLiteral<"new-follower">>;
             clientContext: z.ZodOptional<z.ZodObject<{
                 transcript: z.ZodString;
                 messageCount: z.ZodNumber;
@@ -22050,6 +22439,8 @@ declare const baseRouteSchemas: {
                 fanSubscriptionData: z.ZodDefault<z.ZodString>;
                 fanBio: z.ZodOptional<z.ZodString>;
                 fanCustomName: z.ZodOptional<z.ZodString>;
+                fanUsername: z.ZodOptional<z.ZodString>;
+                fanAvatarUrl: z.ZodOptional<z.ZodString>;
                 pingSegment: z.ZodOptional<z.ZodEnum<{
                     active: "active";
                     "segment-a": "segment-a";
