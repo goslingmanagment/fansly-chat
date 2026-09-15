@@ -94,6 +94,40 @@ describe('release page stamping', () => {
     expect(start).not.toMatch(/<span class="nav-version">v[^<]+<\/span>/);
   });
 
+  it('deploy-pages.sh can only ever restate the version the feed already serves', () => {
+    // It stamps install.html and changelog.html from the LOCAL manifest, so
+    // between a version bump and the release it would publish a landing page
+    // advertising a build nobody can install. The parity gate is what keeps it
+    // an «republish the current release» tool rather than a second, unguarded
+    // release path.
+    const pages = readRepoFile('scripts/deploy-pages.sh');
+    const deploy = readRepoFile('scripts/deploy.sh');
+
+    expect(pages).toContain('assert_pages_preconditions() {');
+    // Called BEFORE anything is stamped or uploaded.
+    const gateCall = pages.indexOf('  assert_pages_preconditions "$version"');
+    expect(gateCall).toBeGreaterThan(-1);
+    expect(gateCall).toBeLessThan(pages.indexOf('stamp_version "$INSTALL_PAGE_FILE"'));
+    expect(gateCall).toBeLessThan(pages.indexOf('scp "$INSTALL_PAGE_FILE"'));
+
+    // Same provenance asserts the release path has.
+    expect(pages).toContain("Public pages ship from main; current branch is '$branch'");
+    expect(pages).toContain('Working tree is dirty');
+    expect(pages).toContain('HEAD does not exactly match origin/main');
+
+    // …plus the one this script needs and the release path does not: the local
+    // manifest must equal the served feed, and an unreadable feed fails closed.
+    expect(pages).toContain('read_served_feed_version() {');
+    expect(pages).toContain('if [[ "$served_version" != "$version" ]]; then');
+    expect(pages).toContain('сначала релиз через deploy.sh');
+    expect(pages).toContain('refusing to stamp pages against a version nobody can confirm');
+
+    // The feed is read through the same extension id the release path writes.
+    const extensionId = /readonly EXTENSION_ID="([^"]+)"/.exec(deploy)?.[1];
+    expect(extensionId).toBeTruthy();
+    expect(pages).toContain(`readonly EXTENSION_ID="${extensionId ?? ''}"`);
+  });
+
   it('--pages-only publishes ONLY start.html: no stamping, no landing, no feed', () => {
     // The mode exists to put «Как начать» online BEFORE the release it belongs
     // to. Anything else it touched would advertise an unreleased build: the

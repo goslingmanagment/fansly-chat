@@ -1,13 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Deploy only static pages (install, guide, changelog, 2.0 walkthrough) without rebuilding
-# or re-signing the extension. Use this for page-only changes.
+# Republish the static pages of the CURRENT release (install, guide, changelog,
+# 2.0 walkthrough, «Как начать») without rebuilding or re-signing the extension.
+# Use it for page-content fixes.
+#
+# «Current release» is the whole contract. install.html and changelog.html carry
+# a version slot stamped from the LOCAL manifest, so running this between a
+# version bump and the actual release would publish a landing page advertising a
+# build the feed cannot deliver — an invited chatter would read about a pane his
+# download does not have. The feed-parity gate below makes that impossible.
+#
+# Publishing a page AHEAD of its release is a different job with a different
+# blast radius: `deploy.sh --pages-only` uploads start.html alone and stamps
+# nothing.
 
 readonly ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly VPS_HOST="root@45.8.230.111"
 readonly REMOTE_DIR="/var/www/ext"
 readonly BASE_URL="https://ext.gosling-agency.ru"
+readonly EXTENSION_ID="chatgoose@gosling.agency"
 
 readonly INSTALL_PAGE_FILE="$ROOT_DIR/install.html"
 readonly WHATS_NEW_PAGE_FILE="$ROOT_DIR/whats-new-2.html"
@@ -42,6 +54,55 @@ read_manifest_version() {
   ' "$1"
 }
 
+read_served_feed_version() {
+  # Prints the currently served feed version, or nothing when the feed is
+  # absent/unreadable — the caller decides what that means.
+  curl --silent --location --fail "${BASE_URL}/updates.json" 2>/dev/null \
+    | node --input-type=module -e '
+        import { readFileSync } from "node:fs";
+        try {
+          const feed = JSON.parse(readFileSync(0, "utf8"));
+          const updates = feed.addons?.["'"$EXTENSION_ID"'"]?.updates ?? [];
+          const version = updates[0]?.version;
+          if (typeof version === "string") process.stdout.write(version);
+        } catch {
+          // unreadable feed — print nothing
+        }
+      ' || true
+}
+
+assert_pages_preconditions() {
+  local version="$1"
+
+  log "Pages preconditions for ${version}"
+
+  # Provenance: this uploads the working tree to a public site.
+  local branch
+  branch="$(git -C "$ROOT_DIR" rev-parse --abbrev-ref HEAD)"
+  [[ "$branch" == "main" ]] \
+    || fail "Public pages ship from main; current branch is '$branch'"
+
+  [[ -z "$(git -C "$ROOT_DIR" status --porcelain)" ]] \
+    || fail "Working tree is dirty — commit (or stash) first; what gets published must be what is committed"
+
+  git -C "$ROOT_DIR" fetch origin main --quiet \
+    || fail "Could not fetch origin/main to verify the publish state"
+  [[ "$(git -C "$ROOT_DIR" rev-parse HEAD)" == "$(git -C "$ROOT_DIR" rev-parse origin/main)" ]] \
+    || fail "HEAD does not exactly match origin/main — push before publishing pages"
+
+  # Feed parity: the pages are stamped from the LOCAL manifest, so this script
+  # may only ever restate the version the fleet can actually install. Failing
+  # closed on an unreadable feed is deliberate — parity cannot be proven.
+  local served_version
+  served_version="$(read_served_feed_version)"
+  [[ -n "$served_version" ]] \
+    || fail "Could not read the served feed at ${BASE_URL}/updates.json — refusing to stamp pages against a version nobody can confirm"
+  if [[ "$served_version" != "$version" ]]; then
+    fail "Local manifest is ${version}, the feed serves ${served_version} — сначала релиз через deploy.sh, страницы штампуются только версией, которая уже отдаётся"
+  fi
+  log "Feed serves ${served_version}, matching the local manifest — ok"
+}
+
 stamp_version() {
   local file="$1" version="$2"
   shift 2
@@ -64,7 +125,7 @@ stamp_version() {
 
 main() {
   local command file
-  for command in node ssh scp curl; do
+  for command in node ssh scp curl git; do
     command -v "$command" >/dev/null || fail "Missing command: $command"
   done
   for file in "$INSTALL_PAGE_FILE" "$GUIDE_PAGE_FILE" "$CHANGELOG_PAGE_FILE" "$WHATS_NEW_PAGE_FILE" "$START_PAGE_FILE" "$MASCOT_FILE" "$ROOT_DIR/manifest.json"; do
@@ -72,6 +133,7 @@ main() {
   done
   local version
   version="$(read_manifest_version "$ROOT_DIR/manifest.json")"
+  assert_pages_preconditions "$version"
   log "Deploying pages for ChatGoose $version"
 
   # Backup originals
