@@ -59,7 +59,7 @@ describe('release page stamping', () => {
   });
 
 
-  it('publishes «Как начать» on both paths, unstamped, before the pages that link to it', () => {
+  it('publishes «Как начать» on the release path too, unstamped, before the pages linking to it', () => {
     // The invite message and both clients point at start.html, so it must be
     // live BEFORE the first invite goes out — and it carries no version slot:
     // the page describes a ceremony, not a build.
@@ -70,13 +70,22 @@ describe('release page stamping', () => {
     for (const script of [deploy, pages]) {
       expect(script).toContain('readonly START_PAGE_FILE="$ROOT_DIR/start.html"');
       expect(script).toContain('scp "$START_PAGE_FILE" "${VPS_HOST}:${remote_tmp_start}"');
+      // No stamper ever touches it — not by name, and not by the shared helper.
       expect(script).not.toMatch(/stamp\w*[^\n]*\$START_PAGE_FILE/);
-      // Linked-to before linking-from: index.html is the last page to move.
-      expect(script.indexOf("mv '$remote_tmp_start'"))
-        .toBeLessThan(script.indexOf("mv '$remote_tmp_index'"));
     }
+
+    // Scoped to the RELEASE upload block, not «somewhere in the file»: the
+    // pages-only function mentions the same variables, so a file-wide indexOf
+    // would pass on the wrong occurrence.
+    const releaseUpload = deploy.slice(deploy.indexOf('log "Uploading signed package'));
+    expect(releaseUpload).toContain('scp "$START_PAGE_FILE" "${VPS_HOST}:${remote_tmp_start}"');
+    expect(releaseUpload.indexOf("mv '$remote_tmp_start'"))
+      .toBeLessThan(releaseUpload.indexOf("mv '$remote_tmp_index'"));
+    // …and the release verifies it served, which it did not before (P2-8).
+    const releaseVerify = deploy.slice(deploy.indexOf('log "Verifying public URLs"'));
+    expect(releaseVerify).toContain('verify_http_200_with_retry "${BASE_URL}/start.html" "start page"');
+
     expect(deploy).toContain('readonly REMOTE_START_PATH="$REMOTE_DIR/start.html"');
-    expect(deploy).toContain('verify_http_200_with_retry "${BASE_URL}/start.html"');
     expect(pages).toContain('for page in index.html guide.html changelog.html whats-new-2.html start.html');
     // …and the pages that send a chatter there actually link to it.
     for (const page of ['install.html', 'guide.html']) {
@@ -85,23 +94,54 @@ describe('release page stamping', () => {
     expect(start).not.toMatch(/<span class="nav-version">v[^<]+<\/span>/);
   });
 
-  it('carries a --pages-only mode that signs nothing and leaves the feed alone', () => {
-    // A page fix (or publishing start.html ahead of the invites) must not cost
-    // an AMO signing slot, and must never move the update feed.
+  it('--pages-only publishes ONLY start.html: no stamping, no landing, no feed', () => {
+    // The mode exists to put «Как начать» online BEFORE the release it belongs
+    // to. Anything else it touched would advertise an unreleased build: the
+    // landing and the changelog are stamped from the LOCAL manifest, so an
+    // early publish would describe a pane the feed cannot yet deliver.
     const deploy = readRepoFile('scripts/deploy.sh');
-    const main = deploy.indexOf('main() {');
-    const pagesOnly = deploy.indexOf('publish_pages_only() {');
+    const pagesOnlyStart = deploy.indexOf('publish_pages_only() {');
+    const pagesOnlyEnd = deploy.indexOf('assert_pages_only_preconditions() {');
+    expect(pagesOnlyStart).toBeGreaterThan(-1);
+    expect(pagesOnlyEnd).toBeGreaterThan(pagesOnlyStart);
+    const body = deploy.slice(pagesOnlyStart, pagesOnlyEnd);
 
-    expect(pagesOnly).toBeGreaterThan(-1);
-    expect(deploy).toContain('--pages-only) pages_only=1 ;;');
-    expect(deploy).toContain('    publish_pages_only "$version"');
-    // The branch returns before anything irreversible: no signing, no feed, no
-    // tag, no announce inside the pages-only function.
-    const pagesOnlyBody = deploy.slice(pagesOnly, main);
-    for (const forbidden of ['web-ext sign', 'REMOTE_UPDATES_PATH', 'tag_release', 'announce-release.mjs']) {
-      expect(pagesOnlyBody).not.toContain(forbidden);
+    // What it DOES: one file, one verify.
+    expect(body).toContain('scp "$START_PAGE_FILE" "${VPS_HOST}:${remote_tmp_start}"');
+    expect(body).toContain("mv '$remote_tmp_start' '$REMOTE_START_PATH'");
+    expect(body.match(/\bscp\b/g)).toHaveLength(1);
+    expect(body.match(/verify_http_200_with_retry/g)).toHaveLength(1);
+
+    // What it must NEVER do.
+    for (const forbidden of [
+      'stamp_release_pages',
+      'INSTALL_PAGE_FILE',
+      'CHANGELOG_PAGE_FILE',
+      'GUIDE_PAGE_FILE',
+      'WHATS_NEW_PAGE_FILE',
+      'INSTALL_PAGE_ASSET',
+      'REMOTE_INDEX_PATH',
+      'REMOTE_UPDATES_PATH',
+      'web-ext sign',
+      'tag_release',
+      'announce-release.mjs',
+      'xpi',
+    ]) {
+      expect(body).not.toContain(forbidden);
     }
-    // …and an unknown flag is refused rather than silently ignored.
+
+    // Provenance still applies: it publishes the working tree to a public site.
+    expect(body).toContain('assert_pages_only_preconditions');
+    const gates = deploy.slice(pagesOnlyEnd, deploy.indexOf('main() {'));
+    expect(gates).toContain("Public pages ship from main; current branch is '$branch'");
+    expect(gates).toContain('Working tree is dirty');
+    expect(gates).toContain('HEAD does not exactly match origin/main');
+    // The contract-hash gate is deliberately NOT here: start.html makes no
+    // kernel call, and requiring it would block publishing ahead of the kernel.
+    expect(gates).not.toContain('contractHash');
+
+    expect(deploy).toContain('--pages-only) pages_only=1 ;;');
+    expect(deploy).toContain('    publish_pages_only\n');
     expect(deploy).toContain('Unknown argument: $1 (supported: --pages-only)');
   });
 

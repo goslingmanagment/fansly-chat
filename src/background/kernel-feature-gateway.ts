@@ -233,12 +233,12 @@ function isLegacyCoachBodyValidation(error: KernelApiError): boolean {
     /\b(?:chatterQuestion|coachHistory|transcriptCoverage)\b/.test(error.message);
 }
 
-function toChatGooseError(
+async function toChatGooseError(
   error: unknown,
   feature?: FeatureType,
   /** The bearer this generation rode on, so a NAMED 401 can clear it (§4.5). */
   bearer?: string,
-): ChatGooseError {
+): Promise<ChatGooseError> {
   if (error instanceof ChatGooseError) {
     return error;
   }
@@ -272,19 +272,18 @@ function toChatGooseError(
       return new ChatGooseError('service_unavailable', { message: error.message });
     }
     if (error.status === 401 || error.status === 403) {
-      // Named reason + our own bearer → sign this device out and say so; a bare
-      // 401 keeps the fail-closed card and leaves the sign-in alone.
-      if (selfHealingUnauthorizedReason(error)) {
-        if (bearer) {
-          void healRevokedHubSession(bearer);
-        }
-        return new ChatGooseError('hub_session_ended', {
-          details: { status: error.status, responseSnippet: error.message.slice(0, 400) },
-        });
-      }
-      return new ChatGooseError('hub_unauthorized', {
-        details: { status: error.status, responseSnippet: error.message.slice(0, 400) },
-      });
+      // «Сессия устройства завершена» is a claim about THIS device, so it waits
+      // for the wipe's answer: a named reason whose bearer has already been
+      // replaced by a newer sign-in heals nothing and keeps the fail-closed
+      // card. A bare 401 never even asks.
+      const healed = selfHealingUnauthorizedReason(error) && bearer
+        ? await healRevokedHubSession(bearer)
+        : false;
+      const details = { status: error.status, responseSnippet: error.message.slice(0, 400) };
+      // Literal keys on both arms: the registry-producer gate reads the source.
+      return healed
+        ? new ChatGooseError('hub_session_ended', { details })
+        : new ChatGooseError('hub_unauthorized', { details });
     }
     if (error.category === 'network' && error.code === 'aborted') {
       throw new DOMException('The operation was aborted.', 'AbortError');
@@ -502,7 +501,7 @@ export function createKernelFeatureGateway(
       try {
         await handle.done;
       } catch (error) {
-        const mapped = toChatGooseError(error, request.feature, bearer);
+        const mapped = await toChatGooseError(error, request.feature, bearer);
         if (mapped.key === 'chat_changed') {
           refreshPersonaCatalog();
         }

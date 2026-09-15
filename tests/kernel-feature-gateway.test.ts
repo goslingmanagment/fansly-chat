@@ -3,6 +3,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { createKernelFeatureGateway } from '../src/background/kernel-feature-gateway.js';
+import { resetHealedBearerMemo } from '../src/background/hub-custody.js';
 import type { KernelFeatureRequest } from '../src/background/kernel-feature-gateway.js';
 import { ChatGooseError } from '../src/shared/errors.js';
 import { resolveAbortChatGooseError } from '../src/background/operation-utils.js';
@@ -327,6 +328,27 @@ describe('kernel feature gateway', () => {
   });
 
   it('maps quota/auth failures and fails closed with a dedicated truncated-stream card', async () => {
+    // §4.5 needs real custody to answer: the card says «сессия завершена» only
+    // when this device was actually signed out, so the stored credential has to
+    // be the one the request carried.
+    const store: Record<string, unknown> = { agencyHubDeviceToken: 'agency_hub_device_x' };
+    (globalThis as Record<string, unknown>).browser = {
+      storage: {
+        local: {
+          get: async (keys: string | string[] | null) => {
+            if (keys === null || keys === undefined) return { ...store };
+            const list = Array.isArray(keys) ? keys : [keys];
+            return Object.fromEntries(list.filter((k) => k in store).map((k) => [k, store[k]]));
+          },
+          set: async (items: Record<string, unknown>) => { Object.assign(store, items); },
+          remove: async (keys: string | string[]) => {
+            for (const k of Array.isArray(keys) ? keys : [keys]) delete store[k];
+          },
+        },
+      },
+    };
+    resetHealedBearerMemo();
+
     const failWith = async (response: Response): Promise<ChatGooseError> => {
       const gateway = createKernelFeatureGateway(
         vi.fn(async () => response) as unknown as typeof fetch,
@@ -371,6 +393,21 @@ describe('kernel feature gateway', () => {
       { status: 401 },
     ));
     expect(unknownReason.key).toBe('hub_unauthorized');
+    // The device WAS signed out — once, by the first named 401 above.
+    expect(store.agencyHubDeviceToken).toBe('');
+
+    // …and a named 401 for a bearer that is no longer the stored one heals
+    // nothing, so it must NOT claim the session ended: a newer sign-in is live.
+    resetHealedBearerMemo();
+    store.agencyHubDeviceToken = 'agency_hub_device_FRESH';
+    const staleRejection = await failWith(new Response(
+      '{"error":"Unauthorized","message":"revoked","statusCode":401,"reason":"token_revoked"}',
+      { status: 401 },
+    ));
+    expect(staleRejection.key).toBe('hub_unauthorized');
+    expect(store.agencyHubDeviceToken).toBe('agency_hub_device_FRESH');
+
+    delete (globalThis as Record<string, unknown>).browser;
 
     // Missing terminal frame = truncated generation → never presented as done.
     const truncated = await failWith(sseResponse([META, { type: 'content_delta', text: 'partial' }]));

@@ -134,7 +134,7 @@ describe('Spenders invalidation policy', () => {
     expect(shouldInvalidateSpendersForStorageChanges({
       agencyHubDeviceToken: change('old-token', 'new-token'),
     }, 'sync')).toBe(false);
-    // v17 (E79): the retired slot's own removal event says nothing about the
+    // v17 (E123): the retired slot's own removal event says nothing about the
     // sign-in, so it must not throw the board cache away.
     expect(shouldInvalidateSpendersForStorageChanges({
       agencyHubApiKey: change('legacy-key', undefined),

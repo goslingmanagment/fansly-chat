@@ -95,7 +95,7 @@ describe('v12 → v13 migration', () => {
     expect(state.settings.agencyHubDeviceToken).toBe('old-token');
 
     // Persisted layout: the custody key owns the secret, the blob has none,
-    // and the retired legacy slot is gone (v17/E79).
+    // and the retired legacy slot is gone (v17/E123).
     expect(mockStorage[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]).toBe('old-token');
     expect(LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY in mockStorage).toBe(false);
     const blob = mockStorage.settings as Record<string, unknown>;
@@ -149,7 +149,7 @@ describe('v12 → v13 migration', () => {
   });
 });
 
-describe('v12 → v17 direct jump (E79)', () => {
+describe('v12 → v17 direct jump (E123)', () => {
   it('carries a working sign-in out of the pre-v13 blob and retires the legacy slot', async () => {
     // The update feed serves only the NEWEST build, so an install still on
     // ≤1.8.0 (pre-v13) lands on v17 in one step. Its credential lives inside the
@@ -282,7 +282,7 @@ describe('narrow steady-state reads', () => {
       'settings',
       AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
       // Still ASKED for, never read as a credential: presence is what tells the
-      // coordinator there is a retired slot left to remove (v17/E79).
+      // coordinator there is a retired slot left to remove (v17/E123).
       LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY,
       'summary:g1',
     ]));
@@ -552,7 +552,7 @@ describe('serialization helpers', () => {
     const state = migrateState(v12Store());
     const serialized = serializePersistedState(state);
     expect(serialized[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]).toBe('old-token');
-    // The retired slot is never re-emitted (v17/E79).
+    // The retired slot is never re-emitted (v17/E123).
     expect(serialized).not.toHaveProperty(LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY);
     expect(serialized.settings).not.toHaveProperty('agencyHubDeviceToken');
   });

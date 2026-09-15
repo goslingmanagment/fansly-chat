@@ -3253,7 +3253,7 @@ export class OverlayController {
 
     if (!spend && options?.placeholder) {
       strip.classList.add('chatgoose-spend-strip-pending');
-      primary.textContent = 'Cost pending · Tokens pending';
+      primary.textContent = 'Cost pending · Usage pending';
       secondary.textContent = 'in — · write — · read — · out —';
       strip.append(primary, secondary);
       return strip;
@@ -3352,7 +3352,7 @@ export class OverlayController {
 
       const usageDuration = document.createElement('div');
       usageDuration.className = 'chatgoose-profiling-stage-duration';
-      usageDuration.textContent = 'tokens';
+      usageDuration.textContent = 'usage';
 
       const usageDetail = document.createElement('div');
       usageDetail.className = 'chatgoose-profiling-stage-detail';
@@ -3593,7 +3593,7 @@ export class OverlayController {
       }
     }
     if (otherKeys.length > 0) {
-      lines.push(`Other manifest keys: ${otherKeys.join(', ')}`);
+      lines.push(`Other manifest fields: ${otherKeys.join(', ')}`);
     }
 
     const text = document.createElement('div');

@@ -389,7 +389,7 @@ describe('StorageCoordinator', () => {
   });
 
   it('v17: removes the retired legacy-key slot it finds on disk, and keeps the sign-in', async () => {
-    // E79 tombstones the slot rather than emptying it: the fallback READ that
+    // E123 tombstones the slot rather than emptying it: the fallback READ that
     // made E19's «never remove» rule necessary went out in the same release, so
     // a key nothing can read is a secret kept for no reason.
     mockStorage = createStorage({

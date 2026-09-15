@@ -129,7 +129,7 @@ const ERROR_REGISTRY: Record<UserErrorKey, ErrorRegistryEntry> = {
   hub_unauthorized: {
     key: 'hub_unauthorized',
     code: 'CG-HUB-03',
-    // E79: the chatter's word is «вход», never the credential that carried it.
+    // E123: the chatter's word is «вход», never the credential that carried it.
     // A bare 401 — one the server gave no reason for — is deliberately NOT
     // self-healed: this card is what a fail-closed rejection looks like.
     message: 'Agency Hub отклонил вход с этого устройства.',
@@ -214,7 +214,7 @@ const ERROR_REGISTRY: Record<UserErrorKey, ErrorRegistryEntry> = {
     message: 'Генерация оборвалась, результат не показан.',
     description: 'ChatGoose не получил подтверждённое окончание потока. Запустите генерацию заново вручную.',
   },
-  // ── E79 (PR-E1): the sign-in family. One login and one password, nothing
+  // ── E123 (PR-E1): the sign-in family. One login and one password, nothing
   // else the chatter has to hold. ──
   hub_sign_in_rejected: {
     key: 'hub_sign_in_rejected',
@@ -228,6 +228,13 @@ const ERROR_REGISTRY: Record<UserErrorKey, ErrorRegistryEntry> = {
     code: 'CG-HUB-18',
     message: 'Владелец должен сбросить пароль.',
     description: 'Для этого логина вход закрыт до смены пароля. Попросите владельца прислать ссылку и задайте новый пароль.',
+    settingsLink: true,
+  },
+  hub_sign_in_throttled: {
+    key: 'hub_sign_in_throttled',
+    code: 'CG-HUB-20',
+    message: 'Слишком много попыток входа.',
+    description: 'Подождите минуту и попробуйте снова. Если пароль потерялся — попросите владельца прислать ссылку для нового.',
     settingsLink: true,
   },
   hub_session_ended: {

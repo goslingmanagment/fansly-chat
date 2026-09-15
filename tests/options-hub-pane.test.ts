@@ -99,7 +99,7 @@ describe('options «Аккаунт ChatGoose» pane', () => {
 
     const tokenRow = detail(page, 'device-token');
     expect(tokenRow.textContent).toContain(COPY.hub.deviceSignedIn);
-    // E79 vocabulary: no prefix, no expiry, no renewal note — the chatter reads
+    // E123 vocabulary: no prefix, no expiry, no renewal note — the chatter reads
     // «вход выполнен» and when it happened, nothing about the credential.
     expect(tokenRow.textContent).not.toContain('abc123');
     expect(tokenRow.textContent).not.toContain('2026-09-01');
@@ -167,7 +167,7 @@ describe('options «Аккаунт ChatGoose» pane', () => {
     // The live check is stated ONCE, in «Подключение» beside the button that
     // produces it — outcome (the pill), then the receipt: clock and duration.
     // E67 retired the diagnostics row that printed the same `lastConnectionCheck`
-    // a card away; E79 dropped the credential kind (there is only one).
+    // a card away; E123 dropped the credential kind (there is only one).
     expect(page.document.querySelector('[data-hub-detail="check"]')).toBeNull();
     const connRow = page.document.querySelector<HTMLElement>('[data-role="hub-connection"]')!;
     expect(connRow.textContent).toContain(COPY.hub.connPillOk);
@@ -309,7 +309,7 @@ describe('options «Аккаунт ChatGoose» pane', () => {
 
       const raw = page.getRawStorage();
       expect(raw[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]).toBe('');
-      // v17/E79: the retired slot is REMOVED by the same wipe, not emptied.
+      // v17/E123: the retired slot is REMOVED by the same wipe, not emptied.
       expect(LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY in raw).toBe(false);
       // The settings blob is untouched by the sign-out: schema stays v15 and a
       // parallel tab's theme survives.
@@ -330,7 +330,7 @@ describe('options «Аккаунт ChatGoose» pane', () => {
         },
       });
       expect(detail(page, 'device-token').textContent).toContain(COPY.hub.deviceSignedIn);
-      // E79: there is no credential field on this page at all.
+      // E123: there is no credential field on this page at all.
       expect(page.document.querySelector('input[type="password"][autocomplete="off"]'))
         .toBeNull();
 

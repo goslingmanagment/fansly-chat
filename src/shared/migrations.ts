@@ -75,14 +75,14 @@ function migrateSettingsRecord(
   // the two new fields.
   // v16: showToolbarHints ADDED, default-on so upgrading keeps the explanatory
   // layer until the chatter explicitly disables it in «Вид».
-  // v17 (E79): agencyHubApiKey REMOVED — field, custody slot, blob fallback and
+  // v17 (E123): agencyHubApiKey REMOVED — field, custody slot, blob fallback and
   // storage key. agencyHubBaseUrl gains a real default; an empty stored address
   // adopts it. The device-token blob fallback below STAYS: the feed serves only
   // the newest build, so a ≤1.8.0 install (pre-v13) jumps straight to v17 and
   // would lose a working sign-in without it. The dedicated custody slot always
   // beats the blob.
   return {
-    // v17: an EMPTY address is the pre-E79 default nobody chose — the fleet has
+    // v17: an EMPTY address is the pre-E123 default nobody chose — the fleet has
     // one hub, so it is filled in rather than left blank for the chatter to
     // type. A non-empty stored address is a deliberate choice and survives.
     agencyHubBaseUrl:

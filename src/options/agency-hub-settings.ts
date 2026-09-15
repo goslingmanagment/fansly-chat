@@ -65,7 +65,7 @@ export function buildAgencyHubConnectionSignature(
   return `${normalizeAgencyHubBaseUrl(baseUrl)}|${deviceToken.trim()}`;
 }
 
-/** v17 (E79): one credential class. A connection is testable once the chatter
+/** v17 (E123): one credential class. A connection is testable once the chatter
  * has signed in and an address is known. */
 export function hasAgencyHubConnectionInputs(
   baseUrl: string,

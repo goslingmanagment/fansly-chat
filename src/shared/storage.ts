@@ -57,7 +57,7 @@ function arraysEqual(left: string[], right: string[]): boolean {
 export interface StorageRepairPlan {
   invalidSummaryKeys: string[];
   custodyLayoutNeedsRepair: boolean;
-  /** v17 (E79): the retired legacy-key storage slot is still on disk. Unlike
+  /** v17 (E123): the retired legacy-key storage slot is still on disk. Unlike
    * every other custody write this one REMOVES the key instead of emptying it —
    * the fallback read that made E19's «never remove» rule necessary is gone
    * with it, and a key nothing reads is a secret kept for no reason. */
@@ -212,7 +212,7 @@ export async function loadStorageState(): Promise<PersistedState> {
     );
   }
   if (repair.legacyApiKeyNeedsRemoval) {
-    // v17 (E79). Removal, not an empty string: the key is retired, and the
+    // v17 (E123). Removal, not an empty string: the key is retired, and the
     // migration that used to read it as a fallback went out in this release.
     await browser.storage.local.remove(LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY);
   }

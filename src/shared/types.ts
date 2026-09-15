@@ -24,7 +24,7 @@ export type UiThemeSetting = 'system' | 'light' | 'dark';
 
 export interface Settings {
   agencyHubBaseUrl: string;
-  /** The device-bound hub credential minted by «Войти» (E79). The ONLY hub
+  /** The device-bound hub credential minted by «Войти» (E123). The ONLY hub
    * credential this build knows: the legacy chatter key went out with v17. */
   agencyHubDeviceToken: string;
   quickMessageCount: number;
@@ -702,6 +702,7 @@ export type UserErrorKey =
   | 'hub_stream_truncated'
   | 'hub_sign_in_rejected'
   | 'hub_password_change_required'
+  | 'hub_sign_in_throttled'
   | 'hub_session_ended'
   | 'voice_disabled'
   | 'voice_not_allowlisted'

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AgencyHubClient } from '../src/background/agency-hub-client.js';
+import { resetHealedBearerMemo } from '../src/background/hub-custody.js';
 import { KERNEL_CONTRACT_HASH } from '@kernel/sdk';
 import vendorManifest from '../vendor/kernel-sdk/kernel-sdk.vendor.json';
 import { createDefaultSettings } from '../src/shared/migrations.js';
@@ -823,7 +824,7 @@ describe('AgencyHubClient', () => {
         httpStatus: 401,
       },
     });
-    // E79: one credential class, one card — the chatter is told to sign in
+    // E123: one credential class, one card — the chatter is told to sign in
     // again, never which of two credentials was rejected.
     expect(result.error?.message).toBe('Agency Hub отклонил вход с этого устройства.');
     expect(result.error?.description).toContain('войдите заново');
@@ -835,44 +836,62 @@ describe('AgencyHubClient', () => {
     );
   });
 
-  it('a NAMED 401 becomes the self-healing card; a bare one stays fail-closed (§4.5)', async () => {
+  it('says «сессия завершена» only when this device was ACTUALLY signed out (§4.5)', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const store: Record<string, unknown> = { agencyHubDeviceToken: 'agency_hub_device_x' };
     (globalThis as Record<string, unknown>).browser = {
       permissions: { contains: vi.fn(async () => true) },
       storage: {
         local: {
-          get: vi.fn(async () => ({})),
-          set: vi.fn(async () => undefined),
-          remove: vi.fn(async () => undefined),
+          get: vi.fn(async (keys: string | string[] | null) => {
+            if (keys === null || keys === undefined) return { ...store };
+            const list = Array.isArray(keys) ? keys : [keys];
+            return Object.fromEntries(list.filter((k) => k in store).map((k) => [k, store[k]]));
+          }),
+          set: vi.fn(async (items: Record<string, unknown>) => { Object.assign(store, items); }),
+          remove: vi.fn(async (keys: string | string[]) => {
+            for (const k of Array.isArray(keys) ? keys : [keys]) delete store[k];
+          }),
         },
       },
     };
+    resetHealedBearerMemo();
 
-    const named = new AgencyHubClient(async () => jsonResponse(
+    const reject = (body: Record<string, unknown>) =>
+      new AgencyHubClient(async () => jsonResponse(body, 401)).testConnection(
+        { agencyHubBaseUrl: 'http://localhost:3000', agencyHubDeviceToken: 'agency_hub_device_x' },
+        new AbortController().signal,
+      );
+
+    // Named reason + the stored bearer → the device really is signed out here,
+    // so the card may say so.
+    const named = await reject(
       { error: 'Unauthorized', message: 'revoked', statusCode: 401, reason: 'token_revoked' },
-      401,
-    ));
-    const namedResult = await named.testConnection(
-      { agencyHubBaseUrl: 'http://localhost:3000', agencyHubDeviceToken: 'agency_hub_device_x' },
-      new AbortController().signal,
     );
-    expect(namedResult.error?.code).toBe('CG-HUB-19');
-    expect(namedResult.error?.message).toBe('Сессия устройства завершена.');
+    expect(named.error?.code).toBe('CG-HUB-19');
+    expect(named.error?.message).toBe('Сессия устройства завершена.');
+    expect(store.agencyHubDeviceToken).toBe('');
 
-    // No reason from the server → no verdict from us. The chatter keeps his
-    // sign-in and gets the fail-closed card instead.
-    const bare = new AgencyHubClient(async () => jsonResponse(
-      { error: 'Unauthorized', message: 'nope', statusCode: 401 },
-      401,
-    ));
-    const bareResult = await bare.testConnection(
-      { agencyHubBaseUrl: 'http://localhost:3000', agencyHubDeviceToken: 'agency_hub_device_x' },
-      new AbortController().signal,
+    // No reason from the server → no verdict from us: the sign-in survives and
+    // the chatter gets the fail-closed card.
+    resetHealedBearerMemo();
+    store.agencyHubDeviceToken = 'agency_hub_device_x';
+    const bare = await reject({ error: 'Unauthorized', message: 'nope', statusCode: 401 });
+    expect(bare.error?.code).toBe('CG-HUB-03');
+    expect(store.agencyHubDeviceToken).toBe('agency_hub_device_x');
+
+    // Named reason, but a NEWER sign-in already replaced the rejected bearer:
+    // nothing was wiped, so claiming «сессия завершена» would be a lie.
+    resetHealedBearerMemo();
+    store.agencyHubDeviceToken = 'agency_hub_device_FRESH';
+    const stale = await reject(
+      { error: 'Unauthorized', message: 'revoked', statusCode: 401, reason: 'token_revoked' },
     );
-    expect(bareResult.error?.code).toBe('CG-HUB-03');
+    expect(stale.error?.code).toBe('CG-HUB-03');
+    expect(store.agencyHubDeviceToken).toBe('agency_hub_device_FRESH');
   });
 
-  it('says «войдите заново» without naming the credential (E79 vocabulary)', async () => {
+  it('says «войдите заново» without naming the credential (E123 vocabulary)', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ error: 'unauthorized' }, 401)));
     (globalThis as Record<string, unknown>).browser = {
@@ -1486,6 +1505,33 @@ describe('AgencyHubClient.checkIdentity', () => {
     const client = new AgencyHubClient(async () => jsonResponse(meBody(), 200));
     expect(await client.checkIdentity(HUB, new AbortController().signal))
       .toEqual({ ok: true, username: 'lilly-chatter', role: 'chatter', pages: ['Lilly'] });
+  });
+
+  it('lists FANSLY pages only for a chatter who works both platforms', async () => {
+    // Grisha is the live case: one account, pages on Fansly AND OnlyFans. The
+    // row is «Страницы Fansly», so an OnlyFans page here would promise a page
+    // this client cannot open.
+    const client = new AgencyHubClient(async () => jsonResponse({
+      authMethod: 'device_token',
+      user: {
+        id: 17,
+        username: 'grisha',
+        role: 'chatter',
+        mustChangePassword: false,
+        assignedPages: [
+          { id: 3, label: 'Lilly', platform: 'fansly', modelSlug: 'lilly', modelName: 'Lilly' },
+          { id: 9, label: 'lora-of', platform: 'onlyfans', modelSlug: 'lora', modelName: 'Lora' },
+          { id: 4, label: 'Lilly VIP', platform: 'fansly', modelSlug: 'lilly', modelName: 'Lilly' },
+        ],
+      },
+    }, 200));
+
+    expect(await client.checkIdentity(HUB, new AbortController().signal)).toEqual({
+      ok: true,
+      username: 'grisha',
+      role: 'chatter',
+      pages: ['Lilly', 'Lilly VIP'],
+    });
   });
 
   it('maps 401 to unauthorized', async () => {

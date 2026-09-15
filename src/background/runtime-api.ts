@@ -1225,7 +1225,7 @@ export function registerRuntimeApi({
         // (d) The SECOND, idempotent wipe. The revoke below can take up to 5s;
         // re-wiping once it has settled closes the window in which a delayed
         // write from an options tab could put a credential back on disk after
-        // the wipe while this handler still reported `revoked`. (v17/E79 shrank
+        // the wipe while this handler still reported `revoked`. (v17/E123 shrank
         // that window: the options page no longer persists any credential of
         // its own — the legacy field it used to autosave is gone.)
         const rewipeCustody = async (): Promise<string | null> => {

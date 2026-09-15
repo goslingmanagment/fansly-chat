@@ -235,7 +235,7 @@ async function loadOptionsPage(options: {
     },
     permissions: {
       contains: vi.fn(async () => false),
-      // E79: «Войти» asks Firefox for the hub origin on the same click, so the
+      // E123: «Войти» asks Firefox for the hub origin on the same click, so the
       // sign-in flows below need the grant to succeed.
       request: vi.fn(async () => true),
     },

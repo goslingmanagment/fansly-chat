@@ -40,6 +40,19 @@ h1{font:600 clamp(34px,6vw,54px)/1.1 var(--serif);letter-spacing:-.045em;margin:
 .tab[aria-selected="true"]{background:var(--ink);border-color:var(--ink);color:#fff9f2}
 
 .panel{background:var(--white);border:1px solid var(--line);border-radius:12px;padding:clamp(22px,4vw,34px);margin:18px 0 44px}
+/* No-JS fallback. Without a script nothing can toggle [hidden], so the panels
+   are driven by :target instead — and a #panel-onlyfans link still opens the
+   right half. A sibling combinator cannot express this: #panel-fansly comes
+   FIRST in the DOM, so an OnlyFans :target can never reach back to hide it.
+   :has() on the container can, and it also gives the «nothing targeted yet»
+   default. The script stamps data-js on <html> before first paint and takes
+   over from there, so the two mechanisms can never fight. */
+html:not([data-js]) .panel{display:none!important}
+html:not([data-js]) .panel:target{display:block!important}
+html:not([data-js]) main:not(:has(.panel:target)) #panel-fansly{display:block!important}
+html:not([data-js]) .tab[aria-selected="true"]{background:none;border-color:var(--line);color:var(--soft)}
+html:not([data-js]) .tab:target,
+html:not([data-js]) .tab:hover{border-color:var(--clay);color:var(--clay)}
 .panel h2{font:600 clamp(23px,3vw,29px)/1.2 var(--serif);letter-spacing:-.03em;margin-bottom:8px}
 .panel-sub{color:var(--soft);font-size:15px;margin-bottom:26px}
 
@@ -99,8 +112,8 @@ footer a:hover{color:var(--clay)}
   </section>
 
   <div class="tabs" role="tablist" aria-label="Выберите платформу">
-    <button class="tab" role="tab" id="tab-fansly" aria-controls="panel-fansly" aria-selected="true" type="button">Fansly — расширение</button>
-    <button class="tab" role="tab" id="tab-onlyfans" aria-controls="panel-onlyfans" aria-selected="false" type="button">OnlyFans — приложение</button>
+    <a class="tab" role="tab" id="tab-fansly" href="#panel-fansly" aria-controls="panel-fansly" aria-selected="true">Fansly — расширение</a>
+    <a class="tab" role="tab" id="tab-onlyfans" href="#panel-onlyfans" aria-controls="panel-onlyfans" aria-selected="false">OnlyFans — приложение</a>
   </div>
 
   <section class="panel" role="tabpanel" id="panel-fansly" aria-labelledby="tab-fansly" tabindex="0">
@@ -223,6 +236,7 @@ footer a:hover{color:var(--clay)}
 </footer>
 
 <script>
+document.documentElement.setAttribute('data-js', '');
 (function () {
   var tabs = Array.prototype.slice.call(document.querySelectorAll('[role="tab"]'));
   function select(tab) {
@@ -234,7 +248,12 @@ footer a:hover{color:var(--clay)}
     });
   }
   tabs.forEach(function (tab) {
-    tab.addEventListener('click', function () { select(tab); });
+    tab.addEventListener('click', function (event) {
+      // With the script alive the tab is a control, not a navigation: keep the
+      // URL clean so a shared link still means «open at the top».
+      event.preventDefault();
+      select(tab);
+    });
     tab.addEventListener('keydown', function (event) {
       if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
       event.preventDefault();
@@ -244,9 +263,12 @@ footer a:hover{color:var(--clay)}
       next.focus();
     });
   });
-  // Deep link: /start.html#onlyfans opens the app tab straight away, so the
-  // invite message can point a chatter at exactly his half of the page.
-  if (location.hash === '#onlyfans') select(document.getElementById('tab-onlyfans'));
+  // Deep links: #onlyfans is the short form the invite message uses;
+  // #panel-onlyfans is what the no-JS fallback (and the tab hrefs) produce.
+  // Both open the app half.
+  if (location.hash === '#onlyfans' || location.hash === '#panel-onlyfans') {
+    select(document.getElementById('tab-onlyfans'));
+  }
 })();
 </script>
 

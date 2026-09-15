@@ -20,7 +20,7 @@ export class FollowersDebugViewer {
     root.innerHTML = `<header><div class="brand">CHATGOOSE <span>ОТЛАДКА</span></div><h1>Журнал проверки фоловеров</h1><p>Запросы, проверки и решения — в порядке выполнения.</p></header>
       <main><aside><label for="runs">Запуск</label><select id="runs"><option value="">Загружаем…</option></select><div class="run-meta"></div>
       <p class="retention">Здесь хранятся последние 8 запусков до перезапуска расширения. Сохраните нужный отчёт для следующей сессии.</p>
-      <p class="retention">Текст сообщений, промпты и токены не записываются. Для каждого сообщения видны ID и причина классификации.</p></aside>
+      <p class="retention">Текст сообщений, промпты и учётные данные не записываются. Для каждого сообщения видны ID и причина классификации.</p></aside>
       <section class="journal"><div class="report-head"><div><span class="state" role="status">Подключаемся…</span><div class="stats"></div></div><div class="actions"><button class="copy" disabled>Копировать весь лог</button><button class="download" disabled>Сохранить .txt</button></div></div>
       <div class="filters"><select class="fan-filter" aria-label="Фан"><option value="">Все фаны</option></select><input class="search" type="search" placeholder="Запрос или событие" aria-label="Поиск в журнале"><label><input class="errors-only" type="checkbox"> Только ошибки</label><span class="shown"></span></div>
       <div class="notice" role="alert" hidden></div><div class="export-status" role="status"></div><div class="truncation" hidden></div>

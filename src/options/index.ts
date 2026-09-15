@@ -812,7 +812,7 @@ async function render(): Promise<void> {
     return { root: item, action, done, unknown };
   };
 
-  // Step order is the chatter's own (E79): the invite link sets the password,
+  // Step order is the chatter's own (E123): the invite link sets the password,
   // the password signs this device in, Fansly comes last. The host permission
   // is no longer a step of its own — «Войти» asks for it on the same click.
   const onboardingSteps: Record<
@@ -2033,7 +2033,7 @@ async function render(): Promise<void> {
 
   // «Это устройство»: whether a sign-in lives here, and since when. The block
   // says nothing about the credential — no prefix, no expiry, no renewal note
-  // (E79 vocabulary). The deep-link anchor stays on the BLOCK, so CG-HUB-02/03
+  // (E123 vocabulary). The deep-link anchor stays on the BLOCK, so CG-HUB-02/03
   // and the self-healing CG-HUB-19 all land on the sign-in the chatter must fix.
   const hubTokenBlock = document.createElement('div');
   hubTokenBlock.dataset.hubDetail = 'device-token';
@@ -2497,7 +2497,7 @@ async function render(): Promise<void> {
   );
 
   // Tagged so a `CG-HUB-01` (invalid URL) deep link can highlight the field the
-  // code is actually about. E79 folds it away: the fleet has ONE hub, the
+  // code is actually about. E123 folds it away: the fleet has ONE hub, the
   // address ships pre-filled, and a new chatter has nothing to answer here.
   const hubBaseUrlField = labeledField(COPY.hub.baseUrlLabel, agencyHubUrlInput);
   hubBaseUrlField.dataset.hubField = 'base-url';
@@ -2830,7 +2830,7 @@ async function render(): Promise<void> {
         key: 'access',
         label: COPY.status.stepAccess,
         // Only a definite `false` is an open step; `null` means «not checked yet».
-        // E79 adds a second condition: before the chatter has signed in, the host
+        // E123 adds a second condition: before the chatter has signed in, the host
         // permission is not a chore of his own — «Войти» asks Firefox for it on
         // the same click. Listing it separately on a fresh install would demand
         // an action that the very next step performs by itself.
@@ -3700,7 +3700,7 @@ async function render(): Promise<void> {
       coachAutoRecap: coachRecapSelect.value as Settings['coachAutoRecap'],
       debugMode: debugInput.checked,
     };
-    // v17 (E79): this page persists NO credential. The sign-in lives in its own
+    // v17 (E123): this page persists NO credential. The sign-in lives in its own
     // custody key, written background-side inside the FIFO — so a stale Options
     // tab saving a theme can no longer race a sign-in at all.
     return patch;
@@ -4301,7 +4301,7 @@ async function render(): Promise<void> {
     'CG-HUB-03': '[data-hub-detail="device-token"]',
     'CG-HUB-04': '[data-hub-detail="host-access"]',
     'CG-HUB-05': '[data-hub-detail="pages"]',
-    // The sign-in family (E79) all points at the one block that fixes it.
+    // The sign-in family (E123) all points at the one block that fixes it.
     'CG-HUB-17': '[data-hub-detail="device-token"]',
     'CG-HUB-18': '[data-hub-detail="device-token"]',
     'CG-HUB-19': '[data-hub-detail="device-token"]',

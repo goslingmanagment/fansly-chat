@@ -1,4 +1,4 @@
-// 1.7.0 audit pins, carried forward to E79: one credential class, and
+// 1.7.0 audit pins, carried forward to E123: one credential class, and
 // `resolveHubBearer` survives legacy runtime message shapes.
 
 import { describe, expect, it } from 'vitest';

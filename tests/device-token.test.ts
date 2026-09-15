@@ -1,4 +1,4 @@
-// E79 (PR-E1) — the single sign-in protocol: login + password → this device's
+// E123 (PR-E1) — the single sign-in protocol: login + password → this device's
 // own credential, in ONE public call, with no cookie and no logout.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -116,11 +116,14 @@ describe('issueAgencyHubDeviceToken', () => {
   });
 
   it('maps password_change_required to CG-HUB-18, not to a wrong-password card', async () => {
+    // The kernel's PRODUCTION shape: `PasswordChangeRequiredError` is a plain
+    // AppError, so the machine code rides `error`, and there is no `reason` at
+    // all (only UnauthorizedError declares one). Reading `reason` alone made
+    // this a CG-HUB-17 «неверный логин или пароль» — a loop no password breaks.
     const fetchMock = vi.fn(async () => jsonResponse({
-      error: 'Forbidden',
-      message: 'password change required',
+      error: 'password_change_required',
+      message: "The owner must reset this account's password before it can sign in",
       statusCode: 403,
-      reason: 'password_change_required',
     }, 403));
 
     await expect(issueAgencyHubDeviceToken({
@@ -130,6 +133,36 @@ describe('issueAgencyHubDeviceToken', () => {
       label: 'Firefox · Windows',
       fetchImpl: fetchMock as unknown as typeof fetch,
     })).rejects.toMatchObject({ key: 'hub_password_change_required' });
+  });
+
+  it('a plain 403 without that code is still «неверный логин или пароль»', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(
+      { error: 'forbidden', message: 'Forbidden', statusCode: 403 },
+      403,
+    ));
+
+    await expect(issueAgencyHubDeviceToken({
+      baseUrl: 'http://localhost:3000',
+      username: 'dasha',
+      password: 'pw',
+      label: 'Firefox · Windows',
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })).rejects.toMatchObject({ key: 'hub_sign_in_rejected' });
+  });
+
+  it('maps the per-IP rate limit to its own card, never «хаб недоступен»', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(
+      { error: 'Too Many Requests', message: 'Too many login attempts', statusCode: 429 },
+      429,
+    ));
+
+    await expect(issueAgencyHubDeviceToken({
+      baseUrl: 'http://localhost:3000',
+      username: 'dasha',
+      password: 'pw',
+      label: 'Firefox · Windows',
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })).rejects.toMatchObject({ key: 'hub_sign_in_throttled' });
   });
 
   it('fails closed when the kernel answers with a reservation we never asked for', async () => {
@@ -243,7 +276,7 @@ describe('§4.5 self-healing', () => {
     await wipeHubCustody();
 
     // The live slot keeps its key (the layout repair reads presence, E19);
-    // the retired slot is gone for good (E79).
+    // the retired slot is gone for good (E123).
     expect(AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY in store).toBe(true);
     expect(store[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]).toBe('');
     expect(LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY in store).toBe(false);

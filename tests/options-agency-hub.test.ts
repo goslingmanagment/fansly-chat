@@ -255,7 +255,7 @@ describe('Options page — «Аккаунт ChatGoose»', () => {
     const section = getSectionByTitle('Аккаунт ChatGoose');
     const urlInput = section.querySelector<HTMLInputElement>('input[type="url"]');
 
-    // E79: no credential field of any kind lives on this page.
+    // E123: no credential field of any kind lives on this page.
     expect(section.querySelector('input[type="password"][autocomplete="off"]')).toBeNull();
     // The address is still editable, but under «Дополнительно».
     expect(urlInput?.value).toBe('http://localhost:3000');

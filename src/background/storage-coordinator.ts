@@ -590,7 +590,7 @@ export class StorageCoordinator {
       await this.writeStartupRemove(repair.invalidSummaryKeys);
     }
 
-    // v17 (E79): retire the legacy-key slot itself. Removed AFTER the
+    // v17 (E123): retire the legacy-key slot itself. Removed AFTER the
     // full-state write above, so a crash between the two leaves the key on disk
     // and the next startup repairs it again — never the other way round.
     if (repair.legacyApiKeyNeedsRemoval) {

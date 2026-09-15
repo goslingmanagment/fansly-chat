@@ -1,4 +1,4 @@
-// E79 (PR-E1) — one sign-in protocol for every ChatGoose client, and no cookie.
+// E123 (PR-E1) — one sign-in protocol for every ChatGoose client, and no cookie.
 //
 // The chatter types a login and a password once in «Аккаунт ChatGoose»; the
 // extension trades them for a device-bound bearer through the kernel's public
@@ -37,10 +37,29 @@ export interface IssuedDeviceToken {
   expiresAt: string;
 }
 
-/** The kernel names WHY it refused, in the `reason` field every error response
- * carries (`errorResponseSchema`). Absent on older cores — the caller then
- * falls back to the generic «неверный логин или пароль» card, which is the
- * honest reading of a 401 on this route. */
+/** The kernel names WHY it refused in TWO different places, and a client that
+ * reads only one of them mislabels half the refusals:
+ *
+ * - `error` is the machine code every `AppError` carries — that is where
+ *   `password_change_required` lives (a plain 403, no `reason`);
+ * - `reason` is the structured extension, present only on the errors that
+ *   declare one (`UnauthorizedError` → token_revoked | token_expired).
+ *
+ * The SDK already lifts `body.error` into `KernelApiError.code`; the body read
+ * is the belt-and-braces half for a build whose envelope shifts. Neither being
+ * present is fine: a 401 then reads as «неверный логин или пароль», which is
+ * the honest reading of an unexplained refusal on this route. */
+export function readErrorCode(error: KernelApiError): string | null {
+  if (typeof error.code === 'string' && error.code) {
+    return error.code;
+  }
+  if (error.body && typeof error.body === 'object') {
+    const code = (error.body as Record<string, unknown>).error;
+    if (typeof code === 'string' && code) return code;
+  }
+  return null;
+}
+
 export function readErrorReason(error: KernelApiError): string | null {
   if (!error.body || typeof error.body !== 'object') {
     return null;
@@ -107,10 +126,20 @@ export async function issueAgencyHubDeviceToken(
       throw error;
     }
     if (error instanceof KernelApiError) {
-      const reason = readErrorReason(error);
-      if (reason === 'password_change_required') {
+      // Checked BEFORE the generic 401/403 branch: a frozen account answers 403
+      // and would otherwise be told its password is wrong, which sends the
+      // chatter round a loop no password can break.
+      if (readErrorCode(error) === 'password_change_required' ||
+        readErrorReason(error) === 'password_change_required') {
         throw new ChatGooseError('hub_password_change_required', {
           details: { status: error.status ?? 0, responseSnippet: responseSnippet(error) },
+        });
+      }
+      if (error.status === 429) {
+        // The route is rate limited per IP. «Хаб недоступен» would be a lie and
+        // would invite exactly the retry that keeps the limit closed.
+        throw new ChatGooseError('hub_sign_in_throttled', {
+          details: { status: error.status, responseSnippet: responseSnippet(error) },
         });
       }
       if (error.status === 401 || error.status === 403) {

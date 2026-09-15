@@ -432,7 +432,7 @@ export class InlinePanelController {
 
     if (!spend && placeholder) {
       section.classList.add('chatgoose-spend-strip-pending');
-      primary.textContent = 'Cost pending · Tokens pending';
+      primary.textContent = 'Cost pending · Usage pending';
       secondary.textContent = 'in — · write — · read — · out —';
       section.append(primary, secondary);
       return section;

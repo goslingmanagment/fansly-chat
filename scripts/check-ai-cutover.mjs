@@ -41,7 +41,7 @@ if (vendorEndpoints) {
 const staleUserDocs = grepUserDocs(
   // bare "Claude" ловит и Claude Direct / Claude API Key: в kernel-only
   // user-доках модель выбирает сервер, provider-имена в них запрещены целиком.
-  // E79: чаттеру вообще не выдают никаких учётных данных — «введите …-ключ» в
+  // E123: чаттеру вообще не выдают никаких учётных данных — «введите …-ключ» в
   // любом виде теперь ложь, а не только про vendor-ключи. Словарь §2 целиком
   // пинится тестом tests/copy-vocabulary.test.ts; здесь остаётся AI-половина.
   'api\\.anthropic\\.com|openrouter\\.ai|console\\.anthropic\\.com|Введите [^ ]*-?ключ|OpenRouter API Key|Claude',

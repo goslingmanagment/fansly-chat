@@ -1,5 +1,5 @@
 // First-run onboarding: the durable checklist, the chatter's own three steps
-// (invite link → sign in → Fansly, E79), and the fresh-install empty states.
+// (invite link → sign in → Fansly, E123), and the fresh-install empty states.
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { COPY } from '../src/options/copy.js';
@@ -94,7 +94,7 @@ describe('options first-run onboarding', () => {
     ).map((node) => node.textContent);
     // The invite link comes first: it is where the password is set, and there
     // is nothing to sign in with until it has been opened. The host permission
-    // is no longer a step of its own — «Войти» asks Firefox for it (E79).
+    // is no longer a step of its own — «Войти» asks Firefox for it (E123).
     expect(titles).toEqual([
       COPY.onboarding.step1Title,
       COPY.onboarding.step2Title,

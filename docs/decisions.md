@@ -112,7 +112,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E120 | 2026-09-14 | Owner corrects release numbering to patch 2.2.1; withdraw 2.3.0 from update discovery, preserve the complete logger and release history |
 | E121 | 2026-09-14 | Creator-wide follower GET pacing and cooldown, human pause/resume, cached proof and lazy conversation preview with clearer progress |
 | E122 | 2026-09-14 | Release E121 as 2.2.2 after independent adversarial review; retain the owner's corrected small-release numbering and skip Telegram |
-| E79 | 2026-09-15 | One login and password for every client; legacy chatter key retired end to end (storage v17); named-401 self-healing; «Как начать» page; 2.4.0 |
+| E123 | 2026-09-15 | One login and password for every client; legacy chatter key retired end to end (storage v17); named-401 self-healing; «Как начать» page; 2.4.0 |
 
 ## Entries
 
@@ -3967,7 +3967,7 @@ follow installation; the synthetic checks do not replace that evidence.
 This entry records authorization and validation scope. Successful publication
 must be established by the served feed, signed package hash and release tag.
 
-**E79 (2026-09-15).** PR-E1 of the «Единый аккаунт чаттера» track. The chatter's
+**E123 (2026-09-15).** PR-E1 of the «Единый аккаунт чаттера» track. The chatter's
 whole story becomes one login and one password: the owner sends an invite link,
 the chatter sets a password there, and that pair signs him into the Fansly
 extension and the OnlyFans desktop app alike.
@@ -4038,12 +4038,25 @@ longer a step of its own, since «Войти» asks for it.
 *Pages and release.* New static `start.html` («Как начать», two tabs:
 Fansly = install + sign in, OnlyFans = download from
 `ext.gosling-agency.ru/desktop/` + sign in) is what the invite, both clients and
-the guide point at. `deploy.sh` carries it through preflight, upload and URL
-verification, and gains `--pages-only`: publish the pages without signing an XPI
-or touching `updates.json`, so the page can be live before the first invite.
-Version **2.4.0** — `v2.3.0` is taken by the withdrawn release (E120/E122), and a
-tag is never reused. Publication only after the kernel's PR-1A is deployed: the
-deploy script's contract-hash gate enforces that by itself.
+the guide point at. The full release path publishes and verifies it like every
+other page.
+
+**Two publications, two orders, two gates — they are not the same event.**
+`start.html` must be live BEFORE the dashboard's `/join` goes out, because the
+first invite links to it; the XPI must ship AFTER the kernel's PR-1A, because a
+signed build pins a vendored contract. So `deploy.sh --pages-only` publishes
+`start.html` and nothing else: no stamping (the page has no version slot — it
+describes a ceremony, not a build), no `index.html`, no `changelog.html`, no
+`updates.json`, no XPI. Touching the landing early would have been the actual
+bug: it is stamped from the LOCAL manifest, so an invited chatter would have
+read about a pane his download did not have. That mode keeps the provenance
+gates a public publish needs — main, clean tree, HEAD == origin/main — and
+deliberately drops the contract-hash gate, which exists for signed builds and
+would block the one case the mode was built for. The XPI path keeps every gate
+it had, contract hash included.
+
+Version **2.4.0** — `v2.3.0` is taken by the withdrawn release (E120/E122), and
+a tag is never reused.
 
 *Not done here:* `whats-new-3.html`. The per-release convention is
 `CHANGELOG.md` + `changelog.html`, both updated; `whats-new-2.html` was a one-off

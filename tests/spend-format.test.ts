@@ -63,8 +63,8 @@ function createSpend(overrides?: Partial<LlmSpendSummary>): LlmSpendSummary {
 }
 
 describe('formatSpendPrimary', () => {
-  it('returns cost and compact tokens', () => {
-    expect(formatSpendPrimary(createSpend())).toBe('$0.0123 · 4.5k tokens');
+  it('returns cost and compact usage', () => {
+    expect(formatSpendPrimary(createSpend())).toBe('$0.0123 · 4.5k usage');
   });
 });
 

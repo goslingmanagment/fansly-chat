@@ -7,7 +7,7 @@ import type { FeaturePolicy } from './features.js';
 
 // ─── Agency Hub ──────────────────────────────────────────────────────────
 
-/** The one hub this fleet talks to (E79). Pre-filled so a new install has
+/** The one hub this fleet talks to (E123). Pre-filled so a new install has
  * nothing to type: the chatter opens «Аккаунт ChatGoose» and signs in. The
  * field stays editable under «Дополнительно» for a staging/self-hosted core. */
 export const DEFAULT_AGENCY_HUB_BASE_URL = 'https://gosling-agency.ru';
@@ -33,7 +33,7 @@ export const PERSONA_CATALOG_FETCHED_AT_STORAGE_KEY = 'personaCatalogFetchedAt';
 // issued mid-edit. The in-memory Settings shape still carries both fields
 // (hydrated at load); only the PERSISTED layout changed.
 export const AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY = 'agencyHubDeviceToken';
-/** TOMBSTONE (E79, v17). The legacy chatter API key is gone — from the UI, the
+/** TOMBSTONE (E123, v17). The legacy chatter API key is gone — from the UI, the
  * Settings shape, the bearer resolver and the storage layout. This constant
  * survives for exactly one purpose: naming the storage.local key the v17
  * migration REMOVES. E19's «wipe to empty strings, never remove the key» rule

@@ -1,5 +1,5 @@
 // The custody of the one hub credential this extension holds, and the two
-// rules that protect it (E79 / plan §4.5).
+// rules that protect it (E123 / plan §4.5).
 //
 // 1. ONE FIFO. Every mutation of the stored sign-in — issue, wipe, self-heal —
 //    runs inside the same promise queue. Without it a sign-in landing mid
@@ -81,6 +81,17 @@ export function selfHealingUnauthorizedReason(
     : null;
 }
 
+/** The digest of the last bearer this process actually signed out.
+ *
+ * Two callers can ask to heal the SAME rejected bearer: the SDK's `onAuthError`
+ * hook (which covers raw/stream paths that never reach an error mapper) and the
+ * mapper itself (which needs the ANSWER, to decide whether to show «сессия
+ * завершена» or the fail-closed card). Without this memo the second caller
+ * arrives after the first has already emptied the slot, finds no match, and
+ * reports «did not heal» about a device it just healed — so the chatter would
+ * get the wrong card exactly when the mechanism worked. */
+let lastHealedBearerDigest: string | null = null;
+
 /**
  * Clear the sign-in that a named 401 just invalidated — but only if the bearer
  * that was rejected is still the one on disk. The comparison runs on sha-256
@@ -99,18 +110,24 @@ export async function healRevokedHubSession(rejectedBearer: string): Promise<boo
   const rejectedDigest = sha256Hex(rejected);
   return withAgencyHubCustodyLock(async () => {
     try {
+      if (lastHealedBearerDigest === rejectedDigest) {
+        // Already signed this exact bearer out (see the memo above). Idempotent,
+        // and the honest answer is still «yes, this device was signed out».
+        return true;
+      }
       const raw = await browser.storage.local.get(AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY);
       const stored = raw[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY];
       const storedToken = typeof stored === 'string' ? stored.trim() : '';
       if (!storedToken || sha256Hex(storedToken) !== rejectedDigest) {
         // Someone signed in again between the request and its answer (or this
-        // device was already signed out). Not ours to erase.
+        // device was already signed out by something else). Not ours to erase.
         return false;
       }
       await wipeHubCustody();
       await browser.storage.local
         .remove(AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY)
         .catch(() => undefined);
+      lastHealedBearerDigest = rejectedDigest;
       return true;
     } catch (error) {
       logWarn('Hub session self-heal failed', {
@@ -119,6 +136,12 @@ export async function healRevokedHubSession(rejectedBearer: string): Promise<boo
       return false;
     }
   });
+}
+
+/** Test seam: forget which bearer was last signed out. Production never calls
+ * this — the memo is per-worker and dies with it. */
+export function resetHealedBearerMemo(): void {
+  lastHealedBearerDigest = null;
 }
 
 /** `Firefox · Windows` (Р7). One short, human device name — never a build

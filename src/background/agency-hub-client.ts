@@ -89,7 +89,7 @@ interface AgencyHubConversationProfileResponse {
 type FetchLike = typeof fetch;
 
 /** The hub bearer: the device-bound credential «Войти» minted, and nothing
- * else. The legacy-key fallback went out with v17 (E79) — a client that finds
+ * else. The legacy-key fallback went out with v17 (E123) — a client that finds
  * no sign-in here asks the chatter to sign in, it does not reach for a second
  * credential class. */
 export function resolveHubBearer(
@@ -266,14 +266,14 @@ export class AgencyHubClient {
     if (!baseUrl || !bearer) throw new ChatGooseError('hub_missing_api_key');
     try {
       return await this.sdkFor(baseUrl, bearer, signal).followerOutreachAttempt({ params: { pageLabel }, body });
-    } catch (error) { throw this.toHubError(error, 'follower outreach'); }
+    } catch (error) { throw await this.toHubError(error, 'follower outreach', bearer); }
   }
 
   /** Map SDK failures back onto the public contract the callers already
    * handle: HTTP errors become ChatGooseError keys, aborts resurface as
    * AbortError DOMExceptions, and plain network failures rethrow as bare
    * Errors so their message survives into the result's `reason`. */
-  private toHubError(error: unknown, op: string): ChatGooseError {
+  private async toHubError(error: unknown, op: string, bearer?: string): Promise<ChatGooseError> {
     if (error instanceof KernelApiError) {
       if (error.category === 'network') {
         if (error.code === 'aborted') {
@@ -287,15 +287,24 @@ export class AgencyHubClient {
         status: error.status ?? 0,
         response: responseSnippet,
       });
-      const key = error.status === 401 || error.status === 403
-        ? (selfHealingUnauthorizedReason(error) ? 'hub_session_ended' : 'hub_unauthorized')
-        : 'hub_request_failed';
-      return new ChatGooseError(key, {
-        details: {
-          status: error.status ?? 0,
-          responseSnippet,
-        },
-      });
+      const details = { status: error.status ?? 0, responseSnippet };
+      if (error.status === 401 || error.status === 403) {
+        // §4.5: «Сессия устройства завершена» is a claim about THIS device, so
+        // it is only made when the device was actually signed out. The wipe
+        // re-checks the digest under the custody FIFO, so a 401 that belonged to
+        // a bearer a newer sign-in has already replaced heals nothing — and then
+        // the honest card is the fail-closed one, not a lie about a live session.
+        const healed = selfHealingUnauthorizedReason(error) && bearer
+          ? await healRevokedHubSession(bearer)
+          : false;
+        // Both keys constructed LITERALLY: the registry-producer gate reads the
+        // source for `new ChatGooseError('key')`, and a computed key would make
+        // a live registry entry look orphaned.
+        return healed
+          ? new ChatGooseError('hub_session_ended', { details })
+          : new ChatGooseError('hub_unauthorized', { details });
+      }
+      return new ChatGooseError('hub_request_failed', { details });
     }
     if (error instanceof ChatGooseError || (error instanceof DOMException && error.name === 'AbortError')) {
       throw error;
@@ -319,7 +328,7 @@ export class AgencyHubClient {
     try {
       return await this.sdkFor(baseUrl, bearer, signal).pages();
     } catch (error) {
-      throw this.toHubError(error, 'pages list');
+      throw await this.toHubError(error, 'pages list', bearer);
     }
   }
 
@@ -362,7 +371,7 @@ export class AgencyHubClient {
       if (error instanceof KernelApiError && error.status === 404) {
         return null;
       }
-      throw this.toHubError(error, 'conversation profile fetch');
+      throw await this.toHubError(error, 'conversation profile fetch', apiKey);
     }
   }
 
@@ -384,7 +393,7 @@ export class AgencyHubClient {
         body: { body, ...(generatedAtMs ? { generatedAtMs } : {}) },
       });
     } catch (error) {
-      throw this.toHubError(error, 'fan profile push');
+      throw await this.toHubError(error, 'fan profile push', apiKey);
     }
   }
 
@@ -399,7 +408,7 @@ export class AgencyHubClient {
         body: { events },
       });
     } catch (error) {
-      throw this.toHubError(error, 'AI usage batch');
+      throw await this.toHubError(error, 'AI usage batch', apiKey);
     }
   }
 
@@ -575,7 +584,7 @@ export class AgencyHubClient {
       }
       // Timeout / hub_request_failed / 401/403 → could not check; surface as a
       // throw so the caller reports 'unavailable', not "no recap".
-      throw this.toHubError(error, 'recap status fetch');
+      throw await this.toHubError(error, 'recap status fetch', bearer);
     }
   }
 
@@ -646,7 +655,7 @@ export class AgencyHubClient {
         })),
       };
     } catch (error) {
-      throw this.toHubError(error, 'top spenders fetch');
+      throw await this.toHubError(error, 'top spenders fetch', bearer);
     }
   }
 
@@ -680,7 +689,7 @@ export class AgencyHubClient {
       const response = await this.sdkFor(baseUrl, bearer, signal).aiPersonaCatalog();
       return response.personas;
     } catch (error) {
-      throw this.toHubError(error, 'persona catalog');
+      throw await this.toHubError(error, 'persona catalog', bearer);
     }
   }
 
@@ -784,7 +793,13 @@ export class AgencyHubClient {
         ok: true,
         username: me.user.username,
         role: me.user.role,
-        pages: me.user.assignedPages.map((page) => page.label),
+        // FANSLY pages only. A chatter can hold pages on both platforms (the
+        // account is platform-neutral — that is the whole point of E123), and
+        // this row is labelled «Страницы Fansly»: listing an OnlyFans page here
+        // would promise something this client cannot open.
+        pages: me.user.assignedPages
+          .filter((page) => page.platform === 'fansly')
+          .map((page) => page.label),
       };
     } catch (error) {
       if (error instanceof KernelApiError && (error.status === 401 || error.status === 403)) {
@@ -819,7 +834,7 @@ export class AgencyHubClient {
         return { ok: false, error: hubError('hub_timeout') };
       }
 
-      // One credential class, one rejection card (E79): the registry entry
+      // One credential class, one rejection card (E123): the registry entry
       // already says «войдите заново», so there is nothing left to disambiguate
       // — the old copy existed only to name WHICH of two credentials was sent.
       return {

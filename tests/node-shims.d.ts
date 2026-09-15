@@ -34,6 +34,10 @@ declare const process: {
   execPath: string;
 };
 
+declare module 'node:fs' {
+  export function writeFileSync(path: string | URL, data: string): void;
+}
+
 declare module 'node:fs/promises' {
   export function mkdtemp(prefix: string): Promise<string>;
   export function mkdir(

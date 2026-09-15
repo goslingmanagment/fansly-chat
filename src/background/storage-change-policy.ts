@@ -60,7 +60,7 @@ export function shouldInvalidateSpendersForStorageChanges(
   }
 
   // The sign-in has its own v13 custody key. A change can alter the visible
-  // Hub pages even when the URL remains the same. (v17/E79: the legacy-key slot
+  // Hub pages even when the URL remains the same. (v17/E123: the legacy-key slot
   // is retired — its removal event carries no credential and refreshes nothing.)
   if (changes.agencyHubDeviceToken) {
     return true;

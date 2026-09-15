@@ -245,7 +245,7 @@ export const COPY = {
   },
 
   /**
-   * First-run checklist (E79). The chatter's own three steps, in the order he
+   * First-run checklist (E123). The chatter's own three steps, in the order he
    * actually lives them: the invite link sets a password, that password signs
    * the extension in, and then Fansly is opened so the accounts appear.
    */
@@ -277,7 +277,7 @@ export const COPY = {
 
   hub: {
     title: 'Аккаунт ChatGoose',
-    /** E79: one account for every client. The chatter knows a login, a password
+    /** E123: one account for every client. The chatter knows a login, a password
      * and his devices — nothing below this line names a credential. */
     subtitle: 'Один логин и пароль — на расширение и на приложение. Их выдаёт владелец по ссылке-приглашению.',
     /** The four zone captions, in the working order of the pane. */
