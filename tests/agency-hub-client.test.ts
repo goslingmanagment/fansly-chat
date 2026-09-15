@@ -835,6 +835,43 @@ describe('AgencyHubClient', () => {
     );
   });
 
+  it('a NAMED 401 becomes the self-healing card; a bare one stays fail-closed (§4.5)', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    (globalThis as Record<string, unknown>).browser = {
+      permissions: { contains: vi.fn(async () => true) },
+      storage: {
+        local: {
+          get: vi.fn(async () => ({})),
+          set: vi.fn(async () => undefined),
+          remove: vi.fn(async () => undefined),
+        },
+      },
+    };
+
+    const named = new AgencyHubClient(async () => jsonResponse(
+      { error: 'Unauthorized', message: 'revoked', statusCode: 401, reason: 'token_revoked' },
+      401,
+    ));
+    const namedResult = await named.testConnection(
+      { agencyHubBaseUrl: 'http://localhost:3000', agencyHubDeviceToken: 'agency_hub_device_x' },
+      new AbortController().signal,
+    );
+    expect(namedResult.error?.code).toBe('CG-HUB-19');
+    expect(namedResult.error?.message).toBe('Сессия устройства завершена.');
+
+    // No reason from the server → no verdict from us. The chatter keeps his
+    // sign-in and gets the fail-closed card instead.
+    const bare = new AgencyHubClient(async () => jsonResponse(
+      { error: 'Unauthorized', message: 'nope', statusCode: 401 },
+      401,
+    ));
+    const bareResult = await bare.testConnection(
+      { agencyHubBaseUrl: 'http://localhost:3000', agencyHubDeviceToken: 'agency_hub_device_x' },
+      new AbortController().signal,
+    );
+    expect(bareResult.error?.code).toBe('CG-HUB-03');
+  });
+
   it('says «войдите заново» without naming the credential (E79 vocabulary)', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ error: 'unauthorized' }, 401)));

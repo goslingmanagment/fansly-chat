@@ -350,7 +350,27 @@ describe('kernel feature gateway', () => {
     expect(quotaDenied.key).toBe('hub_quota_exceeded');
     expect(quotaDenied.code).toBe('CG-HUB-09');
     expect((await failWith(new Response('{"message":"down"}', { status: 503 }))).key).toBe('service_unavailable');
+    // A bare 401 fails closed: the sign-in stays, the chatter gets the honest
+    // «Agency Hub отклонил вход» card (§4.5).
     expect((await failWith(new Response('{"message":"nope"}', { status: 401 }))).key).toBe('hub_unauthorized');
+    // …a 401 the kernel gave a reason for signs this device out and says so.
+    const revoked = await failWith(new Response(
+      '{"error":"Unauthorized","message":"revoked","statusCode":401,"reason":"token_revoked"}',
+      { status: 401 },
+    ));
+    expect(revoked.key).toBe('hub_session_ended');
+    expect(revoked.code).toBe('CG-HUB-19');
+    const expired = await failWith(new Response(
+      '{"error":"Unauthorized","message":"expired","statusCode":401,"reason":"token_expired"}',
+      { status: 401 },
+    ));
+    expect(expired.key).toBe('hub_session_ended');
+    // A reason this client does not act on is NOT self-healed.
+    const unknownReason = await failWith(new Response(
+      '{"error":"Unauthorized","message":"?","statusCode":401,"reason":"user_disabled"}',
+      { status: 401 },
+    ));
+    expect(unknownReason.key).toBe('hub_unauthorized');
 
     // Missing terminal frame = truncated generation → never presented as done.
     const truncated = await failWith(sseResponse([META, { type: 'content_delta', text: 'partial' }]));
