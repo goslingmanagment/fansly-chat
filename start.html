@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#f6f2ea" />
+<meta name="description" content="Как начать работать в ChatGoose: один логин и пароль на расширение для Fansly и приложение для OnlyFans." />
+<title>ChatGoose — как начать</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=Source+Serif+4:ital,wght@0,600;1,600&display=swap" rel="stylesheet" />
+<style>
+:root{--paper:#f6f2ea;--white:#fffdf8;--tint:#eee8de;--ink:#2b251f;--soft:#6d6256;--line:#dcd3c6;--clay:#a74d32;--clay-hover:#893a25;--peach:#f1dfd2;--green:#346349;--sans:"Hanken Grotesk",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--serif:"Source Serif 4",Georgia,serif;--mono:ui-monospace,SFMono-Regular,Consolas,monospace}
+
+*,*::before,*::after{box-sizing:border-box}
+*{margin:0}
+body{background:var(--paper);color:var(--ink);font:400 16px/1.6 var(--sans);-webkit-font-smoothing:antialiased}
+a{color:inherit}
+button{font:inherit;cursor:pointer}
+a:focus-visible,button:focus-visible{outline:3px solid var(--clay);outline-offset:4px}
+[hidden]{display:none!important}
+img{display:block;max-width:100%}
+
+.wrap{width:min(860px,calc(100% - 40px));margin:auto}
+.topbar{border-bottom:1px solid var(--line)}
+.nav{min-height:78px;display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:11px;font-size:23px;font-weight:700;letter-spacing:-1px;text-decoration:none}
+.brand em{font-style:normal;color:var(--clay)}
+.nav-version{font:500 12px/1.5 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--soft)}
+
+.hero{padding:52px 0 26px}
+.eyebrow{display:inline-flex;align-items:center;gap:11px;font:500 12px/1.5 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--clay)}
+.dot{height:7px;width:7px;border-radius:100%;background:var(--clay)}
+h1{font:600 clamp(34px,6vw,54px)/1.1 var(--serif);letter-spacing:-.045em;margin:18px 0 16px}
+.lede{font-size:18px;line-height:1.65;color:var(--soft);max-width:560px}
+
+.tabs{display:flex;gap:8px;margin:36px 0 0;flex-wrap:wrap}
+.tab{background:none;border:1px solid var(--line);border-radius:6px;padding:11px 20px;font-weight:600;color:var(--soft);transition:border-color .16s,color .16s,background .16s}
+.tab:hover{border-color:var(--clay);color:var(--clay)}
+.tab[aria-selected="true"]{background:var(--ink);border-color:var(--ink);color:#fff9f2}
+
+.panel{background:var(--white);border:1px solid var(--line);border-radius:12px;padding:clamp(22px,4vw,34px);margin:18px 0 44px}
+.panel h2{font:600 clamp(23px,3vw,29px)/1.2 var(--serif);letter-spacing:-.03em;margin-bottom:8px}
+.panel-sub{color:var(--soft);font-size:15px;margin-bottom:26px}
+
+ol.steps{list-style:none;counter-reset:s;padding:0;display:grid;gap:20px}
+ol.steps li{counter-increment:s;display:grid;grid-template-columns:34px 1fr;gap:16px;align-items:start}
+ol.steps li::before{content:counter(s);display:grid;place-items:center;width:34px;height:34px;border-radius:50%;background:var(--peach);color:var(--clay);font:600 15px var(--mono)}
+.step-title{font-weight:600;font-size:17px;margin-bottom:5px}
+.step-body{color:var(--soft);font-size:15px}
+.step-body code{font:500 13px var(--mono);background:var(--tint);border-radius:4px;padding:2px 6px;word-break:break-all}
+
+.cta{display:inline-flex;align-items:center;gap:14px;background:var(--clay);color:#fff9f2;padding:13px 20px;border-radius:6px;font-weight:600;text-decoration:none;margin-top:12px;transition:background .18s}
+.cta:hover{background:var(--clay-hover)}
+.cta-ghost{display:inline-block;margin-top:12px;font-size:14px;border-bottom:1px solid var(--line);padding:6px 0;text-decoration:none}
+.cta-ghost:hover{border-color:var(--clay);color:var(--clay)}
+
+.note{margin-top:26px;border-left:3px solid var(--peach);padding:2px 0 2px 16px;color:var(--soft);font-size:15px}
+.note b{color:var(--ink)}
+
+.faq{border-top:1px solid var(--line);padding:34px 0 0}
+.faq h2{font:600 24px/1.2 var(--serif);letter-spacing:-.03em;margin-bottom:18px}
+details{border-bottom:1px solid var(--line);padding:14px 0}
+summary{cursor:pointer;font-weight:600;list-style:none}
+summary::-webkit-details-marker{display:none}
+summary::after{content:"+";float:right;color:var(--clay);font:600 18px var(--mono)}
+details[open] summary::after{content:"–"}
+details p{color:var(--soft);font-size:15px;margin-top:10px}
+
+footer{border-top:1px solid var(--line);margin-top:44px;padding:26px 0 40px;color:var(--soft);font-size:13px;display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
+footer a{text-decoration:none}
+footer a:hover{color:var(--clay)}
+
+@media (max-width:560px){
+  ol.steps li{grid-template-columns:28px 1fr;gap:12px}
+  ol.steps li::before{width:28px;height:28px;font-size:13px}
+  .tab{flex:1 1 auto;text-align:center}
+}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="wrap nav">
+    <a class="brand" href="index.html"><span>Chat<em>Goose</em></span></a>
+    <span class="nav-version">Как начать</span>
+  </div>
+</header>
+
+<main class="wrap" id="main">
+  <section class="hero">
+    <span class="eyebrow"><span class="dot"></span>Один аккаунт</span>
+    <h1>Один логин и пароль — на всё</h1>
+    <p class="lede">
+      Владелец присылает вам в Telegram ссылку-приглашение. Вы открываете её, придумываете пароль —
+      и этой парой входите и в расширение для Fansly, и в приложение для OnlyFans.
+      Заводить что-то отдельно для каждой программы не нужно.
+    </p>
+  </section>
+
+  <div class="tabs" role="tablist" aria-label="Выберите платформу">
+    <button class="tab" role="tab" id="tab-fansly" aria-controls="panel-fansly" aria-selected="true" type="button">Fansly — расширение</button>
+    <button class="tab" role="tab" id="tab-onlyfans" aria-controls="panel-onlyfans" aria-selected="false" type="button">OnlyFans — приложение</button>
+  </div>
+
+  <section class="panel" role="tabpanel" id="panel-fansly" aria-labelledby="tab-fansly" tabindex="0">
+    <h2>Fansly: расширение для Firefox</h2>
+    <p class="panel-sub">Работает внутри самого Fansly — панель появляется прямо над полем сообщения.</p>
+    <ol class="steps">
+      <li>
+        <div>
+          <div class="step-title">Откройте ссылку от владельца и задайте пароль</div>
+          <div class="step-body">
+            В ссылке уже написан ваш логин — придумайте пароль и повторите его. Ссылка одноразовая и живёт 7 дней.
+            Если она перестала открываться, попросите владельца прислать новую.
+          </div>
+        </div>
+      </li>
+      <li>
+        <div>
+          <div class="step-title">Установите расширение</div>
+          <div class="step-body">
+            Нужен Firefox. Откройте страницу установки и подтвердите добавление; дальше расширение обновляется само.
+          </div>
+          <a class="cta" href="index.html">Установить расширение →</a>
+        </div>
+      </li>
+      <li>
+        <div>
+          <div class="step-title">Войдите</div>
+          <div class="step-body">
+            Настройки ChatGoose → раздел <b>«Аккаунт ChatGoose»</b> → логин, пароль, «Войти».
+            Firefox один раз спросит доступ к <code>gosling-agency.ru</code> — подтвердите, без этого вход не пройдёт.
+            Пароль на компьютере не сохраняется.
+          </div>
+        </div>
+      </li>
+      <li>
+        <div>
+          <div class="step-title">Откройте Fansly</div>
+          <div class="step-body">
+            Зайдите на страницу модели и откройте любой диалог. Аккаунт появится в «Аккаунтах» сам — останется назначить персону.
+          </div>
+          <a class="cta-ghost" href="guide.html">Подробный гайд по функциям →</a>
+        </div>
+      </li>
+    </ol>
+    <p class="note">
+      <b>Вход не проходит?</b> Чаще всего дело в одном из двух: Firefox не дал доступ к адресу агентства
+      (нажмите «Войти» ещё раз и подтвердите) или пароль был изменён. В обоих случаях напишите владельцу — он пришлёт новую ссылку.
+    </p>
+  </section>
+
+  <section class="panel" role="tabpanel" id="panel-onlyfans" aria-labelledby="tab-onlyfans" tabindex="0" hidden>
+    <h2>OnlyFans: приложение для Windows</h2>
+    <p class="panel-sub">Отдельная программа с рабочим столом для диалогов — ставится один раз.</p>
+    <ol class="steps">
+      <li>
+        <div>
+          <div class="step-title">Откройте ссылку от владельца и задайте пароль</div>
+          <div class="step-body">
+            Тот же шаг, что и для Fansly, и тот же логин с паролем. Если вы уже сделали это для расширения — переходите ко второму шагу.
+          </div>
+        </div>
+      </li>
+      <li>
+        <div>
+          <div class="step-title">Скачайте приложение</div>
+          <div class="step-body">
+            Установщик лежит на <code>ext.gosling-agency.ru/desktop/</code>. Скачайте, запустите и дождитесь конца установки —
+            дальше приложение обновляется само.
+          </div>
+          <a class="cta" href="https://ext.gosling-agency.ru/desktop/">Скачать приложение →</a>
+        </div>
+      </li>
+      <li>
+        <div>
+          <div class="step-title">Войдите</div>
+          <div class="step-body">
+            При первом запуске приложение сразу просит логин и пароль — те же, что вы задали по ссылке. Пароль на компьютере не сохраняется.
+          </div>
+        </div>
+      </li>
+      <li>
+        <div>
+          <div class="step-title">Начните смену</div>
+          <div class="step-body">
+            Страницы, к которым вас подключил владелец, появятся в приложении сами. Если их нет — значит доступ ещё не выдан, напишите владельцу.
+          </div>
+        </div>
+      </li>
+    </ol>
+    <p class="note">
+      <b>Работаете и там, и там?</b> Это нормально: логин и пароль общие. В каждой программе вход отдельный —
+      и выйти из одной можно, не трогая другую.
+    </p>
+  </section>
+
+  <section class="faq">
+    <h2>Короткие ответы</h2>
+    <details>
+      <summary>Забыл пароль</summary>
+      <p>Напишите владельцу — он пришлёт ссылку для нового пароля. Как только вы зададите его, все прежние входы завершатся, и во всех программах нужно будет войти заново.</p>
+    </details>
+    <details>
+      <summary>Где посмотреть свои устройства</summary>
+      <p>В кабинете на сайте агентства: кнопка «Аккаунт» в настройках расширения открывает его. Там же меняется пароль и видно, сколько вы потратили на генерации.</p>
+    </details>
+    <details>
+      <summary>Сменил компьютер</summary>
+      <p>Просто войдите на новом — старый вход останется жить своей жизнью, пока вы не завершите его в кабинете. Так безопаснее: потерянный ноутбук отключается одной кнопкой.</p>
+    </details>
+    <details>
+      <summary>Ссылка-приглашение не открывается</summary>
+      <p>Она одноразовая и действует 7 дней. Если вы уже задали по ней пароль или прошла неделя — попросите у владельца новую.</p>
+    </details>
+  </section>
+</main>
+
+<footer class="wrap">
+  <span>ChatGoose &middot; Gosling Agency</span>
+  <span><a href="guide.html">Гайд</a> &middot; <a href="changelog.html">История версий</a></span>
+</footer>
+
+<script>
+(function () {
+  var tabs = Array.prototype.slice.call(document.querySelectorAll('[role="tab"]'));
+  function select(tab) {
+    tabs.forEach(function (candidate) {
+      var selected = candidate === tab;
+      candidate.setAttribute('aria-selected', selected ? 'true' : 'false');
+      var panel = document.getElementById(candidate.getAttribute('aria-controls'));
+      if (panel) panel.hidden = !selected;
+    });
+  }
+  tabs.forEach(function (tab) {
+    tab.addEventListener('click', function () { select(tab); });
+    tab.addEventListener('keydown', function (event) {
+      if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
+      event.preventDefault();
+      var step = event.key === 'ArrowRight' ? 1 : -1;
+      var next = tabs[(tabs.indexOf(tab) + step + tabs.length) % tabs.length];
+      select(next);
+      next.focus();
+    });
+  });
+  // Deep link: /start.html#onlyfans opens the app tab straight away, so the
+  // invite message can point a chatter at exactly his half of the page.
+  if (location.hash === '#onlyfans') select(document.getElementById('tab-onlyfans'));
+})();
+</script>
+
+</body>
+</html>

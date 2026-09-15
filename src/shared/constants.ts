@@ -71,8 +71,6 @@ export const LAST_SEEN_VERSION_STORAGE_KEY = 'chatgoose:lastSeenVersion';
 export const CHANGELOG_URL = 'https://ext.gosling-agency.ru/changelog.html';
 /** Detailed 2.0 release guide; deployed beside the chronological archive. */
 export const WHATS_NEW_2_URL = 'https://ext.gosling-agency.ru/whats-new-2.html';
-/** The 2.4 release note — the sign-in release (E79). */
-export const WHATS_NEW_3_URL = 'https://ext.gosling-agency.ru/whats-new-3.html';
 /** «Как начать»: the one page both clients point a new chatter at (plan §6.2).
  * Static, published beside the update feed by `scripts/deploy.sh`. */
 export const START_PAGE_URL = 'https://ext.gosling-agency.ru/start.html';

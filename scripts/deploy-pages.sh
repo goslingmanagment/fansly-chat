@@ -11,6 +11,7 @@ readonly BASE_URL="https://ext.gosling-agency.ru"
 
 readonly INSTALL_PAGE_FILE="$ROOT_DIR/install.html"
 readonly WHATS_NEW_PAGE_FILE="$ROOT_DIR/whats-new-2.html"
+readonly START_PAGE_FILE="$ROOT_DIR/start.html"
 readonly GUIDE_PAGE_FILE="$ROOT_DIR/guide.html"
 readonly CHANGELOG_PAGE_FILE="$ROOT_DIR/changelog.html"
 readonly MASCOT_FILE="$ROOT_DIR/mascot.png"
@@ -66,7 +67,7 @@ main() {
   for command in node ssh scp curl; do
     command -v "$command" >/dev/null || fail "Missing command: $command"
   done
-  for file in "$INSTALL_PAGE_FILE" "$GUIDE_PAGE_FILE" "$CHANGELOG_PAGE_FILE" "$WHATS_NEW_PAGE_FILE" "$MASCOT_FILE" "$ROOT_DIR/manifest.json"; do
+  for file in "$INSTALL_PAGE_FILE" "$GUIDE_PAGE_FILE" "$CHANGELOG_PAGE_FILE" "$WHATS_NEW_PAGE_FILE" "$START_PAGE_FILE" "$MASCOT_FILE" "$ROOT_DIR/manifest.json"; do
     [[ -f "$file" ]] || fail "Missing file: $file"
   done
   local version
@@ -93,6 +94,7 @@ main() {
   local remote_tmp_guide="$REMOTE_DIR/.guide.html.upload.$$"
   local remote_tmp_changelog="$REMOTE_DIR/.changelog.html.upload.$$"
   local remote_tmp_whats_new="$REMOTE_DIR/.whats-new-2.html.upload.$$"
+  local remote_tmp_start="$REMOTE_DIR/.start.html.upload.$$"
   local remote_tmp_mascot="$REMOTE_DIR/.mascot.png.upload.$$"
   log "Uploading pages to ${VPS_HOST}"
   ssh "$VPS_HOST" "mkdir -p '$REMOTE_DIR'"
@@ -100,18 +102,20 @@ main() {
   scp "$GUIDE_PAGE_FILE" "${VPS_HOST}:${remote_tmp_guide}"
   scp "$CHANGELOG_PAGE_FILE" "${VPS_HOST}:${remote_tmp_changelog}"
   scp "$WHATS_NEW_PAGE_FILE" "${VPS_HOST}:${remote_tmp_whats_new}"
+  scp "$START_PAGE_FILE" "${VPS_HOST}:${remote_tmp_start}"
   scp "$MASCOT_FILE" "${VPS_HOST}:${remote_tmp_mascot}"
   ssh "$VPS_HOST" "
     set -euo pipefail
-    chmod 644 '$remote_tmp_index' '$remote_tmp_guide' '$remote_tmp_changelog' '$remote_tmp_whats_new' '$remote_tmp_mascot'
+    chmod 644 '$remote_tmp_index' '$remote_tmp_guide' '$remote_tmp_changelog' '$remote_tmp_whats_new' '$remote_tmp_start' '$remote_tmp_mascot'
     mv '$remote_tmp_whats_new' '$REMOTE_DIR/whats-new-2.html'
+    mv '$remote_tmp_start' '$REMOTE_DIR/start.html'
     mv '$remote_tmp_mascot' '$REMOTE_DIR/mascot.png'
     mv '$remote_tmp_guide' '$REMOTE_DIR/guide.html'
     mv '$remote_tmp_changelog' '$REMOTE_DIR/changelog.html'
     mv '$remote_tmp_index' '$REMOTE_DIR/index.html'
   "
   local page status
-  for page in index.html guide.html changelog.html whats-new-2.html; do
+  for page in index.html guide.html changelog.html whats-new-2.html start.html; do
     status="$(curl --silent --show-error --location --output /dev/null --write-out '%{http_code}' --retry 3 --connect-timeout 10 --max-time 30 "${BASE_URL}/$page")" || fail "Cannot verify $page"
     [[ "$status" == "200" ]] || fail "Public $page returned HTTP $status"
   done
