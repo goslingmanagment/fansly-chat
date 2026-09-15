@@ -25,6 +25,7 @@ import {
 } from './dom.js';
 import { COPY } from './copy.js';
 import { renderHotkeysPane } from './hotkeys-pane.js';
+import { createSignInGate } from './sign-in-gate.js';
 import { detectLabelPlatform } from '../shared/hotkeys.js';
 import {
   buildPersonaRowViews,
@@ -660,12 +661,16 @@ async function render(): Promise<void> {
     renderStorageUnavailable();
     return;
   }
-  // Start live session discovery immediately, but do not put it on the
+  const state = await readStorageState();
+  // Start live session discovery after sign-in, but do not put it on the
   // critical path for the local settings UI. getSessionsSnapshot may spend up
   // to five seconds resolving a Fansly identity. It also owns identity
   // rekey/reconcile, so account controls stay in a loading state until it has
   // finished and we have re-read the resulting storage state.
   const loadSessionsResult = (): Promise<SessionsResult> => {
+    if (!state.settings.agencyHubDeviceToken.trim()) {
+      return Promise.resolve({ ok: true, sessions: [] });
+    }
     lastSessionsPollAt = Date.now();
     return sendRuntimeRequest('getSessionsSnapshot')
       .then((sessions): SessionsResult => (
@@ -675,11 +680,11 @@ async function render(): Promise<void> {
       ))
       .catch((error: unknown): SessionsResult => ({ ok: false, error }));
   };
+  const sessionDiscoveryStarted = Boolean(state.settings.agencyHubDeviceToken.trim());
   const sessionsResultPromise = loadSessionsResult();
   // This first read must stay non-mutating. Session discovery owns account
   // identity reconciliation and runs concurrently; a full-state migration
   // write from an older snapshot could otherwise restore pre-rekey mappings.
-  const state = await readStorageState();
 
   // One-time: reuse this render's state instead of a second storage read;
   // installUiTheme keeps itself current afterwards (storage + OS listeners).
@@ -700,6 +705,19 @@ async function render(): Promise<void> {
   // Every pane now has content, so the rail carries the full route list.
   const shell = createShell(root, OPTIONS_PANES);
   cleanupTasks.push(() => shell.dispose());
+  const cabinet = root.querySelector<HTMLElement>('.chatgoose-cabinet')!;
+  cabinet.hidden = !state.settings.agencyHubDeviceToken.trim();
+  cabinet.inert = cabinet.hidden;
+  // A rejection belongs to the exact address/credential that was checked.
+  // It cannot close the cabinet after another tab installs a new credential.
+  let unauthorizedSignInSignature: string | null = null;
+  const signInRequired = (): boolean =>
+    !state.settings.agencyHubDeviceToken.trim() ||
+    unauthorizedSignInSignature === buildAgencyHubConnectionSignature(
+      state.settings.agencyHubBaseUrl, state.settings.agencyHubDeviceToken,
+    );
+  let updateSignInGate = (): void => undefined;
+  let refreshSignedInSessions = (): void => undefined;
 
   /** Assigned by the deep-link block below; every repaint that can produce the
    * highlight's target row calls it through this hook, so nothing depends on
@@ -1973,20 +1991,30 @@ async function render(): Promise<void> {
   hubSignInUserInput.autocomplete = 'username';
   hubSignInUserInput.className = 'chatgoose-input';
   hubSignInUserInput.placeholder = COPY.hub.signInLoginPlaceholder;
+  hubSignInUserInput.required = true;
+  hubSignInUserInput.name = 'username';
 
   const hubSignInPasswordInput = document.createElement('input');
   hubSignInPasswordInput.type = 'password';
   hubSignInPasswordInput.autocomplete = 'current-password';
   hubSignInPasswordInput.className = 'chatgoose-input';
   hubSignInPasswordInput.placeholder = COPY.hub.signInPasswordPlaceholder;
+  hubSignInPasswordInput.required = true;
+  hubSignInPasswordInput.name = 'password';
 
-  const hubSignInButton = createButton(COPY.hub.signIn, true);
+  const hubSignInButton = createButton(COPY.hub.signIn);
+  hubSignInButton.type = 'submit';
+  const hubSignInRow = document.createElement('form');
+  hubSignInRow.style.display = 'grid';
+  hubSignInRow.style.gap = '8px';
   const hubSignInMeta = document.createElement('div');
   hubSignInMeta.className = 'chatgoose-meta';
   // Tagged so a test can pin WHICH line this is: it is the one line that survives
   // a repaint by itself (`renderHubSignInState` only fills it when empty), so a
   // stale sign-in message next to a signed-out pill is a real failure mode.
   hubSignInMeta.dataset.role = 'hub-signin-meta';
+  hubSignInMeta.setAttribute('role', 'status');
+  hubSignInMeta.setAttribute('aria-live', 'polite');
 
   let hubSignInFormExpanded = false;
   const hubReissueButton = createButton(COPY.hub.signInAgain, true);
@@ -2072,18 +2100,10 @@ async function render(): Promise<void> {
 
   const renderHubSignInState = (): void => {
     const hasToken = Boolean(state.settings.agencyHubDeviceToken.trim());
-    // The truth about the token lives in ONE place — the Device token row below.
-    // (The duplicate «Device token active ✓» pill died with the М2 re-layout;
-    // the static fallback note covers the signed-in copy.)
-    if (!hubSignInMeta.textContent && !hasToken) {
-      // With no token the line IS the first-sign-in card's copy: who hands out
-      // the credentials, and that the password is never stored on this device.
-      hubSignInMeta.textContent = COPY.hub.signInHint;
-    }
     // With a live token the credential form reads as unfinished business —
     // fold it away; «Перевыпустить токен» brings it back for rotation.
     // The inline grid display would override [hidden] — set both.
-    hubSignInRow.hidden = hasToken && !hubSignInFormExpanded;
+    hubSignInRow.hidden = hasToken && !hubSignInFormExpanded && !signInRequired();
     hubSignInRow.style.display = hubSignInRow.hidden ? 'none' : 'grid';
     hubReissueButton.hidden = !hasToken || hubSignInFormExpanded;
     hubAccountLink.hidden = !hasToken;
@@ -2120,6 +2140,7 @@ async function render(): Promise<void> {
     hubDangerZone.hidden = hubSignOutButton.hidden
       && hubSignOutConfirmRow.hidden
       && !hubSignOutStatus.textContent;
+    updateSignInGate();
   };
 
   hubReissueButton.addEventListener('click', () => {
@@ -2128,15 +2149,24 @@ async function render(): Promise<void> {
     hubSignInUserInput.focus();
   });
 
-  hubSignInButton.addEventListener('click', () => {
+  const setSignInBusy = (busy: boolean): void => {
+    hubSignInRow.setAttribute('aria-busy', String(busy));
+    for (const control of [hubSignInButton, hubSignInUserInput, hubSignInPasswordInput, agencyHubUrlInput]) {
+      control.disabled = busy || disposed || futureSchemaObserved !== null;
+    }
+  };
+  hubSignInRow.addEventListener('submit', (event) => {
+    event.preventDefault();
+    if (hubSignInButton.disabled || disposed || futureSchemaObserved !== null) return;
     void (async () => {
       const username = hubSignInUserInput.value.trim();
       const password = hubSignInPasswordInput.value;
+      const baseUrl = normalizeAgencyHubBaseUrl(agencyHubUrlInput.value);
       if (!username || !password || !agencyHubUrlInput.value.trim()) {
         hubSignInMeta.textContent = COPY.hub.signInMissingFields;
         return;
       }
-      hubSignInButton.disabled = true;
+      setSignInBusy(true);
       hubSignInMeta.textContent = COPY.hub.signingIn;
       // Firefox grants `host_permissions` only at INSTALL time (bug 1893232),
       // so an install that upgraded into this release has no access to the hub
@@ -2144,7 +2174,7 @@ async function render(): Promise<void> {
       // runtime request rides it — and a refusal stops here with the sentence
       // that explains it, rather than as an opaque network failure.
       const signInOrigin = buildAgencyHubOriginPattern(
-        normalizeAgencyHubBaseUrl(agencyHubUrlInput.value),
+        baseUrl,
       );
       if (signInOrigin && typeof browser.permissions?.request === 'function') {
         try {
@@ -2152,7 +2182,7 @@ async function render(): Promise<void> {
           if (!granted) {
             agencyHubPermissionFeedback = { kind: 'denied', originPattern: signInOrigin };
             hubSignInMeta.textContent = COPY.hub.permDenied.replace('{origin}', signInOrigin);
-            hubSignInButton.disabled = false;
+            setSignInBusy(false);
             await refreshAgencyHubPermissionState();
             return;
           }
@@ -2164,6 +2194,9 @@ async function render(): Promise<void> {
             originPattern: signInOrigin,
             errorMessage: formatAgencyHubError(error),
           };
+          hubSignInMeta.textContent = COPY.signInGate.permissionFailed;
+          setSignInBusy(false);
+          return;
         }
       }
       // THIS tab is about to make the background write custody. The storage event
@@ -2178,16 +2211,25 @@ async function render(): Promise<void> {
         // device token from those Hub inputs. This prevents a delayed local
         // settings write from restoring the pre-sign-in base URL afterwards.
         await persistAgencyHubSettings();
+        if (disposed || futureSchemaObserved !== null ||
+          normalizeAgencyHubBaseUrl(agencyHubUrlInput.value) !== baseUrl) {
+          hubSignInMeta.textContent = COPY.signInGate.requestFailed;
+          return;
+        }
         const response = await sendRuntimeRequest('issueAgencyHubDeviceToken', {
-          baseUrl: agencyHubUrlInput.value,
+          baseUrl,
           username,
           password,
         });
-        if (response.ok) {
+        if (response?.ok === true) {
           // Re-read the real stored settings — the background deliberately
           // returns only metadata; a placeholder here would later be SENT as
           // the bearer by the connection test (1.7.0 audit finding).
           state.settings = (await loadStorageState()).settings;
+          if (!state.settings.agencyHubDeviceToken.trim()) {
+            throw new Error('Sign-in was not retained in storage');
+          }
+          unauthorizedSignInSignature = null;
           // The background wrote the token's operational metadata inside the
           // same auth critical section; pull it so the pane can name WHICH
           // token is live without ever reading the token.
@@ -2216,23 +2258,27 @@ async function render(): Promise<void> {
             console.error('Failed to refresh Agency Hub status after sign-in', error);
           });
         } else {
-          hubSignInMeta.textContent = COPY.hub.signInFailed.replace('{message}', response.error.message);
+          hubSignInMeta.textContent = response?.ok === false
+            ? COPY.hub.signInFailed.replace('{message}', response.error.message)
+            : COPY.signInGate.requestFailed;
         }
+      } catch {
+        hubSignInMeta.textContent = COPY.signInGate.requestFailed;
       } finally {
         if (!ownRefreshStarted) {
           ownCustodyWriteInFlight = false;
         }
-        hubSignInButton.disabled = false;
+        setSignInBusy(false);
         renderHubSignInState();
       }
     })();
   });
   const hubSignInFields = document.createElement('div');
   hubSignInFields.className = 'chatgoose-signin-grid';
-  hubSignInFields.append(hubSignInUserInput, hubSignInPasswordInput);
-  const hubSignInRow = document.createElement('div');
-  hubSignInRow.style.display = 'grid';
-  hubSignInRow.style.gap = '8px';
+  hubSignInFields.append(
+    labeledField(COPY.signInGate.login, hubSignInUserInput),
+    labeledField(COPY.signInGate.password, hubSignInPasswordInput),
+  );
   hubSignInButton.style.justifySelf = 'start';
   hubSignInRow.append(hubSignInFields, hubSignInButton);
   // «Выйти…» is two-step on purpose: it destroys credentials on this device.
@@ -2525,6 +2571,20 @@ async function render(): Promise<void> {
     agencyHubConnectionMeta,
     hubAdvancedDetails,
   );
+
+  const signInGate = createSignInGate({
+    root, cabinet, form: hubSignInRow, feedback: hubSignInMeta, signOutStatus: hubSignOutStatus,
+    helpLink: hubHelpLink, advanced: hubAdvancedDetails, version: extensionVersion,
+  });
+  cleanupTasks.push(() => signInGate.dispose());
+  let previouslyRequiredSignIn = signInRequired();
+  updateSignInGate = () => {
+    const required = signInRequired();
+    signInGate.update(required, Boolean(state.settings.agencyHubDeviceToken.trim()));
+    if (previouslyRequiredSignIn && !required) refreshSignedInSessions();
+    previouslyRequiredSignIn = required;
+  };
+  updateSignInGate();
 
   // ── Pane layout (E61, columns re-cut in E67): four zone CARDS in two columns.
   // LEFT is everything about the hub — its address, whether we can reach it, and
@@ -2991,7 +3051,9 @@ async function render(): Promise<void> {
     } else {
       hubIdentityRow.value.textContent = identity === null
         ? COPY.common.unknown
-        : COPY.hub.deviceSignedOut;
+        : identity.reason === 'no_credential' || identity.reason === 'unauthorized'
+          ? COPY.hub.deviceSignedOut
+          : COPY.status.accessUnknown;
       hubPagesRow.value.textContent = COPY.common.unknown;
       hubPagesChips.replaceChildren();
     }
@@ -3290,7 +3352,8 @@ async function render(): Promise<void> {
     // already moved on from the snapshot this run was fired for, skip entirely:
     // the user is mid-edit and a newer persist will re-trigger with its own
     // signature. Firing a doomed pair of hub requests here is the storm we avoid.
-    if (disposed || currentHubSignature() !== expectedSignature) return;
+    if (disposed || currentHubSignature() !== expectedSignature ||
+      !state.settings.agencyHubDeviceToken.trim()) return;
     for (const row of [statusRows.hub, statusRows.access]) row.skeleton();
     // Independent sources: a rejected transport on ONE read must not leave the
     // OTHER row a skeleton nor surface as an unhandled rejection. allSettled
@@ -3329,6 +3392,12 @@ async function render(): Promise<void> {
         : { ok: false, reason: 'unreachable' };
     statusModel.health = health;
     statusModel.identity = identity;
+    if (identity.ok) {
+      unauthorizedSignInSignature = null;
+    } else if (identity.reason === 'unauthorized') {
+      unauthorizedSignInSignature = expectedSignature;
+    }
+    renderHubSignInState();
 
     // Hub
     statusRows.hub.setAction(null);
@@ -3655,6 +3724,7 @@ async function render(): Promise<void> {
   document.body.append(saveToast);
   let saveToastTimer: number | undefined;
   const showSaveToast = (failed = false): void => {
+    if (!failed && signInRequired()) return;
     saveToastMessage.textContent = failed ? COPY.common.saveFailed : COPY.common.saved;
     saveToast.dataset.failed = String(failed);
     retrySaveButton.hidden = !failed;
@@ -5196,6 +5266,7 @@ async function render(): Promise<void> {
   // did not ask for and must not feel: it never rebuilds a table the chatter is
   // working inside, and a transient failure leaves the healthy table standing
   // instead of painting «refresh failed» over live data.
+  let hasSuccessfulSessionSnapshot = false;
   const applySessionsResult = async (
     result: SessionsResult,
     options: { repoll?: boolean } = {},
@@ -5203,7 +5274,7 @@ async function render(): Promise<void> {
     if (disposed) {
       return;
     }
-    const repoll = options.repoll === true;
+    const repoll = options.repoll === true && hasSuccessfulSessionSnapshot;
     if (!result.ok) {
       console.error('Failed to load Fansly sessions for Settings', result.error);
       // On the mount path the failure state IS the honest first paint. On a
@@ -5235,6 +5306,7 @@ async function render(): Promise<void> {
       if (disposed) {
         return;
       }
+      hasSuccessfulSessionSnapshot = true;
       // A background re-poll must never yank the control under the chatter's
       // hands: `renderAccountMappings` calls `replaceChildren`, which would
       // destroy a focused persona <select> (and its open dropdown) mid-choice.
@@ -5257,7 +5329,11 @@ async function render(): Promise<void> {
   };
 
   const hydrateAccountSections = async (): Promise<void> => {
+    if (!sessionDiscoveryStarted) return;
     await applySessionsResult(await sessionsResultPromise);
+  };
+  refreshSignedInSessions = () => {
+    void loadSessionsResult().then((result) => applySessionsResult(result, { repoll: true }));
   };
 
   // Re-poll sessions when the tab regains focus/visibility, throttled so it only

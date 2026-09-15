@@ -103,6 +103,7 @@ describe('options error deep links', () => {
     // background view land; a flash at mount would have pointed at nothing.
     const page = await mountOptionsPage({
       hash: '#accounts:CG-FLOW-02',
+      settings: { agencyHubDeviceToken: 'device-token-deeplink-tests' },
       state: {
         knownAccounts: ['acc-1'],
         personaCatalog: [ACTIVE_PERSONA],
@@ -138,6 +139,7 @@ describe('options error deep links', () => {
     });
     const page = await mountOptionsPage({
       hash: '#accounts:CG-FLOW-02',
+      settings: { agencyHubDeviceToken: 'device-token-deeplink-tests' },
       state: {
         knownAccounts: ['acc-1'],
         personaCatalog: [ACTIVE_PERSONA],

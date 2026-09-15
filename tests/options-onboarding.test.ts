@@ -137,6 +137,14 @@ describe('options first-run onboarding', () => {
       runtime: { onboarding: FRESH, health: HEALTH_UP, identity: IDENTITY_AUTH },
     });
 
+    // First-screen sign-in completes through durable custody; only then may
+    // the page ask the Hub for identity and discover live Fansly sessions.
+    expect(page.sentRequestTypes()).not.toContain('getAgencyHubIdentity');
+    page.emitStorageChange({
+      [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: { oldValue: '', newValue: 'agency_hub_device_onboarded' },
+    });
+    await page.flushAsync();
+
     expect(step(page, 'signIn').dataset.done).toBe('true');
     expect(step(page, 'fansly').dataset.done).toBe('false');
     // A done step drops its CTA for the «готово» badge.
@@ -166,13 +174,21 @@ describe('options first-run onboarding', () => {
         personaCatalog: [ACTIVE_PERSONA],
         personaCatalogSource: personaCatalogSource({
           agencyHubBaseUrl: 'https://hub.example',
-          agencyHubDeviceToken: '',
+          agencyHubDeviceToken: 'agency_hub_device_onboarded',
         }),
       },
       sessions: arrivingSession,
       permissionGranted: true,
       runtime: { onboarding: FRESH, health: HEALTH_UP, identity: IDENTITY_AUTH },
     });
+
+    // First-screen sign-in completes through durable custody; only then may
+    // the page ask the Hub for identity and discover live Fansly sessions.
+    expect(page.sentRequestTypes()).not.toContain('getAgencyHubIdentity');
+    page.emitStorageChange({
+      [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: { oldValue: '', newValue: 'agency_hub_device_onboarded' },
+    });
+    await page.flushAsync();
 
     expect(page.onboardingDismissals()).toBe(1);
     expect(card(page).hidden).toBe(true);
@@ -286,7 +302,7 @@ describe('options first-run onboarding', () => {
         personaCatalog: [ACTIVE_PERSONA],
         personaCatalogSource: personaCatalogSource({
           agencyHubBaseUrl: 'https://hub.example',
-          agencyHubDeviceToken: '',
+          agencyHubDeviceToken: 'agency_hub_device_onboarded',
         }),
       },
       sessions: arrivingSession,
@@ -299,8 +315,18 @@ describe('options first-run onboarding', () => {
       },
     });
 
+    // First-screen sign-in completes through durable custody; only then may
+    // the page ask the Hub for identity and discover live Fansly sessions.
+    expect(page.sentRequestTypes()).not.toContain('getAgencyHubIdentity');
+    page.emitStorageChange({
+      [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: { oldValue: '', newValue: 'agency_hub_device_onboarded' },
+    });
+    await page.flushAsync();
+
     // A checklist that vanishes over a flag that was never written would come
     // back on the next open — say the truth instead.
+    expect(page.sentRequestTypes()).toContain('dismissOnboarding');
+    expect(page.onboardingDismissals()).toBe(0);
     expect(card(page).hidden).toBe(false);
   });
 
@@ -332,6 +358,10 @@ describe('options first-run onboarding', () => {
 
   it('gives a fresh install ghost account rows, a Персоны pointer and honest rail micros', async () => {
     const page = await mountOptionsPage({ sessions: [], runtime: { onboarding: FRESH } });
+    page.emitStorageChange({
+      [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: { oldValue: '', newValue: 'agency_hub_device_onboarded' },
+    });
+    await page.flushAsync();
 
     // «Аккаунты»: the shape of the row that will appear on its own, plus the
     // instruction — and nothing focusable inside the ghosts.
@@ -367,6 +397,11 @@ describe('options first-run onboarding', () => {
       sessions: () => Promise.reject(new Error('Fansly identity timed out')),
       runtime: { onboarding: FRESH },
     });
+
+    page.emitStorageChange({
+      [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: { oldValue: '', newValue: 'agency_hub_device_onboarded' },
+    });
+    await page.flushAsync();
 
     const accounts = page.document.querySelector<HTMLElement>(
       '.chatgoose-cabinet-pane[data-pane="accounts"]',

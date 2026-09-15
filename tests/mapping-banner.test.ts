@@ -103,6 +103,57 @@ describe('MappingBanner', () => {
     expect(banner.root.querySelector('.chatgoose-banner-actions')?.childElementCount).toBe(0);
   });
 
+  it.each([
+    { accountId: 'account-a', mapped: true },
+    { accountId: 'account-a', mapped: false },
+    { accountId: null, mapped: false },
+  ])('puts sign-in before account and persona state ($accountId, $mapped)', async ({ accountId, mapped }) => {
+    const { MappingBanner } = await import('../src/content/mapping-banner.js');
+    const onOpenSettings = vi.fn();
+    const banner = new MappingBanner({ onOpenSettings });
+    await banner.render(accountId, mapped, false);
+    expect(banner.root.classList.contains('chatgoose-hidden')).toBe(false);
+    expect(banner.root.textContent).toContain('Войдите в ChatGoose');
+    expect(banner.root.querySelector('select')).toBeNull();
+    expect(storageGet).not.toHaveBeenCalled();
+    expect(storageSet).not.toHaveBeenCalled();
+    banner.root.querySelector<HTMLButtonElement>('button')?.click();
+    expect(onOpenSettings).toHaveBeenCalledWith('signed-out');
+  });
+
+  it('does not let a pending mapping read replace sign-in or revive mapping writes', async () => {
+    const read = deferred<Record<string, unknown>>();
+    await ensureSnapshotReady();
+    const { MappingBanner } = await import('../src/content/mapping-banner.js');
+    const banner = new MappingBanner({ onOpenSettings: vi.fn() });
+    await banner.render('account-a', false, true);
+    const staleSelect = banner.root.querySelector<HTMLSelectElement>('select')!;
+    const staleSave = banner.root.querySelector<HTMLButtonElement>('button')!;
+    storageSet.mockClear();
+    storageGet.mockReturnValueOnce(read.promise);
+    const pending = banner.render('account-a', false, true);
+    await banner.render('account-a', false, false);
+    staleSelect.value = 'custom-1';
+    staleSelect.dispatchEvent(new Event('change'));
+    staleSave.click();
+    read.resolve(backingStorage);
+    await pending;
+    expect(banner.root.textContent).toContain('Войдите в ChatGoose');
+    expect(banner.root.querySelector('select')).toBeNull();
+    expect(storageSet).not.toHaveBeenCalled();
+  });
+
+  it('restores mapping setup after sign-in and hides it for an existing mapping', async () => {
+    const { MappingBanner } = await import('../src/content/mapping-banner.js');
+    const banner = new MappingBanner({ onOpenSettings: vi.fn() });
+    await banner.render('account-a', false, false);
+    await banner.render('account-a', false, true);
+    expect(banner.root.textContent).not.toContain('Войдите в ChatGoose');
+    expect(banner.root.querySelector('select')).not.toBeNull();
+    await banner.render('account-a', true, true);
+    expect(banner.root.classList.contains('chatgoose-hidden')).toBe(true);
+  });
+
   it('does not let stale account controls save after a newer account wins', async () => {
     const nextRead = deferred<Record<string, unknown>>();
     await ensureSnapshotReady();

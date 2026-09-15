@@ -445,15 +445,22 @@ export function registerRuntimeApi({
         tabUrl = activeTab?.url;
       }
 
+      const state = await storageCoordinator.getState();
+      const signedIn = state.settings.agencyHubDeviceToken.trim().length > 0;
+      const hasApiKey = Boolean(
+        normalizeAgencyHubBaseUrl(state.settings.agencyHubBaseUrl) && signedIn,
+      );
+
       if (!tabId) {
         return {
           tabId: -1,
+          signedIn,
           accountId: null,
           groupId: null,
           hasAvailableSummary: false,
           availableRecaps: { full: false, short: false },
           connected: false,
-          hasApiKey: false,
+          hasApiKey,
           voiceNotesCapable: false,
           hasPersonalities: false,
           mappedPersonalityId: null,
@@ -470,7 +477,6 @@ export function registerRuntimeApi({
         } satisfies PopupStatus;
       }
 
-      const state = await storageCoordinator.getState();
       const session = sessionStore.getSessionForTab(tabId);
       const legacyAccountId = sessionStore.getAccountIdForTab(tabId);
       const accountId = session?.resolvedAccountId ?? legacyAccountId;
@@ -515,16 +521,14 @@ export function registerRuntimeApi({
 
       return {
         tabId,
+        signedIn,
         accountId,
         groupId: displayGroupId,
         hasAvailableSummary: availableRecaps.full || availableRecaps.short,
         availableRecaps,
         connected,
         // Stage 32: readiness = kernel lane configured (hub transport up).
-        hasApiKey: Boolean(
-          normalizeAgencyHubBaseUrl(state.settings.agencyHubBaseUrl) &&
-          state.settings.agencyHubDeviceToken.trim().length > 0,
-        ),
+        hasApiKey,
         voiceNotesCapable,
         hasPersonalities: getActivePersonaCatalog(state.personaCatalog).length > 0,
         mappedPersonalityId,

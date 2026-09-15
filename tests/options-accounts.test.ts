@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 import { COPY } from '../src/options/copy.js';
 import {
+  DEFAULT_AGENCY_HUB_BASE_URL,
   STORAGE_SCHEMA_VERSION,
 } from '../src/shared/constants.js';
 import { personaCatalogSource } from '../src/shared/persona-catalog.js';
@@ -59,12 +60,13 @@ async function flushMicrotasks(): Promise<void> {
   }
 }
 
+/** Settings-editor fixtures start signed in; login scenarios override custody explicitly. */
 function makeState(overrides?: Partial<PersistedState>): PersistedState {
-  return {
+  const state: PersistedState = {
     schemaVersion: STORAGE_SCHEMA_VERSION,
     settings: {
       agencyHubBaseUrl: '',
-      agencyHubDeviceToken: '',
+      agencyHubDeviceToken: 'device-token-account-tests',
       quickMessageCount: 30,
       pingMessageCount: 30,
       improveMessageCount: 45,
@@ -91,6 +93,24 @@ function makeState(overrides?: Partial<PersistedState>): PersistedState {
     knownAccounts: [],
     ...overrides,
   };
+  if (!Object.prototype.hasOwnProperty.call(overrides ?? {}, 'personaCatalogSource')) {
+    state.personaCatalogSource = personaCatalogSource({
+      agencyHubBaseUrl: state.settings.agencyHubBaseUrl || DEFAULT_AGENCY_HUB_BASE_URL,
+      agencyHubDeviceToken: state.settings.agencyHubDeviceToken,
+    });
+  }
+  return state;
+}
+
+/** Account/session scenarios run inside an already signed-in cabinet. */
+function signedInState(overrides?: Partial<PersistedState>): PersistedState {
+  const state = makeState(overrides);
+  const settings = {
+    ...state.settings,
+    agencyHubBaseUrl: 'https://hub.example.test',
+    agencyHubDeviceToken: 'device-token-account-tests',
+  };
+  return { ...state, settings, personaCatalogSource: personaCatalogSource(settings) };
 }
 
 function installDom() {
@@ -306,7 +326,7 @@ describe('Options page account sections', () => {
 
   it('preserves legacy personas before session discovery and hydrates rekeyed accounts cleanly', async () => {
     await loadOptionsPage({
-      state: makeState({
+      state: signedInState({
         accountMappings: {
           mappedOffline: 'p1',
         },
@@ -323,7 +343,7 @@ describe('Options page account sections', () => {
         },
       ],
       onSnapshotRequest: () => {
-        currentState = makeState({
+        currentState = signedInState({
           accountMappings: {
             mappedOffline: 'p1',
           },
@@ -337,7 +357,9 @@ describe('Options page account sections', () => {
     // A fresh extension realm first checks the durable preservation key, then
     // captures the full legacy source only when that key is absent. Both reads
     // must finish before session discovery can own identity reconciliation.
-    expect(callOrder.slice(0, 3)).toEqual(['storage', 'storage', 'snapshot']);
+    expect(callOrder.indexOf('snapshot')).toBeGreaterThanOrEqual(2);
+    expect(callOrder.slice(0, callOrder.indexOf('snapshot')).every((call) => call === 'storage'))
+      .toBe(true);
     expect(mappingsSection.textContent).toContain(accountIdText('active-resolved'));
     expect(mappingsSection.textContent).toContain(accountIdText('mappedOffline'));
     expect(mappingsSection.textContent).not.toContain('stale');
@@ -368,7 +390,7 @@ describe('Options page account sections', () => {
   it('renders local settings before a slow session snapshot and hydrates only account sections', async () => {
     const snapshot = deferred<SessionSnapshotEntry[]>();
     await loadOptionsPage({
-      state: makeState({
+      state: signedInState({
         knownAccounts: ['legacy'],
       }),
       sessions: [],
@@ -389,11 +411,13 @@ describe('Options page account sections', () => {
     expect(personalityCard.textContent).toContain('Closer');
     expect(mappingsSection.dataset.sessionHydration).toBe('loading');
     expect(mappingsSection.textContent).toContain(COPY.accounts.loading);
-    expect(callOrder.slice(0, 3)).toEqual(['storage', 'storage', 'snapshot']);
+    expect(callOrder.indexOf('snapshot')).toBeGreaterThanOrEqual(2);
+    expect(callOrder.slice(0, callOrder.indexOf('snapshot')).every((call) => call === 'storage'))
+      .toBe(true);
 
     // getSessionsSnapshot owns identity rekey/reconciliation in the real
     // background. Simulate that committed state immediately before its reply.
-    currentState = makeState({
+    currentState = signedInState({
       personalities: [{ id: 'p1', name: 'Closer', content: 'be nice', updatedAt: 1 }],
       knownAccounts: ['canonical'],
     });
@@ -463,7 +487,7 @@ describe('Options page account sections', () => {
     }];
 
     await loadOptionsPage({
-      state: makeState({
+      state: signedInState({
         accountMappings: { legacy: 'p1' },
         accountAliases: {},
         knownAccounts: ['legacy'],
@@ -480,7 +504,7 @@ describe('Options page account sections', () => {
         // background-owned rekey before that read resumes. A mutating initial
         // load would now persist its stale full state over this canonical one.
         queueMicrotask(() => {
-          currentState = makeState({
+          currentState = signedInState({
             accountMappings: { canonical: 'p1' },
             accountAliases: { legacy: 'canonical' },
             knownAccounts: ['canonical'],
@@ -500,7 +524,7 @@ describe('Options page account sections', () => {
   it('keeps local settings usable and marks only account sections failed when session loading rejects', async () => {
     const snapshot = deferred<SessionSnapshotEntry[]>();
     await loadOptionsPage({
-      state: makeState({ knownAccounts: ['offline-account'] }),
+      state: signedInState({ knownAccounts: ['offline-account'] }),
       sessions: [],
       snapshotPromise: snapshot.promise,
       waitForHydration: false,
@@ -527,7 +551,7 @@ describe('Options page account sections', () => {
 
   it('shows the newest snapshot entry when sessions collide on a canonical account', async () => {
     await loadOptionsPage({
-      state: makeState({ knownAccounts: ['resolved'] }),
+      state: signedInState({ knownAccounts: ['resolved'] }),
       sessions: [
         {
           legacyAccountId: 'legacy-1',
@@ -557,7 +581,7 @@ describe('Options page account sections', () => {
 
   it('summarizes the live Fansly account on the «Статус» row', async () => {
     await loadOptionsPage({
-      state: makeState({ knownAccounts: ['resolved'] }),
+      state: signedInState({ knownAccounts: ['resolved'] }),
       sessions: [{
         legacyAccountId: 'legacy',
         resolvedAccountId: 'resolved',
@@ -1017,6 +1041,7 @@ describe('Options page settings and read-only personas', () => {
         settings: {
           ...makeState().settings,
           agencyHubBaseUrl: 'https://hub.example.test',
+          agencyHubDeviceToken: 'device-token-old',
         },
       }),
       sessions: [],
@@ -1036,9 +1061,12 @@ describe('Options page settings and read-only personas', () => {
       },
     });
 
+    const reissue = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-pane="hub"] button'))
+      .find((button) => button.textContent === COPY.hub.signInAgain)!;
+    reissue.click();
     const username = document.querySelector<HTMLInputElement>('input[autocomplete="username"]')!;
     const password = document.querySelector<HTMLInputElement>('input[autocomplete="current-password"]')!;
-    const signIn = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-pane="hub"] button'))
+    const signIn = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-pane="hub"] button[type="submit"]'))
       .find((button) => button.textContent === COPY.hub.signIn)!;
     username.value = 'owner';
     password.value = 'secret';
@@ -1088,9 +1116,11 @@ describe('Options page settings and read-only personas', () => {
         settings: {
           ...makeState().settings,
           agencyHubBaseUrl: 'https://hub.example.test',
+          agencyHubDeviceToken: '',
         },
       }),
       sessions: [],
+      waitForHydration: false,
       onRuntimeRequest: async (message) => {
         const request = message as {
           type?: string;
@@ -1116,7 +1146,7 @@ describe('Options page settings and read-only personas', () => {
 
     const username = document.querySelector<HTMLInputElement>('input[autocomplete="username"]')!;
     const password = document.querySelector<HTMLInputElement>('input[autocomplete="current-password"]')!;
-    const signIn = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-pane="hub"] button'))
+    const signIn = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-sign-in-gate] button[type="submit"]'))
       .find((button) => button.textContent === COPY.hub.signIn)!;
     username.value = 'owner';
     password.value = 'secret';
@@ -1537,6 +1567,19 @@ describe('Options page coach settings', () => {
 // background's `getAccountsView`, which the older harness above deliberately
 // does not answer (which is what proves the degraded path still renders).
 
+function mountAccountOptions(options: Parameters<typeof mountOptionsPage>[0] = {}) {
+  const settings = {
+    agencyHubBaseUrl: DEFAULT_AGENCY_HUB_BASE_URL,
+    agencyHubDeviceToken: 'device-token-account-tests',
+    ...options.settings,
+  };
+  return mountOptionsPage({
+    ...options,
+    settings,
+    state: { personaCatalogSource: personaCatalogSource(settings), ...options.state },
+  });
+}
+
 describe('Options «Аккаунты» pane', () => {
   let page: MountedOptionsPage;
 
@@ -1578,7 +1621,7 @@ describe('Options «Аккаунты» pane', () => {
 
   it('sorts live first, then by recency, then never-seen — naming each state honestly', async () => {
     const now = Date.now();
-    page = await mountOptionsPage({
+    page = await mountAccountOptions({
       state: {
         personaCatalog: CATALOG,
         accountMappings: {
@@ -1649,7 +1692,7 @@ describe('Options «Аккаунты» pane', () => {
   });
 
   it('marks an unmapped account «AI отключён» in amber and says why', async () => {
-    page = await mountOptionsPage({
+    page = await mountAccountOptions({
       state: { personaCatalog: CATALOG, knownAccounts: ['acc-live'] },
       accounts: {
         accounts: [viewEntry({ personaMapped: false })],
@@ -1665,7 +1708,7 @@ describe('Options «Аккаунты» pane', () => {
   });
 
   it('offers «к вкладке» only for a live row with a known tab', async () => {
-    page = await mountOptionsPage({
+    page = await mountAccountOptions({
       state: { personaCatalog: CATALOG, knownAccounts: ['acc-live', 'acc-seen'] },
       accounts: {
         accounts: [
@@ -1690,7 +1733,7 @@ describe('Options «Аккаунты» pane', () => {
   });
 
   it('saves an inline label through setAccountLabel and prefers it over the display name', async () => {
-    page = await mountOptionsPage({
+    page = await mountAccountOptions({
       state: { personaCatalog: CATALOG, knownAccounts: ['acc-live'] },
       accounts: { accounts: [viewEntry({})], unattributedFanslyTabs: 0 },
     });
@@ -1724,7 +1767,7 @@ describe('Options «Аккаунты» pane', () => {
   });
 
   it('keeps «AI отключён» in step with the mapping across a live refresh (BL-005)', async () => {
-    page = await mountOptionsPage({
+    page = await mountAccountOptions({
       state: { personaCatalog: CATALOG, knownAccounts: ['acc-live'] },
       accounts: {
         accounts: [viewEntry({ personaMapped: false })],
@@ -1748,7 +1791,8 @@ describe('Options «Аккаунты» pane', () => {
   });
 
   it('does not call an empty table «fresh» when the live read failed (BL-006)', async () => {
-    page = await mountOptionsPage({
+    page = await mountAccountOptions({
+      settings: { agencyHubDeviceToken: 'device-token-account-tests' },
       state: { personaCatalog: CATALOG, knownAccounts: [] },
       sessions: () => Promise.reject(new Error('Fansly identity timed out')),
     });
@@ -1758,7 +1802,7 @@ describe('Options «Аккаунты» pane', () => {
   });
 
   it('Esc cancels the inline editor without writing anything', async () => {
-    page = await mountOptionsPage({
+    page = await mountAccountOptions({
       state: { personaCatalog: CATALOG, knownAccounts: ['acc-live'] },
       accounts: { accounts: [viewEntry({})], unattributedFanslyTabs: 0 },
     });
@@ -1779,7 +1823,7 @@ describe('Options «Аккаунты» pane', () => {
   });
 
   it('keeps the editor open with the typed text when the label write fails', async () => {
-    page = await mountOptionsPage({
+    page = await mountAccountOptions({
       state: { personaCatalog: CATALOG, knownAccounts: ['acc-live'] },
       accounts: { accounts: [viewEntry({})], unattributedFanslyTabs: 0 },
       runtime: { setAccountLabelOk: false },
@@ -1804,7 +1848,7 @@ describe('Options «Аккаунты» pane', () => {
   });
 
   it('shows the observed kernel page only once a generation proved the binding', async () => {
-    page = await mountOptionsPage({
+    page = await mountAccountOptions({
       state: { personaCatalog: CATALOG, knownAccounts: ['acc-live', 'acc-quiet'] },
       accounts: {
         accounts: [
@@ -1822,7 +1866,7 @@ describe('Options «Аккаунты» pane', () => {
   });
 
   it('reports unattributed Fansly tabs as an aggregate, never as a per-account claim', async () => {
-    page = await mountOptionsPage({
+    page = await mountAccountOptions({
       state: { personaCatalog: CATALOG, knownAccounts: [] },
       accounts: { accounts: [], unattributedFanslyTabs: 2 },
     });
@@ -1840,7 +1884,8 @@ describe('Options «Аккаунты» pane', () => {
     // An older background answers `undefined`. The pane must still list the known
     // accounts — and must NOT claim a tab id or an observed page it cannot know
     // without the operation.
-    page = await mountOptionsPage({
+    page = await mountAccountOptions({
+      settings: { agencyHubDeviceToken: 'device-token-account-tests' },
       state: {
         personaCatalog: CATALOG,
         accountMappings: { 'acc-1': 'p1' },
@@ -1878,7 +1923,8 @@ describe('Options «Аккаунты» pane', () => {
       at.setHours(22, 23, 0, 0);
       return at.getTime();
     })();
-    page = await mountOptionsPage({
+    page = await mountAccountOptions({
+      settings: { agencyHubDeviceToken: 'device-token-account-tests' },
       state: {
         personaCatalog: CATALOG,
         accountMappings: { 'acc-live': 'p1', 'acc-quiet': 'p1', 'acc-silent': 'p1' },

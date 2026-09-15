@@ -866,7 +866,7 @@ describe('runtime-api getPopupStatus', () => {
     ]);
 
     const configured = await onMessageListener?.({ type: 'getPopupStatus' });
-    expect(configured).toEqual(expect.objectContaining({ hasApiKey: true }));
+    expect(configured).toEqual(expect.objectContaining({ hasApiKey: true, signedIn: true }));
   });
 
   it('reports hasApiKey false when the hub transport is unconfigured', async () => {
@@ -880,7 +880,29 @@ describe('runtime-api getPopupStatus', () => {
     ]);
 
     const cleared = await onMessageListener?.({ type: 'getPopupStatus' });
-    expect(cleared).toEqual(expect.objectContaining({ hasApiKey: false }));
+    expect(cleared).toEqual(expect.objectContaining({ hasApiKey: false, signedIn: false }));
+  });
+
+  it.each(['', 'device-token'])('reports sign-in from storage without any active tab (%s)', async (token) => {
+    mockStorage = createStorage({ [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: token });
+    await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });
+    const result = await onMessageListener?.({ type: 'getPopupStatus' });
+    expect(result).toEqual(expect.objectContaining({
+      tabId: -1, connected: false, signedIn: token.length > 0, hasApiKey: token.length > 0,
+    }));
+  });
+
+  it('does not treat an invalid Hub URL or disconnected Fansly tab as sign-out', async () => {
+    mockStorage = createStorage({
+      settings: { ...createDefaultSettings(), agencyHubBaseUrl: 'not-a-url' },
+      [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'device-token',
+    });
+    const { tabsQuery } = await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });
+    tabsQuery.mockResolvedValue([{ id: 1, url: 'https://example.test/' }]);
+    const result = await onMessageListener?.({ type: 'getPopupStatus' });
+    expect(result).toEqual(expect.objectContaining({
+      signedIn: true, hasApiKey: false, connected: false,
+    }));
   });
 
   it('carries resolved human names and drops the fan placeholder', async () => {

@@ -4112,3 +4112,48 @@ of the existing sign-in/mappings. Missing-event tests use virtual time. The
 runtime API harness explicitly reads its fixture on each call instead of
 implicitly obtaining that behavior from perpetually unobserved probes.
 This change is prepared locally; publication is a separate release step.
+
+
+**E125 (2026-09-15).** Settings opens with one sign-in screen when this
+device has no credential or the current identity check explicitly rejects the
+current Hub URL + credential. The cabinet is hidden and inert, including when
+a saved deep link targets another pane. A network failure, missing host
+permission, invalid Hub URL or an authenticated account with zero pages does
+not mean the person signed out. Health, identity and Fansly discovery are not
+started for an initially signed-out device. The first real discovery after
+sign-in owns its loading/error state; a skipped read is not an empty snapshot.
+
+The gate reuses the cabinet's live form, feedback, help and advanced address
+controls, with placeholders restoring their original locations after sign-in.
+There is one credential writer and no duplicate password form. Submit/Enter
+asks for Firefox host permission in the user gesture, prevents duplicate
+issuance, reports permission/transport errors in place, and only opens the
+cabinet after custody is read back. Sign-out, cross-tab changes and explicit
+current-identity rejection return to the same screen. The requested pane and
+local account/persona setup are retained; the password is cleared on success
+and when entering the gate. Sign-out results remain visible on the gate.
+
+The popup and chat banner likewise lead with sign-in before account/persona
+setup. A separate `signedIn` projection expresses local credential presence;
+transport configuration, Fansly-tab presence and assigned pages cannot answer
+that question. Content tolerates the previous worker's missing projection
+during an update. Popup replies and pending banner reads are generation-fenced
+so an older result cannot replace a newer sign-out view.
+
+An auth audit also reproduced a delayed-response defect in the self-healing
+memo: after wiping an old credential and signing in again, a second old-401
+consumer could incorrectly report that the new session had ended. The custody
+FIFO now reads the current slot before reusing that memo, and only reuses it
+while the slot remains empty. No credential or storage schema change. The
+reported Nikita screenshot proves a missing local sign-in, not why it was
+removed; v17 retires legacy key-only installations but preserves device
+credentials, and the affected profile's pre-upgrade state is unavailable.
+
+Regression coverage includes initial signed-out deep links, durable sign-in,
+duplicate Enter, transport/permission refusal, source-bound rejection,
+zero-page accounts, cross-tab changes, initial discovery failure, all sign-out
+outcomes, popup/banner precedence and delayed old-credential errors. Full
+`pnpm check` passed (127 files / 2,354 tests). Browser verification uses actual
+compiled UI with synthetic browser APIs, light/dark themes and a 320 px window;
+it does not issue or revoke real credentials. Publication remains a separate
+release step.

@@ -2027,6 +2027,24 @@ describe('ChatGooseContentApp', () => {
     });
   });
 
+  it('offers sign-in before persona setup and routes it to the sign-in pane', async () => {
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
+    app.handlePortMessage({
+      type: 'tab:state',
+      state: readyState({ signedIn: false, hasApiKey: false }),
+    });
+    const banner = app.mappingBanner.root as HTMLElement;
+    expect(banner.textContent).toContain('Войдите в ChatGoose');
+    expect(banner.querySelector('select')).toBeNull();
+    banner.querySelector<HTMLButtonElement>('button')?.click();
+    expect(browser.runtime.sendMessage).toHaveBeenCalledWith({
+      type: 'openOptions', pane: 'hub', code: 'CG-HUB-02',
+    });
+    app.handlePortMessage({ type: 'settings:changed', state: readyState({ signedIn: true }) });
+    expect(banner.classList.contains('chatgoose-hidden')).toBe(true);
+  });
+
   it('falls back to the native opener when the runtime cannot answer', async () => {
     const ChatGooseContentApp = await loadAppClass();
     const app = new ChatGooseContentApp() as any;

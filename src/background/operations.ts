@@ -890,6 +890,7 @@ export class OperationCoordinator {
       connected: Boolean(session?.connected),
       // Stage 32: readiness = kernel lane configured (hub transport up).
       hasApiKey: this.kernelGateway.isConfigured(storage.settings),
+      signedIn: storage.settings.agencyHubDeviceToken.trim().length > 0,
       voiceNotesCapable,
       showToolbarHints: storage.settings.showToolbarHints,
       hasPersonalities: getActivePersonaCatalog(storage.personaCatalog).length > 0,
