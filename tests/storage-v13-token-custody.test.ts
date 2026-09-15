@@ -11,6 +11,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import {
   LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
+  DEFAULT_AGENCY_HUB_BASE_URL,
   LEGACY_PERSONA_SNAPSHOT_KEY,
   STORAGE_SCHEMA_VERSION,
 } from '../src/shared/constants.js';
@@ -145,6 +146,93 @@ describe('v12 → v13 migration', () => {
     expect(mockStorage[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]).toBe('fresh-token');
     expect(mockStorage.settings).toHaveProperty('agencyHubDeviceToken', 'old-token');
     expect(fullStateWrites()).toEqual([]);
+  });
+});
+
+describe('v12 → v17 direct jump (E79)', () => {
+  it('carries a working sign-in out of the pre-v13 blob and retires the legacy slot', async () => {
+    // The update feed serves only the NEWEST build, so an install still on
+    // ≤1.8.0 (pre-v13) lands on v17 in one step. Its credential lives inside the
+    // settings blob; without the blob fallback below it would arrive signed out
+    // and need a fresh password — which is exactly what this release promises
+    // will NOT happen.
+    mockStorage = {
+      schemaVersion: 12,
+      settings: {
+        ...createDefaultSettings(),
+        agencyHubBaseUrl: 'https://hub.example',
+        agencyHubDeviceToken: 'agency_hub_device_live',
+        // A pre-v13 blob also carried the legacy key. It is dropped, not moved.
+        agencyHubApiKey: 'legacy-key',
+      },
+      agencyHubApiKey: 'legacy-key',
+      personalities: [],
+      accountMappings: {},
+      accountAliases: {},
+      knownAccounts: [],
+    };
+
+    const state = await storage.loadStorageState();
+
+    // The sign-in survives the jump — no re-login for anyone on the fleet.
+    expect(state.settings.agencyHubDeviceToken).toBe('agency_hub_device_live');
+    expect(mockStorage[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]).toBe('agency_hub_device_live');
+    expect(mockStorage.schemaVersion).toBe(STORAGE_SCHEMA_VERSION);
+    // …and the retired credential is gone from both places it could hide.
+    expect(state.settings).not.toHaveProperty('agencyHubApiKey');
+    expect(mockStorage.settings).not.toHaveProperty('agencyHubApiKey');
+    expect(LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY in mockStorage).toBe(false);
+  });
+
+  it('fills in the default hub address for an install that never had one', async () => {
+    mockStorage = {
+      schemaVersion: 12,
+      settings: { ...createDefaultSettings(), agencyHubBaseUrl: '' },
+      personalities: [],
+      accountMappings: {},
+      accountAliases: {},
+      knownAccounts: [],
+    };
+
+    const state = await storage.loadStorageState();
+
+    expect(state.settings.agencyHubBaseUrl).toBe(DEFAULT_AGENCY_HUB_BASE_URL);
+  });
+
+  it('never overwrites an address someone chose deliberately', async () => {
+    mockStorage = {
+      schemaVersion: 12,
+      settings: { ...createDefaultSettings(), agencyHubBaseUrl: 'https://staging.example' },
+      personalities: [],
+      accountMappings: {},
+      accountAliases: {},
+      knownAccounts: [],
+    };
+
+    const state = await storage.loadStorageState();
+
+    expect(state.settings.agencyHubBaseUrl).toBe('https://staging.example');
+  });
+
+  it('an install that held ONLY the legacy key arrives signed out, not half-signed-in', async () => {
+    mockStorage = {
+      schemaVersion: 12,
+      settings: {
+        ...createDefaultSettings(),
+        agencyHubBaseUrl: 'https://hub.example',
+        agencyHubApiKey: 'legacy-key',
+      },
+      agencyHubApiKey: 'legacy-key',
+      personalities: [],
+      accountMappings: {},
+      accountAliases: {},
+      knownAccounts: [],
+    };
+
+    const state = await storage.loadStorageState();
+
+    expect(state.settings.agencyHubDeviceToken).toBe('');
+    expect(LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY in mockStorage).toBe(false);
   });
 });
 

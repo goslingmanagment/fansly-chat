@@ -388,6 +388,25 @@ describe('StorageCoordinator', () => {
     expect(mockStorage.settings).not.toHaveProperty('agencyHubDeviceToken');
   });
 
+  it('v17: removes the retired legacy-key slot it finds on disk, and keeps the sign-in', async () => {
+    // E79 tombstones the slot rather than emptying it: the fallback READ that
+    // made E19's «never remove» rule necessary went out in the same release, so
+    // a key nothing can read is a secret kept for no reason.
+    mockStorage = createStorage({
+      schemaVersion: 12,
+      agencyHubApiKey: 'legacy-key',
+      [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'agency_hub_device_live',
+    });
+    const { coordinator } = await installStorageCoordinatorHarness();
+
+    const state = await coordinator.getState();
+
+    expect(state.settings.agencyHubDeviceToken).toBe('agency_hub_device_live');
+    expect(mockStorage[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]).toBe('agency_hub_device_live');
+    expect(LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY in mockStorage).toBe(false);
+    expect(mockStorage.schemaVersion).toBe(STORAGE_SCHEMA_VERSION);
+  });
+
   it('fresh-reads current storage after an initially unobserved barrier', async () => {
     mockStorage = createStorage({
       settings: { ...createDefaultSettings(), uiTheme: 'light' },

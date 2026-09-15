@@ -59,6 +59,52 @@ describe('release page stamping', () => {
   });
 
 
+  it('publishes «Как начать» on both paths, unstamped, before the pages that link to it', () => {
+    // The invite message and both clients point at start.html, so it must be
+    // live BEFORE the first invite goes out — and it carries no version slot:
+    // the page describes a ceremony, not a build.
+    const deploy = readRepoFile('scripts/deploy.sh');
+    const pages = readRepoFile('scripts/deploy-pages.sh');
+    const start = readRepoFile('start.html');
+
+    for (const script of [deploy, pages]) {
+      expect(script).toContain('readonly START_PAGE_FILE="$ROOT_DIR/start.html"');
+      expect(script).toContain('scp "$START_PAGE_FILE" "${VPS_HOST}:${remote_tmp_start}"');
+      expect(script).not.toMatch(/stamp\w*[^\n]*\$START_PAGE_FILE/);
+      // Linked-to before linking-from: index.html is the last page to move.
+      expect(script.indexOf("mv '$remote_tmp_start'"))
+        .toBeLessThan(script.indexOf("mv '$remote_tmp_index'"));
+    }
+    expect(deploy).toContain('readonly REMOTE_START_PATH="$REMOTE_DIR/start.html"');
+    expect(deploy).toContain('verify_http_200_with_retry "${BASE_URL}/start.html"');
+    expect(pages).toContain('for page in index.html guide.html changelog.html whats-new-2.html start.html');
+    // …and the pages that send a chatter there actually link to it.
+    for (const page of ['install.html', 'guide.html']) {
+      expect(readRepoFile(page)).toContain('href="start.html"');
+    }
+    expect(start).not.toMatch(/<span class="nav-version">v[^<]+<\/span>/);
+  });
+
+  it('carries a --pages-only mode that signs nothing and leaves the feed alone', () => {
+    // A page fix (or publishing start.html ahead of the invites) must not cost
+    // an AMO signing slot, and must never move the update feed.
+    const deploy = readRepoFile('scripts/deploy.sh');
+    const main = deploy.indexOf('main() {');
+    const pagesOnly = deploy.indexOf('publish_pages_only() {');
+
+    expect(pagesOnly).toBeGreaterThan(-1);
+    expect(deploy).toContain('--pages-only) pages_only=1 ;;');
+    expect(deploy).toContain('    publish_pages_only "$version"');
+    // The branch returns before anything irreversible: no signing, no feed, no
+    // tag, no announce inside the pages-only function.
+    const pagesOnlyBody = deploy.slice(pagesOnly, main);
+    for (const forbidden of ['web-ext sign', 'REMOTE_UPDATES_PATH', 'tag_release', 'announce-release.mjs']) {
+      expect(pagesOnlyBody).not.toContain(forbidden);
+    }
+    // …and an unknown flag is refused rather than silently ignored.
+    expect(deploy).toContain('Unknown argument: $1 (supported: --pages-only)');
+  });
+
   it('publishes the fixed 2.0 walkthrough before pages linking to it, without stamping it', () => {
     const deploy = readRepoFile('scripts/deploy.sh');
     const pages = readRepoFile('scripts/deploy-pages.sh');
