@@ -164,7 +164,8 @@ describe('migrateState', () => {
       settings: { agencyHubBaseUrl: 'http://localhost:3000', agencyHubApiKey: 'legacy-key' },
     });
     expect(legacy.settings.agencyHubDeviceToken).toBe('');
-    expect(legacy.settings.agencyHubApiKey).toBe('legacy-key');
+    // v17: the legacy key is not carried forward at all.
+    expect(legacy.settings).not.toHaveProperty('agencyHubApiKey');
 
     // v8 record with a token survives re-migration byte-for-byte.
     const migratedOnce = migrateState({
@@ -539,19 +540,17 @@ describe('sanitizeSettings', () => {
     expect(result.coachAutoRecap).toBe('off');
   });
 
-  it('trims API key', () => {
-    const result = storage.sanitizeSettings({ agencyHubApiKey: '  hub-key  ' });
-    expect(result.agencyHubApiKey).toBe('hub-key');
+  it('trims the stored sign-in', () => {
+    const result = storage.sanitizeSettings({ agencyHubDeviceToken: '  agency_hub_device_x  ' });
+    expect(result.agencyHubDeviceToken).toBe('agency_hub_device_x');
   });
 
-  it('canonicalizes the Agency Hub base URL and trims its API key', () => {
+  it('canonicalizes the Agency Hub base URL', () => {
     const result = storage.sanitizeSettings({
       agencyHubBaseUrl: ' https://hub.example.com/base/ ',
-      agencyHubApiKey: '  hub-key  ',
-      agencyHubDeviceToken: '',
+      agencyHubDeviceToken: '  hub-key  ',
     });
     expect(result.agencyHubBaseUrl).toBe('https://hub.example.com/base');
-    expect(result.agencyHubApiKey).toBe('hub-key');
   });
 
   it('fills defaults for missing fields', () => {
@@ -587,7 +586,7 @@ describe('sanitizeSettings', () => {
         featureModels: { 'fast-reply': 'anthropic:claude-haiku-4-5' },
         featureReasoning: { 'fast-reply': 'max' },
         agencyHubBaseUrl: 'http://localhost:3000',
-        agencyHubApiKey: 'hub-key',
+        agencyHubDeviceToken: 'hub-key',
       },
     });
     const dumped = JSON.stringify(result.settings);
@@ -595,7 +594,8 @@ describe('sanitizeSettings', () => {
     expect(dumped).not.toContain('or-legacy');
     expect(dumped).not.toContain('featureModels');
     expect(dumped).not.toContain('featureReasoning');
-    expect(result.settings.agencyHubApiKey).toBe('hub-key');
+    // v17: the legacy field is not carried forward at all.
+    expect(dumped).not.toContain('agencyHubApiKey');
   });
   it('falls back to default when quickMessageCount is NaN-producing string', () => {
     const result = storage.sanitizeSettings({ quickMessageCount: 'abc' as unknown as number });

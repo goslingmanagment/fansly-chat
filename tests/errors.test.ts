@@ -62,7 +62,7 @@ describe('toUserError', () => {
   });
 
   it('carries upstream HTTP diagnostics into the user error', () => {
-    const err = new ChatGooseError('hub_invalid_api_key', {
+    const err = new ChatGooseError('hub_unauthorized', {
       details: { status: 401, responseSnippet: '{"message":"Unauthorized"}' },
     });
     const result = toUserError(err);
@@ -135,7 +135,7 @@ describe('getErrorMessage', () => {
       'hub_provider_auth',
       'CG-HUB-13',
       'AI-провайдер отклонил доступ Agency Hub.',
-      'Это не ваш ключ Agency Hub: провайдер отклонил серверный ключ или права Hub. Сообщите менеджеру — повтор не поможет.',
+      'Это не про ваш вход: провайдер отклонил доступ самого Agency Hub. Сообщите менеджеру — повтор не поможет.',
     ],
     [
       'hub_provider_rate_limited',

@@ -1044,8 +1044,8 @@ describe('VoiceService SDK transport', () => {
         type: 'voice:noteError',
         attemptId: ATTEMPT_ID,
         source: 'create',
-        code: 'hub_invalid_api_key',
-        message: 'Agency Hub отклонил учётные данные.',
+        code: 'hub_unauthorized',
+        message: 'Agency Hub отклонил вход с этого устройства.',
         status: 401,
     }]);
   });
@@ -1148,8 +1148,8 @@ describe('VoiceService SDK transport', () => {
       attemptId: ATTEMPT_ID,
       source: 'audio',
       voiceNoteId: 42,
-      code: 'hub_invalid_api_key',
-      message: 'Agency Hub отклонил учётные данные.',
+      code: 'hub_unauthorized',
+      message: 'Agency Hub отклонил вход с этого устройства.',
       status: 403,
     }]);
   });

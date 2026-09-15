@@ -127,15 +127,17 @@ describe('Spenders invalidation policy', () => {
     }, 'local')).toBe(false);
   });
 
-  it('invalidates for either credential custody key only in local storage', () => {
+  it('invalidates for the sign-in custody key, and only in local storage', () => {
     expect(shouldInvalidateSpendersForStorageChanges({
       agencyHubDeviceToken: change('old-token', 'new-token'),
     }, 'local')).toBe(true);
     expect(shouldInvalidateSpendersForStorageChanges({
-      agencyHubApiKey: change('old-key', 'new-key'),
-    }, 'local')).toBe(true);
-    expect(shouldInvalidateSpendersForStorageChanges({
-      agencyHubApiKey: change('old-key', 'new-key'),
+      agencyHubDeviceToken: change('old-token', 'new-token'),
     }, 'sync')).toBe(false);
+    // v17 (E79): the retired slot's own removal event says nothing about the
+    // sign-in, so it must not throw the board cache away.
+    expect(shouldInvalidateSpendersForStorageChanges({
+      agencyHubApiKey: change('legacy-key', undefined),
+    }, 'local')).toBe(false);
   });
 });

@@ -103,10 +103,7 @@ function readyMount(overrides: Parameters<typeof mountOptionsPage>[0] = {}) {
       knownAccounts: ['acc-1'],
       accountMappings: { 'acc-1': 'p1' },
       personaCatalog: [ACTIVE_PERSONA],
-      personaCatalogSource: personaCatalogSource({
-        agencyHubApiKey: '',
-        ...settings,
-      }),
+      personaCatalogSource: personaCatalogSource(settings),
       ...overrides.state,
     },
     sessions: overrides.sessions ?? [LIVE_SESSION],
@@ -1102,7 +1099,6 @@ describe('options «Статус» pane', () => {
         settings: {
           agencyHubBaseUrl: 'https://hub.example',
           agencyHubDeviceToken: 'agency_hub_device_SECRET',
-          agencyHubApiKey: 'agency_hub_key_SECRET',
         },
         runtime: {
           health: HEALTH_UP,

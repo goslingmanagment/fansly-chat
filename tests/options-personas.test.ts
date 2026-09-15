@@ -158,7 +158,6 @@ describe('«Персоны» pane', () => {
         personaCatalog: [],
         personaCatalogSource: personaCatalogSource({
           agencyHubBaseUrl: 'https://hub.example.test',
-          agencyHubApiKey: '',
           agencyHubDeviceToken: 'device-x',
         }),
         personaCatalogFetchedAt: null,
@@ -174,7 +173,6 @@ describe('«Персоны» pane', () => {
   it('says «каталог пуст» only once the server confirmed it for these credentials', async () => {
     const source = personaCatalogSource({
       agencyHubBaseUrl: 'https://hub.example.test',
-      agencyHubApiKey: '',
       agencyHubDeviceToken: 'device-x',
     });
     // Freshness is measured against the wall clock, so this fixture has to be
@@ -215,7 +213,6 @@ describe('«Персоны» pane', () => {
     };
     const source = personaCatalogSource({
       agencyHubBaseUrl: 'https://hub.example.test/agency-b',
-      agencyHubApiKey: '',
       agencyHubDeviceToken: 'device-x',
     });
     page = await mountOptionsPage({
@@ -242,7 +239,6 @@ describe('«Персоны» pane', () => {
   it('does not confuse an old content timestamp with failed or stale synchronization', async () => {
     const source = personaCatalogSource({
       agencyHubBaseUrl: 'https://hub.example.test',
-      agencyHubApiKey: '',
       agencyHubDeviceToken: 'device-x',
     });
     page = await mountOptionsPage({
@@ -263,7 +259,6 @@ describe('«Персоны» pane', () => {
   it('renders a row with the built-in badge, mono version and mapping count', async () => {
     const source = personaCatalogSource({
       agencyHubBaseUrl: 'https://hub.example.test',
-      agencyHubApiKey: '',
       agencyHubDeviceToken: 'device-x',
     });
     page = await mountOptionsPage({
@@ -297,7 +292,6 @@ describe('«Персоны» pane', () => {
   it('keeps an archived persona visible with an amber «выбери замену» while mapped', async () => {
     const source = personaCatalogSource({
       agencyHubBaseUrl: 'https://hub.example.test',
-      agencyHubApiKey: '',
       agencyHubDeviceToken: 'device-x',
     });
     page = await mountOptionsPage({
@@ -327,7 +321,6 @@ describe('«Персоны» pane', () => {
   it('hides an archived-and-unreferenced persona but never calls the catalog empty', async () => {
     const source = personaCatalogSource({
       agencyHubBaseUrl: 'https://hub.example.test',
-      agencyHubApiKey: '',
       agencyHubDeviceToken: 'device-x',
     });
     page = await mountOptionsPage({

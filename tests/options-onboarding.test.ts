@@ -1,5 +1,5 @@
-// First-run onboarding: the durable checklist, its corrected step order
-// (host access BEFORE sign-in), and the fresh-install empty states.
+// First-run onboarding: the durable checklist, the chatter's own three steps
+// (invite link → sign in → Fansly, E79), and the fresh-install empty states.
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { COPY } from '../src/options/copy.js';
@@ -84,7 +84,7 @@ describe('options first-run onboarding', () => {
     await unmountOptionsPage();
   });
 
-  it('shows the three steps in the corrected order — host access before sign-in', async () => {
+  it('shows the three steps in the chatter\'s own order — invite, sign-in, Fansly', async () => {
     const page = await mountOptionsPage({ sessions: [], runtime: { onboarding: FRESH } });
 
     expect(card(page).hidden).toBe(false);
@@ -92,19 +92,20 @@ describe('options first-run onboarding', () => {
     const titles = Array.from(
       page.document.querySelectorAll('.chatgoose-onboarding-step-title'),
     ).map((node) => node.textContent);
-    // Access first: sign-in cannot pass without the host permission (E41's
-    // no_permission flow), so telling the chatter to log in first is a trap.
+    // The invite link comes first: it is where the password is set, and there
+    // is nothing to sign in with until it has been opened. The host permission
+    // is no longer a step of its own — «Войти» asks Firefox for it (E79).
     expect(titles).toEqual([
       COPY.onboarding.step1Title,
       COPY.onboarding.step2Title,
       COPY.onboarding.step3Title,
     ]);
     // Nothing is done on an untouched install.
-    for (const key of ['access', 'signIn', 'fansly']) {
+    for (const key of ['invite', 'signIn', 'fansly']) {
       expect(step(page, key).dataset.done).toBe('false');
     }
     // The «Вход» step names the password rule the hub card also carries.
-    expect(step(page, 'signIn').textContent).toContain('пароль на устройстве не хранится');
+    expect(step(page, 'signIn').textContent).toContain('Пароль на этом устройстве не сохраняется');
   });
 
   it('stays put when the chatter only types a hub URL (no self-cancelling)', async () => {
@@ -119,19 +120,16 @@ describe('options first-run onboarding', () => {
     // v1 derived «fresh» from live form state, so filling this field dismissed
     // the checklist that was still explaining the next two steps.
     expect(card(page).hidden).toBe(false);
-    // …and step 1 is NOT done: the permission has not been granted.
-    expect(step(page, 'access').dataset.done).toBe('false');
+    // …and step 1 is NOT done: no invite has been redeemed on this device.
+    expect(step(page, 'invite').dataset.done).toBe('false');
     expect(page.onboardingDismissals()).toBe(0);
   });
 
   it('paints live done-states and CTAs that route into the right pane', async () => {
-    // Access granted + a working identity, but no Fansly account yet: two green,
-    // one open — every state read from the same sources the «Статус» rows use.
-    //
-    // The custody keys stay EMPTY on purpose: the mount predicate would stop
-    // reading «fresh» the moment a credential is stored, and what this case
-    // exercises is the step logic — step 2 follows the background's live
-    // identity read, not the presence of a token string.
+    // A live identity, but no Fansly account yet: step 2 green, step 3 open.
+    // Step 1 reads custody — a sign-in cannot exist without a redeemed invite —
+    // so it turns green the moment the credential lands, which here happens
+    // after mount (the fresh predicate stops reading «fresh» otherwise).
     const page = await mountOptionsPage({
       settings: { agencyHubBaseUrl: 'https://hub.example' },
       sessions: [],
@@ -139,15 +137,14 @@ describe('options first-run onboarding', () => {
       runtime: { onboarding: FRESH, health: HEALTH_UP, identity: IDENTITY_AUTH },
     });
 
-    expect(step(page, 'access').dataset.done).toBe('true');
     expect(step(page, 'signIn').dataset.done).toBe('true');
     expect(step(page, 'fansly').dataset.done).toBe('false');
     // A done step drops its CTA for the «готово» badge.
     expect(
-      page.document.querySelector<HTMLElement>('[data-onboarding-action="access"]')?.hidden,
+      page.document.querySelector<HTMLElement>('[data-onboarding-action="signIn"]')?.hidden,
     ).toBe(true);
     expect(
-      page.document.querySelector<HTMLElement>('[data-onboarding-done="access"]')?.hidden,
+      page.document.querySelector<HTMLElement>('[data-onboarding-done="signIn"]')?.hidden,
     ).toBe(false);
     // Still visible: not every step is done, so nothing was stamped.
     expect(card(page).hidden).toBe(false);
@@ -168,7 +165,6 @@ describe('options first-run onboarding', () => {
         accountMappings: { 'acc-1': 'p1' },
         personaCatalog: [ACTIVE_PERSONA],
         personaCatalogSource: personaCatalogSource({
-          agencyHubApiKey: '',
           agencyHubBaseUrl: 'https://hub.example',
           agencyHubDeviceToken: '',
         }),
@@ -246,7 +242,6 @@ describe('options first-run onboarding', () => {
         // catalog whose source does not match the live credential is hidden, so
         // the persona step only closes once the token below arrives.
         personaCatalogSource: personaCatalogSource({
-          agencyHubApiKey: '',
           agencyHubBaseUrl: 'https://hub.example',
           agencyHubDeviceToken: 'agency_hub_device_abc123',
         }),
@@ -290,7 +285,6 @@ describe('options first-run onboarding', () => {
         accountMappings: { 'acc-1': 'p1' },
         personaCatalog: [ACTIVE_PERSONA],
         personaCatalogSource: personaCatalogSource({
-          agencyHubApiKey: '',
           agencyHubBaseUrl: 'https://hub.example',
           agencyHubDeviceToken: '',
         }),

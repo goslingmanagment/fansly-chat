@@ -739,7 +739,7 @@ describe('ChatGooseContentApp', () => {
 
     expect(sendSpy).not.toHaveBeenCalled();
     expect(document.querySelector('.chatgoose-toast')?.textContent).toContain(
-      'CG-HUB-02: Нет учётных данных Agency Hub.',
+      'CG-HUB-02: Вы не вошли в ChatGoose.',
     );
     expect(document.querySelector('.chatgoose-toast')?.textContent)
       .not.toContain('OpenRouter');
@@ -1689,7 +1689,7 @@ describe('ChatGooseContentApp', () => {
 
     expect(sendSpy).not.toHaveBeenCalled();
     expect(document.querySelector('.chatgoose-toast')?.textContent).toContain(
-      'CG-HUB-02: Нет учётных данных Agency Hub.',
+      'CG-HUB-02: Вы не вошли в ChatGoose.',
     );
     expect(document.querySelector('.chatgoose-toast')?.textContent)
       .not.toContain('OpenRouter');

@@ -115,7 +115,12 @@ function materializeStorageState(raw: Record<string, unknown>): StorageStateSnap
       hasOwn(rawSettings, 'agencyHubDeviceToken') ||
       hasOwn(rawSettings, LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY)
     ));
-  const legacyApiKeyNeedsRemoval = hasOwn(raw, LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY);
+  // A VALUE, not merely a key: `storage.local.get([...])` answers with the keys
+  // it was asked for, and an absent one can come back as `undefined`. Removing
+  // on presence alone would make every narrow read think there is work to do.
+  const legacyApiKeyNeedsRemoval =
+    hasOwn(raw, LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY) &&
+    raw[LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY] !== undefined;
 
   return {
     state,

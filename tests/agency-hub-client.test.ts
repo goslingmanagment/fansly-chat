@@ -16,8 +16,7 @@ function makeSettings(overrides: Partial<ReturnType<typeof createDefaultSettings
   return {
     ...createDefaultSettings(),
     agencyHubBaseUrl: 'http://localhost:3000',
-    agencyHubApiKey: 'hub-key',
-    agencyHubDeviceToken: '',
+    agencyHubDeviceToken: 'hub-key',
     ...overrides,
   };
 }
@@ -345,7 +344,7 @@ describe('AgencyHubClient', () => {
       'lifetime',
       1000,
       new AbortController().signal,
-    )).rejects.toMatchObject({ key: 'hub_invalid_api_key' });
+    )).rejects.toMatchObject({ key: 'hub_unauthorized' });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -757,8 +756,7 @@ describe('AgencyHubClient', () => {
     const result = await client.testConnection(
       {
         agencyHubBaseUrl: 'http://localhost:3000',
-        agencyHubApiKey: 'hub-key',
-        agencyHubDeviceToken: '',
+        agencyHubDeviceToken: 'hub-key',
       },
       new AbortController().signal,
     );
@@ -784,8 +782,7 @@ describe('AgencyHubClient', () => {
     const result = await client.testConnection(
       {
         agencyHubBaseUrl: 'http://localhost:3000',
-        agencyHubApiKey: 'hub-key',
-        agencyHubDeviceToken: '',
+        agencyHubDeviceToken: 'hub-key',
       },
       new AbortController().signal,
     );
@@ -813,8 +810,7 @@ describe('AgencyHubClient', () => {
     const result = await client.testConnection(
       {
         agencyHubBaseUrl: 'http://localhost:3000',
-        agencyHubApiKey: 'hub-key',
-        agencyHubDeviceToken: '',
+        agencyHubDeviceToken: 'hub-key',
       },
       new AbortController().signal,
     );
@@ -822,15 +818,15 @@ describe('AgencyHubClient', () => {
     expect(result).toMatchObject({
       ok: false,
       error: {
-        key: 'hub_invalid_api_key',
+        key: 'hub_unauthorized',
         code: 'CG-HUB-03',
         httpStatus: 401,
       },
     });
-    // Copy names the credential that was actually sent (legacy key here) and
-    // points at the preferred fix — issuing a device token.
-    expect(result.error?.message).toContain('API key');
-    expect(result.error?.description).toContain('device token');
+    // E79: one credential class, one card — the chatter is told to sign in
+    // again, never which of two credentials was rejected.
+    expect(result.error?.message).toBe('Agency Hub отклонил вход с этого устройства.');
+    expect(result.error?.description).toContain('войдите заново');
     expect(result.error?.serverDetail).toContain('unauthorized');
     // The failure is also visible in the background console.
     expect(consoleWarn).toHaveBeenCalledWith(
@@ -839,7 +835,7 @@ describe('AgencyHubClient', () => {
     );
   });
 
-  it('blames the device token, not the key, when the token was the bearer', async () => {
+  it('says «войдите заново» without naming the credential (E79 vocabulary)', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ error: 'unauthorized' }, 401)));
     (globalThis as Record<string, unknown>).browser = {
@@ -852,7 +848,6 @@ describe('AgencyHubClient', () => {
     const result = await client.testConnection(
       {
         agencyHubBaseUrl: 'http://localhost:3000',
-        agencyHubApiKey: 'hub-key',
         agencyHubDeviceToken: 'agency_hub_device_stale',
       },
       new AbortController().signal,
@@ -860,8 +855,8 @@ describe('AgencyHubClient', () => {
 
     expect(result.ok).toBe(false);
     expect(result.error?.code).toBe('CG-HUB-03');
-    expect(result.error?.message).toContain('device token');
-    expect(result.error?.message).not.toContain('API key');
+    expect(result.error?.message).not.toMatch(/device token|API|ключ|токен/i);
+    expect(result.error?.description).not.toMatch(/device token|API|ключ|токен/i);
   });
 
   it('returns a failed result on non-ok or network failures without throwing', async () => {
@@ -1350,9 +1345,8 @@ describe('AgencyHubClient', () => {
   });
 });
 
-const HUB: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'> = {
+const HUB: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubDeviceToken'> = {
   agencyHubBaseUrl: 'https://hub.example',
-  agencyHubApiKey: '',
   agencyHubDeviceToken: 'agency_hub_device_abc',
 };
 
@@ -1466,7 +1460,7 @@ describe('AgencyHubClient.checkIdentity', () => {
   it('reports no_credential with no bearer', async () => {
     const client = new AgencyHubClient(async () => jsonResponse(meBody(), 200));
     expect(await client.checkIdentity(
-      { ...HUB, agencyHubDeviceToken: '', agencyHubApiKey: '' },
+      { ...HUB, agencyHubDeviceToken: '' },
       new AbortController().signal,
     )).toEqual({ ok: false, reason: 'no_credential' });
   });

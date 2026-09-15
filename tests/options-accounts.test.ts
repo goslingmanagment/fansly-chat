@@ -64,7 +64,6 @@ function makeState(overrides?: Partial<PersistedState>): PersistedState {
     schemaVersion: STORAGE_SCHEMA_VERSION,
     settings: {
       agencyHubBaseUrl: '',
-      agencyHubApiKey: '',
       agencyHubDeviceToken: '',
       quickMessageCount: 30,
       pingMessageCount: 30,
@@ -236,7 +235,9 @@ async function loadOptionsPage(options: {
     },
     permissions: {
       contains: vi.fn(async () => false),
-      request: vi.fn(async () => false),
+      // E79: «Войти» asks Firefox for the hub origin on the same click, so the
+      // sign-in flows below need the grant to succeed.
+      request: vi.fn(async () => true),
     },
   };
 
@@ -701,7 +702,7 @@ describe('Options page account sections', () => {
       element.closest<HTMLElement>('[hidden]:not(.chatgoose-cabinet-pane)');
     expect(foldedAncestor(signInUser)).not.toBeNull();
     const reissue = Array.from(document.querySelectorAll('button'))
-      .find((button) => button.textContent === COPY.hub.reissueToken)!;
+      .find((button) => button.textContent === COPY.hub.signInAgain)!;
     expect(reissue.hidden).toBe(false);
 
     reissue.click();
@@ -778,16 +779,13 @@ describe('Options page settings and read-only personas', () => {
   it.each([
     'settings',
     'agencyHubDeviceToken',
-    'agencyHubApiKey',
   ] as const)(
     'drops source-A catalog rows immediately when the Hub source changes via %s',
     async (sourceChangeKey) => {
-      const usesLegacyKey = sourceChangeKey === 'agencyHubApiKey';
       const settingsA = {
         ...makeState().settings,
         agencyHubBaseUrl: 'https://hub-a.example.test',
-        agencyHubDeviceToken: usesLegacyKey ? '' : 'device-a',
-        agencyHubApiKey: usesLegacyKey ? 'legacy-a' : '',
+        agencyHubDeviceToken: 'device-a',
       };
       await loadOptionsPage({
         state: makeState({
@@ -820,15 +818,9 @@ describe('Options page settings and read-only personas', () => {
           settings: { oldValue: settingsA, newValue: settingsB },
         };
       } else {
-        const nextCredential = sourceChangeKey === 'agencyHubDeviceToken'
-          ? 'device-b'
-          : 'legacy-b';
-        (currentState as unknown as Record<string, unknown>)[sourceChangeKey] = nextCredential;
+        (currentState as unknown as Record<string, unknown>)[sourceChangeKey] = 'device-b';
         changes = {
-          [sourceChangeKey]: {
-            oldValue: sourceChangeKey === 'agencyHubDeviceToken' ? 'device-a' : 'legacy-a',
-            newValue: nextCredential,
-          },
+          [sourceChangeKey]: { oldValue: 'device-a', newValue: 'device-b' },
         };
       }
 
@@ -983,7 +975,7 @@ describe('Options page settings and read-only personas', () => {
         settings: {
           ...makeState().settings,
           agencyHubBaseUrl: 'https://hub.example.test',
-          agencyHubApiKey: 'key',
+          agencyHubDeviceToken: 'key',
         },
       }),
       sessions: [],
@@ -1073,7 +1065,7 @@ describe('Options page settings and read-only personas', () => {
       expiresAt: Date.now() + 86_400_000,
     });
     await vi.waitFor(() => {
-      expect(document.body.textContent).toContain(COPY.hub.deviceTokenStored);
+      expect(document.body.textContent).toContain(COPY.hub.deviceSignedIn);
     });
 
     releaseFirstStorageSet?.();
@@ -1086,7 +1078,7 @@ describe('Options page settings and read-only personas', () => {
     await vi.waitFor(() => {
       expect(connectionTokens.at(-1)).toBe('device-token-new');
     });
-    expect(document.body.textContent).toContain(COPY.hub.deviceTokenStored);
+    expect(document.body.textContent).toContain(COPY.hub.deviceSignedIn);
   });
 
   it('re-tests the hub connection automatically after a successful sign-in', async () => {
@@ -1137,7 +1129,7 @@ describe('Options page settings and read-only personas', () => {
       expect(connectionTokens).toContain('device-token-auto');
     });
     await vi.waitFor(() => {
-      expect(document.body.textContent).toContain(COPY.hub.checkViaDeviceToken);
+      expect(document.body.textContent).toContain(COPY.hub.connPillOk);
     });
   });
 
@@ -1147,7 +1139,7 @@ describe('Options page settings and read-only personas', () => {
         settings: {
           ...makeState().settings,
           agencyHubBaseUrl: 'https://hub.example.test',
-          agencyHubApiKey: 'stale-visible-key',
+          agencyHubDeviceToken: 'stale-visible-key',
         },
       }),
       sessions: [],
@@ -1164,65 +1156,6 @@ describe('Options page settings and read-only personas', () => {
     const formWrite = storageSet.mock.calls.at(-1)?.[0] as Record<string, unknown>;
     expect(Object.prototype.hasOwnProperty.call(formWrite, 'agencyHubApiKey')).toBe(false);
     expect((currentState as unknown as Record<string, unknown>).agencyHubApiKey).toBe('rotated-key');
-  });
-
-  it('does write the API-key custody value after an explicit key-field edit', async () => {
-    await loadOptionsPage({
-      state: makeState({
-        settings: {
-          ...makeState().settings,
-          agencyHubBaseUrl: 'https://hub.example.test',
-          agencyHubApiKey: 'old-key',
-        },
-      }),
-      sessions: [],
-    });
-
-    const storageSet = vi.mocked(browser.storage.local.set);
-    const callsBeforeEdit = storageSet.mock.calls.length;
-    const keyInput = getSectionByTitle('Agency Hub')
-      .querySelector<HTMLInputElement>('input[type="password"][autocomplete="off"]')!;
-    keyInput.value = 'new-key';
-    keyInput.dispatchEvent(new Event('change', { bubbles: true }));
-
-    await vi.waitFor(() => expect(storageSet.mock.calls.length).toBeGreaterThan(callsBeforeEdit));
-    const formWrite = storageSet.mock.calls.at(-1)?.[0] as Record<string, unknown>;
-    expect(formWrite.agencyHubApiKey).toBe('new-key');
-  });
-
-  it('retries an explicitly edited API key with the next unrelated settings save after a transient failure', async () => {
-    await loadOptionsPage({
-      state: makeState({
-        settings: {
-          ...makeState().settings,
-          agencyHubBaseUrl: 'https://hub.example.test',
-          agencyHubApiKey: 'old-key',
-        },
-      }),
-      sessions: [],
-    });
-
-    failNextStorageSet?.();
-    const storageSet = vi.mocked(browser.storage.local.set);
-    const keyInput = getSectionByTitle('Agency Hub')
-      .querySelector<HTMLInputElement>('input[type="password"][autocomplete="off"]')!;
-    keyInput.value = 'new-key';
-    keyInput.dispatchEvent(new Event('change', { bubbles: true }));
-    await flushMicrotasks();
-    expect((currentState as unknown as Record<string, unknown>).agencyHubApiKey)
-      .not.toBe('new-key');
-
-    const quickInput = document.querySelector<HTMLInputElement>('input[type="number"][max="200"]')!;
-    quickInput.value = '74';
-    quickInput.dispatchEvent(new Event('change', { bubbles: true }));
-
-    await vi.waitFor(() => {
-      expect((currentState as unknown as Record<string, unknown>).agencyHubApiKey)
-        .toBe('new-key');
-      expect(currentState.settings.quickMessageCount).toBe(74);
-    });
-    const retryWrite = storageSet.mock.calls.at(-1)?.[0] as Record<string, unknown>;
-    expect(retryWrite.agencyHubApiKey).toBe('new-key');
   });
 
   it('shows a persistent save failure and retries the current form on request', async () => {
@@ -1253,66 +1186,6 @@ describe('Options page settings and read-only personas', () => {
     expect(currentState.settings.quickMessageCount).toBe(30);
     window.dispatchEvent(new Event('pagehide'));
     await vi.waitFor(() => expect(currentState.settings.quickMessageCount).toBe(74));
-  });
-
-  it('retries a failed explicit API-key write on pagehide without another edit', async () => {
-    await loadOptionsPage({
-      state: makeState({
-        settings: {
-          ...makeState().settings,
-          agencyHubBaseUrl: 'https://hub.example.test',
-          agencyHubApiKey: 'old-key',
-        },
-      }),
-      sessions: [],
-    });
-
-    failNextStorageSet?.();
-    const storageSet = vi.mocked(browser.storage.local.set);
-    const keyInput = getSectionByTitle('Agency Hub')
-      .querySelector<HTMLInputElement>('input[type="password"][autocomplete="off"]')!;
-    keyInput.value = 'new-key';
-    keyInput.dispatchEvent(new Event('change', { bubbles: true }));
-    await flushMicrotasks();
-    const callsBeforePageHide = storageSet.mock.calls.length;
-
-    window.dispatchEvent(new Event('pagehide'));
-
-    expect(storageSet.mock.calls.length).toBe(callsBeforePageHide + 1);
-    const retryWrite = storageSet.mock.calls.at(-1)?.[0] as Record<string, unknown>;
-    expect(retryWrite.agencyHubApiKey).toBe('new-key');
-    await flushMicrotasks();
-    expect((currentState as unknown as Record<string, unknown>).agencyHubApiKey)
-      .toBe('new-key');
-  });
-
-  it('does not let an older API-key acknowledgement clear a newer explicit key snapshot', async () => {
-    await loadOptionsPage({
-      state: makeState({
-        settings: {
-          ...makeState().settings,
-          agencyHubBaseUrl: 'https://hub.example.test',
-          agencyHubApiKey: 'old-key',
-        },
-      }),
-      sessions: [],
-    });
-
-    stallNextStorageSet?.();
-    const keyInput = getSectionByTitle('Agency Hub')
-      .querySelector<HTMLInputElement>('input[type="password"][autocomplete="off"]')!;
-    keyInput.value = 'first-new-key';
-    keyInput.dispatchEvent(new Event('change', { bubbles: true }));
-
-    keyInput.value = 'final-new-key';
-    keyInput.dispatchEvent(new Event('change', { bubbles: true }));
-    releaseFirstStorageSet?.();
-
-    await vi.waitFor(() => {
-      expect((currentState as unknown as Record<string, unknown>).agencyHubApiKey)
-        .toBe('final-new-key');
-    });
-    expect(keyInput.value).toBe('final-new-key');
   });
 
   it('disambiguates duplicate personality names in the mapping dropdown', async () => {

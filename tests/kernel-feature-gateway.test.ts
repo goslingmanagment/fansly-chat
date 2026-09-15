@@ -14,7 +14,6 @@ function settings() {
   return {
     ...createDefaultSettings(),
     agencyHubBaseUrl: 'http://localhost:3000',
-    agencyHubApiKey: 'hub-key',
     agencyHubDeviceToken: 'agency_hub_device_x',
   };
 }
@@ -351,7 +350,7 @@ describe('kernel feature gateway', () => {
     expect(quotaDenied.key).toBe('hub_quota_exceeded');
     expect(quotaDenied.code).toBe('CG-HUB-09');
     expect((await failWith(new Response('{"message":"down"}', { status: 503 }))).key).toBe('service_unavailable');
-    expect((await failWith(new Response('{"message":"nope"}', { status: 401 }))).key).toBe('hub_invalid_api_key');
+    expect((await failWith(new Response('{"message":"nope"}', { status: 401 }))).key).toBe('hub_unauthorized');
 
     // Missing terminal frame = truncated generation → never presented as done.
     const truncated = await failWith(sseResponse([META, { type: 'content_delta', text: 'partial' }]));

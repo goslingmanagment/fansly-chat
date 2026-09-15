@@ -104,14 +104,14 @@ describe('Popup', () => {
   it('flags a missing Agency Hub configuration and stays quiet otherwise', async () => {
     await loadPopup(async () => makeStatus({ hasApiKey: false }));
     await vi.waitFor(() => {
-      expect(rootText()).toContain('Agency Hub не настроен');
+      expect(rootText()).toContain('Войдите в ChatGoose');
     });
 
     await loadPopup(async () => makeStatus({ hasApiKey: true }));
     await vi.waitFor(() => {
       expect(rootText()).toContain('Fansly подключён');
     });
-    expect(rootText()).not.toContain('Agency Hub не настроен');
+    expect(rootText()).not.toContain('Войдите в ChatGoose');
   });
 
   it('opens Settings through the runtime on the normal path, natively on the fallback', async () => {

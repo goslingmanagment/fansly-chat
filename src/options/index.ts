@@ -2829,9 +2829,14 @@ async function render(): Promise<void> {
       {
         key: 'access',
         label: COPY.status.stepAccess,
-        // Only a definite `false` is an open step; `null` means «not checked yet»
-        // (no hub address entered), which the hub step already covers.
-        state: hubPermissionGranted !== false ? 'done' : 'open',
+        // Only a definite `false` is an open step; `null` means «not checked yet».
+        // E79 adds a second condition: before the chatter has signed in, the host
+        // permission is not a chore of his own — «Войти» asks Firefox for it on
+        // the same click. Listing it separately on a fresh install would demand
+        // an action that the very next step performs by itself.
+        state: hubPermissionGranted === false && state.settings.agencyHubDeviceToken.trim()
+          ? 'open'
+          : 'done',
       },
       {
         key: 'fansly',
@@ -2853,10 +2858,13 @@ async function render(): Promise<void> {
    * do, so a step turns green the moment its state is genuinely satisfied — and
    * only then. */
   const onboardingStepStates = (): Record<OnboardingStepKey, ReadinessStepState> => ({
-    // A stored sign-in is proof the invite link was opened and a password set:
-    // there is no other way to get one. Deliberately a CUSTODY check, not a live
-    // one — step 2 is where the kernel's opinion is asked.
-    invite: state.settings.agencyHubDeviceToken.trim() ? 'done' : 'open',
+    // A sign-in — stored here, or confirmed live by the kernel — is proof the
+    // invite link was opened and a password set: there is no other way to get
+    // one. The custody half is what lets this step go green while step 2 is
+    // still «неизвестно» over a kernel outage.
+    invite: state.settings.agencyHubDeviceToken.trim() || hubStepState() === 'done'
+      ? 'done'
+      : 'open',
     // A live identity read is the only proof a credential actually works —
     // truer than «a token string exists in storage». But the READ can fail for
     // reasons that are not this chatter's: the same three-state truth the

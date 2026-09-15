@@ -9,7 +9,7 @@
 
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import {
-  AGENCY_HUB_API_KEY_STORAGE_KEY,
+  LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
   LEGACY_PERSONA_SNAPSHOT_KEY,
   STORAGE_SCHEMA_VERSION,
@@ -59,7 +59,6 @@ function v12Store(overrides: Record<string, unknown> = {}): Record<string, unkno
     settings: {
       ...createDefaultSettings(),
       agencyHubBaseUrl: 'http://localhost:3000',
-      agencyHubApiKey: 'legacy-key',
       agencyHubDeviceToken: 'old-token',
     },
     personalities: [],
@@ -76,7 +75,7 @@ function fullStateWrites(): Record<string, unknown>[] {
     .filter((items) =>
       Object.prototype.hasOwnProperty.call(items, 'settings') ||
       Object.prototype.hasOwnProperty.call(items, AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY) ||
-      Object.prototype.hasOwnProperty.call(items, AGENCY_HUB_API_KEY_STORAGE_KEY),
+      Object.prototype.hasOwnProperty.call(items, LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY),
     );
 }
 
@@ -93,11 +92,11 @@ describe('v12 → v13 migration', () => {
 
     // In-memory shape unchanged: consumers still read settings.agencyHub*.
     expect(state.settings.agencyHubDeviceToken).toBe('old-token');
-    expect(state.settings.agencyHubApiKey).toBe('legacy-key');
 
-    // Persisted layout: custody keys own the secrets, blob has none.
+    // Persisted layout: the custody key owns the secret, the blob has none,
+    // and the retired legacy slot is gone (v17/E79).
     expect(mockStorage[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]).toBe('old-token');
-    expect(mockStorage[AGENCY_HUB_API_KEY_STORAGE_KEY]).toBe('legacy-key');
+    expect(LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY in mockStorage).toBe(false);
     const blob = mockStorage.settings as Record<string, unknown>;
     expect(blob).not.toHaveProperty('agencyHubDeviceToken');
     expect(blob).not.toHaveProperty('agencyHubApiKey');
@@ -107,19 +106,16 @@ describe('v12 → v13 migration', () => {
   it('fallback-reads a v12 blob that has not migrated yet (pure migrateState)', () => {
     const state = migrateState(v12Store());
     expect(state.settings.agencyHubDeviceToken).toBe('old-token');
-    expect(state.settings.agencyHubApiKey).toBe('legacy-key');
   });
 
   it('custody key beats a stale blob value whenever both exist', () => {
     const state = migrateState({
       ...v12Store({ schemaVersion: STORAGE_SCHEMA_VERSION }),
       [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'fresh-token',
-      [AGENCY_HUB_API_KEY_STORAGE_KEY]: '',
     });
-    // The stale v12-shaped blob still carries 'old-token'/'legacy-key' — the
-    // custody keys must win in BOTH directions (fresh token, cleared key).
+    // The stale v12-shaped blob still carries 'old-token' — the custody key
+    // must win over it.
     expect(state.settings.agencyHubDeviceToken).toBe('fresh-token');
-    expect(state.settings.agencyHubApiKey).toBe('');
   });
 
   it('leaves current-schema custody repair to the fenced background coordinator', async () => {
@@ -128,7 +124,6 @@ describe('v12 → v13 migration', () => {
     const snapshot = await storage.readStorageStateSnapshot();
 
     expect(snapshot.state.settings.agencyHubDeviceToken).toBe('old-token');
-    expect(snapshot.state.settings.agencyHubApiKey).toBe('legacy-key');
     expect(snapshot.repair).toMatchObject({
       persistState: false,
       custodyLayoutNeedsRepair: true,
@@ -142,14 +137,12 @@ describe('v12 → v13 migration', () => {
     mockStorage = {
       ...v12Store({ schemaVersion: STORAGE_SCHEMA_VERSION }),
       [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'fresh-token',
-      [AGENCY_HUB_API_KEY_STORAGE_KEY]: '',
     };
 
     const state = await storage.loadStorageState();
 
     expect(state.settings.agencyHubDeviceToken).toBe('fresh-token');
     expect(mockStorage[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]).toBe('fresh-token');
-    expect(mockStorage[AGENCY_HUB_API_KEY_STORAGE_KEY]).toBe('');
     expect(mockStorage.settings).toHaveProperty('agencyHubDeviceToken', 'old-token');
     expect(fullStateWrites()).toEqual([]);
   });
@@ -174,7 +167,6 @@ describe('narrow steady-state reads', () => {
     mockStorage = serializePersistedState(migrateState({
       ...v12Store({ schemaVersion: STORAGE_SCHEMA_VERSION }),
       [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'current-token',
-      [AGENCY_HUB_API_KEY_STORAGE_KEY]: 'current-key',
       'summary:g1': summaryOne,
       'summary:g2': summaryTwo,
     }));
@@ -201,7 +193,9 @@ describe('narrow steady-state reads', () => {
       'schemaVersion',
       'settings',
       AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
-      AGENCY_HUB_API_KEY_STORAGE_KEY,
+      // Still ASKED for, never read as a credential: presence is what tells the
+      // coordinator there is a retired slot left to remove (v17/E79).
+      LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY,
       'summary:g1',
     ]));
     expect(requestedKeys).not.toContain('summary:g2');
@@ -244,7 +238,6 @@ describe('narrow steady-state reads', () => {
     expect(calls.some(([keys]) => Array.isArray(keys))).toBe(true);
     expect(calls.some(([keys]) => keys === null)).toBe(true);
     expect(state.settings.agencyHubDeviceToken).toBe('old-token');
-    expect(state.settings.agencyHubApiKey).toBe('legacy-key');
     expect((state as unknown as Record<string, unknown>)['summary:g2']).toEqual(summaryTwo);
     expect(fullStateWrites()).toEqual([]);
   });
@@ -274,7 +267,7 @@ describe('saveSettings custody contract', () => {
     const written = (browser.storage.local.set as ReturnType<typeof vi.fn>).mock.calls[0]![0] as Record<string, unknown>;
     expect(written).toHaveProperty('settings');
     expect(written).not.toHaveProperty(AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY);
-    expect(written).not.toHaveProperty(AGENCY_HUB_API_KEY_STORAGE_KEY);
+    expect(written).not.toHaveProperty(LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY);
     expect((written.settings as Record<string, unknown>)).not.toHaveProperty('agencyHubDeviceToken');
   });
 
@@ -310,7 +303,6 @@ describe('saveSettings custody contract', () => {
     // property, the page never edits it).
     await storage.saveSettings({
       agencyHubBaseUrl: staleView.settings.agencyHubBaseUrl,
-      agencyHubApiKey: staleView.settings.agencyHubApiKey,
       quickMessageCount: 30,
       pingMessageCount: staleView.settings.pingMessageCount,
       improveMessageCount: staleView.settings.improveMessageCount,
@@ -456,10 +448,9 @@ describe('saveSettings durably stamps schemaVersion (E45)', () => {
 });
 
 describe('serialization helpers', () => {
-  it('stripSecretSettings removes exactly the two credential fields', () => {
+  it('stripSecretSettings removes the one credential field (and the retired one stays gone)', () => {
     const settings = {
       ...createDefaultSettings(),
-      agencyHubApiKey: 'k',
       agencyHubDeviceToken: 't',
     };
     const stripped = stripSecretSettings(settings);
@@ -469,11 +460,12 @@ describe('serialization helpers', () => {
     expect(stripped.uiTheme).toBe(settings.uiTheme);
   });
 
-  it('serializePersistedState emits custody keys + a secret-free blob', () => {
+  it('serializePersistedState emits the one custody key + a secret-free blob', () => {
     const state = migrateState(v12Store());
     const serialized = serializePersistedState(state);
     expect(serialized[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]).toBe('old-token');
-    expect(serialized[AGENCY_HUB_API_KEY_STORAGE_KEY]).toBe('legacy-key');
+    // The retired slot is never re-emitted (v17/E79).
+    expect(serialized).not.toHaveProperty(LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY);
     expect(serialized.settings).not.toHaveProperty('agencyHubDeviceToken');
   });
 });

@@ -28,7 +28,7 @@ function hubSettings() {
   return {
     ...createDefaultSettings(),
     agencyHubBaseUrl: 'http://localhost:3000',
-    agencyHubApiKey: 'hub-key',
+    agencyHubDeviceToken: 'hub-key',
   };
 }
 

@@ -2,7 +2,6 @@ import { vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 import { getErrorMessage } from '../../src/shared/errors.js';
 import {
-  AGENCY_HUB_API_KEY_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
   KNOWN_ACCOUNTS_KEY,
@@ -434,7 +433,6 @@ export async function mountOptionsPage(
               stored = {
                 ...stored,
                 [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: '',
-                [AGENCY_HUB_API_KEY_STORAGE_KEY]: '',
               };
               delete stored[AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY];
             }

@@ -6,7 +6,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { COPY } from '../src/options/copy.js';
 import {
-  AGENCY_HUB_API_KEY_STORAGE_KEY,
+  LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
   PERSONA_CATALOG_FETCHED_AT_STORAGE_KEY,
@@ -62,7 +62,7 @@ function signedInMount(overrides: Parameters<typeof mountOptionsPage>[0] = {}) {
   });
 }
 
-describe('options «Agency Hub» pane', () => {
+describe('options «Аккаунт ChatGoose» pane', () => {
   afterEach(async () => {
     await unmountOptionsPage();
   });
@@ -98,11 +98,12 @@ describe('options «Agency Hub» pane', () => {
     });
 
     const tokenRow = detail(page, 'device-token');
-    expect(tokenRow.textContent).toContain('abc123…');
-    expect(tokenRow.textContent).toContain(COPY.hub.deviceTokenRenews);
-    // Sliding expiry: a shown date would be wrong within minutes.
+    expect(tokenRow.textContent).toContain(COPY.hub.deviceSignedIn);
+    // E79 vocabulary: no prefix, no expiry, no renewal note — the chatter reads
+    // «вход выполнен» and when it happened, nothing about the credential.
+    expect(tokenRow.textContent).not.toContain('abc123');
     expect(tokenRow.textContent).not.toContain('2026-09-01');
-    // …and the token itself is never rendered.
+    // …and the credential itself is never rendered.
     expect(page.document.body.textContent).not.toContain('agency_hub_device_SECRET');
   });
 
@@ -114,9 +115,9 @@ describe('options «Agency Hub» pane', () => {
     const tokenBlock = detail(page, 'device-token');
     const issuedRow = Array.from(
       tokenBlock.querySelectorAll<HTMLElement>('.chatgoose-hub-srow'),
-    ).find((row) => row.textContent?.includes(COPY.hub.deviceTokenIssuedLabel))!;
+    ).find((row) => row.textContent?.includes(COPY.hub.deviceSinceLabel))!;
     expect(issuedRow.hidden).toBe(true);
-    expect(tokenBlock.textContent).toContain(COPY.hub.deviceTokenStored);
+    expect(tokenBlock.textContent).toContain(COPY.hub.deviceSignedIn);
   });
 
   it('takes the «Выпущен» row down with the token it belongs to', async () => {
@@ -132,10 +133,10 @@ describe('options «Agency Hub» pane', () => {
 
     const issuedRow = Array.from(
       detail(page, 'device-token').querySelectorAll<HTMLElement>('.chatgoose-hub-srow'),
-    ).find((row) => row.textContent?.includes(COPY.hub.deviceTokenIssuedLabel))!;
+    ).find((row) => row.textContent?.includes(COPY.hub.deviceSinceLabel))!;
     expect(issuedRow).toBeTruthy();
     expect(issuedRow.hidden).toBe(true);
-    expect(detail(page, 'device-token').textContent).toContain(COPY.hub.deviceTokenMissing);
+    expect(detail(page, 'device-token').textContent).toContain(COPY.hub.deviceSignedOut);
   });
 
   it('fills the diagnostics card from the same reads the Статус rows use', async () => {
@@ -164,14 +165,13 @@ describe('options «Agency Hub» pane', () => {
     // Host access names the granted origin.
     expect(detail(page, 'host-access').textContent).toContain('hub.example');
     // The live check is stated ONCE, in «Подключение» beside the button that
-    // produces it — outcome (the pill), then the receipt: clock, duration and
-    // WHICH credential carried it. E67 retired the diagnostics row that printed
-    // the same `lastConnectionCheck` a card away.
+    // produces it — outcome (the pill), then the receipt: clock and duration.
+    // E67 retired the diagnostics row that printed the same `lastConnectionCheck`
+    // a card away; E79 dropped the credential kind (there is only one).
     expect(page.document.querySelector('[data-hub-detail="check"]')).toBeNull();
     const connRow = page.document.querySelector<HTMLElement>('[data-role="hub-connection"]')!;
     expect(connRow.textContent).toContain(COPY.hub.connPillOk);
     expect(connRow.textContent).toContain('мс');
-    expect(connRow.textContent).toContain(COPY.hub.checkViaDeviceToken);
     // 37 errors today with only 20 listed — say that the list is capped.
     expect(detail(page, 'errors').textContent).toContain(COPY.hub.errorsToday.replace('{n}', '37'));
     expect(detail(page, 'errors').textContent).toContain(COPY.hub.errorsCapped);
@@ -235,7 +235,7 @@ describe('options «Agency Hub» pane', () => {
     await page.flushAsync();
 
     // The sign-in is real (the pane shows the live token)…
-    expect(detail(page, 'device-token').textContent).toContain(COPY.hub.deviceTokenStored);
+    expect(detail(page, 'device-token').textContent).toContain(COPY.hub.deviceSignedIn);
     // …and exactly one live test was run for it.
     expect(connectionTests() - before).toBe(1);
   });
@@ -295,7 +295,6 @@ describe('options «Agency Hub» pane', () => {
         settings: {
           agencyHubBaseUrl: 'https://hub.example',
           agencyHubDeviceToken: 'agency_hub_device_SECRET',
-          agencyHubApiKey: 'legacy-SECRET',
         },
         // The background wipes; the harness models that by emptying the custody
         // keys when the sign-out request lands.
@@ -310,7 +309,8 @@ describe('options «Agency Hub» pane', () => {
 
       const raw = page.getRawStorage();
       expect(raw[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]).toBe('');
-      expect(raw[AGENCY_HUB_API_KEY_STORAGE_KEY]).toBe('');
+      // v17/E79: the retired slot is REMOVED by the same wipe, not emptied.
+      expect(LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY in raw).toBe(false);
       // The settings blob is untouched by the sign-out: schema stays v15 and a
       // parallel tab's theme survives.
       expect((raw.settings as Record<string, unknown>).uiTheme).toBe(themeBefore);
@@ -320,42 +320,39 @@ describe('options «Agency Hub» pane', () => {
     it('fences a SECOND tab: an external custody wipe repaints this tab signed-out', async () => {
       // `openOptions` keeps ONE settings tab only for the paths it owns — a
       // manually opened second tab is real. Without the fence this tab keeps the
-      // wiped token in memory after the other tab's «Выйти»: it renders «Device
-      // token active ✓» and would run a connection test with a credential that no
-      // longer exists on disk.
+      // wiped credential in memory after the other tab's «Выйти»: it still shows
+      // «вход выполнен» and would run a connection test with a credential that
+      // no longer exists on disk.
       const page = await signedInMount({
         settings: {
           agencyHubBaseUrl: 'https://hub.example',
           agencyHubDeviceToken: 'agency_hub_device_SECRET',
-          agencyHubApiKey: 'legacy-SECRET',
         },
       });
-      expect(detail(page, 'device-token').textContent).toContain(COPY.hub.deviceTokenStored);
-      const keyInput = page.document.querySelector<HTMLInputElement>(
-        'input[type="password"][autocomplete="off"]',
-      );
-      expect(keyInput?.value).toBe('legacy-SECRET');
+      expect(detail(page, 'device-token').textContent).toContain(COPY.hub.deviceSignedIn);
+      // E79: there is no credential field on this page at all.
+      expect(page.document.querySelector('input[type="password"][autocomplete="off"]'))
+        .toBeNull();
 
-      // The other tab's sign-out: EMPTY strings, never removal (E19).
+      // The other tab's sign-out: an EMPTY string in the live slot, never a
+      // removed key (E19 still holds for the slot this build uses).
       page.emitStorageChange({
         [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: {
           oldValue: 'agency_hub_device_SECRET',
           newValue: '',
         },
-        [AGENCY_HUB_API_KEY_STORAGE_KEY]: { oldValue: 'legacy-SECRET', newValue: '' },
       });
       await page.flushAsync();
 
       // This document's own state followed the wipe…
-      expect(detail(page, 'device-token').textContent).toContain(COPY.hub.deviceTokenMissing);
-      expect(detail(page, 'device-token').textContent).not.toContain(COPY.hub.deviceTokenStored);
-      expect(keyInput?.value).toBe('');
+      expect(detail(page, 'device-token').textContent).toContain(COPY.hub.deviceSignedOut);
+      expect(detail(page, 'device-token').textContent).not.toContain(COPY.hub.deviceSignedIn);
       // …so there is nothing left to sign out of, and the sign-in form is back.
       expect(hubButton(page, COPY.hub.signOut).hidden).toBe(true);
-      expect(page.document.body.textContent).toContain(COPY.hub.deviceTokenMissing);
+      expect(page.document.body.textContent).toContain(COPY.hub.deviceSignedOut);
       // The sign-in meta line is RE-RENDERED: it normally survives a repaint on
       // its own, which would leave a stale line (after a sign-in in this
-      // session, «Device token abc… выпущен») next to a signed-out token row.
+      // session, «Готово — вы вошли.») next to a signed-out device row.
       const signInMeta = page.document.querySelector<HTMLElement>(
         '[data-role="hub-signin-meta"]',
       );
@@ -372,7 +369,6 @@ describe('options «Agency Hub» pane', () => {
         settings: {
           agencyHubBaseUrl: 'https://hub.example',
           agencyHubDeviceToken: 'agency_hub_device_OLD',
-          agencyHubApiKey: '',
         },
       });
       const testsBefore = page
@@ -388,7 +384,7 @@ describe('options «Agency Hub» pane', () => {
       await page.flushAsync();
 
       // State followed the rotation, the pill is honest…
-      expect(detail(page, 'device-token').textContent).toContain(COPY.hub.deviceTokenStored);
+      expect(detail(page, 'device-token').textContent).toContain(COPY.hub.deviceSignedIn);
       // …but not one additional LOCAL connection test was fired by the fence.
       const testsAfter = page
         .sentRequestTypes()
@@ -406,10 +402,9 @@ describe('options «Agency Hub» pane', () => {
         settings: {
           agencyHubBaseUrl: 'https://hub.example',
           agencyHubDeviceToken: 'agency_hub_device_SECRET',
-          agencyHubApiKey: 'legacy-SECRET',
         },
       });
-      expect(detail(page, 'device-token').textContent).toContain(COPY.hub.deviceTokenStored);
+      expect(detail(page, 'device-token').textContent).toContain(COPY.hub.deviceSignedIn);
 
       // Burst: the wipe, then an unrelated event in the same tick — the second
       // read wins the generation race.
@@ -418,121 +413,17 @@ describe('options «Agency Hub» pane', () => {
           oldValue: 'agency_hub_device_SECRET',
           newValue: '',
         },
-        [AGENCY_HUB_API_KEY_STORAGE_KEY]: { oldValue: 'legacy-SECRET', newValue: '' },
+        [LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY]: { oldValue: 'legacy-SECRET', newValue: '' },
       });
       page.emitStorageChange({
         [PERSONA_CATALOG_FETCHED_AT_STORAGE_KEY]: { oldValue: null, newValue: Date.now() },
       });
       await page.flushAsync();
 
-      expect(detail(page, 'device-token').textContent).toContain(COPY.hub.deviceTokenMissing);
-      expect(detail(page, 'device-token').textContent).not.toContain(COPY.hub.deviceTokenStored);
+      expect(detail(page, 'device-token').textContent).toContain(COPY.hub.deviceSignedOut);
+      expect(detail(page, 'device-token').textContent).not.toContain(COPY.hub.deviceSignedIn);
       expect(hubButton(page, COPY.hub.signOut).hidden).toBe(true);
     });
 
-    it('invalidates THIS tab’s pending credential save when another tab wipes', async () => {
-      // The wave-B quiesce only covers the tab that pressed «Выйти». Here the OTHER
-      // tab wiped while this one had a typed-but-unsaved key: the 350 ms debounce
-      // would fire afterwards and put a usable credential back on disk while the
-      // signing-out tab honestly reported `revoked`. Real timers on purpose — the
-      // point is that the debounce genuinely elapses after the wipe.
-      const page = await signedInMount({
-        settings: {
-          agencyHubBaseUrl: 'https://hub.example',
-          agencyHubDeviceToken: 'agency_hub_device_SECRET',
-          agencyHubApiKey: 'legacy-SECRET',
-        },
-      });
-      const keyInput = page.document.querySelector<HTMLInputElement>(
-        'input[type="password"][autocomplete="off"]',
-      );
-      keyInput!.value = 'legacy-typed-SECRET';
-      keyInput!.dispatchEvent(new page.window.Event('input', { bubbles: true }));
-
-      page.emitStorageChange({
-        [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: {
-          oldValue: 'agency_hub_device_SECRET',
-          newValue: '',
-        },
-        [AGENCY_HUB_API_KEY_STORAGE_KEY]: { oldValue: 'legacy-SECRET', newValue: '' },
-      });
-      await page.flushAsync();
-
-      // Well past the debounce window: nothing persisted the typed key…
-      await new Promise((resolve) => { setTimeout(resolve, 500); });
-      expect(page.getRawStorage()[AGENCY_HUB_API_KEY_STORAGE_KEY]).toBe('');
-      expect(page.getRawStorage()[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]).toBe('');
-      // …and the draft the chatter typed is still in front of them.
-      expect(keyInput!.value).toBe('legacy-typed-SECRET');
-    });
-
-    it('keeps a dirty legacy-key input while still updating the signed-in state', async () => {
-      // The typed text belongs to THIS chatter and is not saved yet, so it must
-      // survive — but the indicators may not claim a credential that was wiped.
-      const page = await signedInMount({
-        settings: {
-          agencyHubBaseUrl: 'https://hub.example',
-          agencyHubDeviceToken: 'agency_hub_device_SECRET',
-          agencyHubApiKey: 'legacy-SECRET',
-        },
-      });
-      const keyInput = page.document.querySelector<HTMLInputElement>(
-        'input[type="password"][autocomplete="off"]',
-      );
-      keyInput!.value = 'legacy-typed-SECRET';
-      keyInput!.dispatchEvent(new page.window.Event('input', { bubbles: true }));
-
-      page.emitStorageChange({
-        [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: {
-          oldValue: 'agency_hub_device_SECRET',
-          newValue: '',
-        },
-        [AGENCY_HUB_API_KEY_STORAGE_KEY]: { oldValue: 'legacy-SECRET', newValue: '' },
-      });
-      await page.flushAsync();
-
-      expect(keyInput!.value).toBe('legacy-typed-SECRET');
-      expect(detail(page, 'device-token').textContent).toContain(COPY.hub.deviceTokenMissing);
-    });
-
-    it('drops a pending legacy-key write instead of letting it land during the revoke', async () => {
-      // The page's debounced settings chain writes `agencyHubApiKey` OUTSIDE
-      // the background's auth FIFO. A snapshot still armed when «Выйти» is
-      // confirmed would fire during the (up-to-5s) revoke and put a usable key
-      // back on disk while the handler honestly reported `revoked`. Real timers
-      // here on purpose: the point is that the 350 ms debounce genuinely
-      // elapses while the sign-out is in flight.
-      let releaseSignOut!: () => void;
-      const held = new Promise<void>((resolve) => { releaseSignOut = resolve; });
-      const page = await signedInMount({
-        runtime: {
-          signOut: async () => {
-            await held;
-            return { outcome: 'revoked' } as const;
-          },
-        },
-      });
-      const keyInput = page.document.querySelector<HTMLInputElement>(
-        'input[type="password"][autocomplete="off"]',
-      );
-      expect(keyInput).not.toBeNull();
-
-      keyInput!.value = 'legacy-typed-SECRET';
-      keyInput!.dispatchEvent(new page.window.Event('input', { bubbles: true }));
-
-      hubButton(page, COPY.hub.signOut).click();
-      hubButton(page, COPY.hub.signOut.replace('…', '')).click();
-
-      // The sign-out is parked in the background; more than the debounce window
-      // passes. The armed snapshot must never have been written.
-      await new Promise((resolve) => { setTimeout(resolve, 500); });
-      expect(page.getRawStorage()[AGENCY_HUB_API_KEY_STORAGE_KEY]).toBe('');
-
-      releaseSignOut();
-      await page.flushAsync();
-      expect(page.getRawStorage()[AGENCY_HUB_API_KEY_STORAGE_KEY]).toBe('');
-      // The field mirrors what is actually stored — an empty custody key.
-      expect(keyInput!.value).toBe('');
-    });
   });
 });

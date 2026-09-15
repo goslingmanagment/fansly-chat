@@ -112,7 +112,6 @@ describe('isDebugEnabled', () => {
   it('returns true when debugMode is true', () => {
     expect(isDebugEnabled({
       agencyHubBaseUrl: '',
-      agencyHubApiKey: '',
       agencyHubDeviceToken: '',
       quickMessageCount: 100,
       pingMessageCount: 100,
@@ -130,7 +129,6 @@ describe('isDebugEnabled', () => {
   it('returns false when debugMode is false', () => {
     expect(isDebugEnabled({
       agencyHubBaseUrl: '',
-      agencyHubApiKey: '',
       agencyHubDeviceToken: '',
       quickMessageCount: 100,
       pingMessageCount: 100,
