@@ -112,6 +112,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E120 | 2026-09-14 | Owner corrects release numbering to patch 2.2.1; withdraw 2.3.0 from update discovery, preserve the complete logger and release history |
 | E121 | 2026-09-14 | Creator-wide follower GET pacing and cooldown, human pause/resume, cached proof and lazy conversation preview with clearer progress |
 | E122 | 2026-09-14 | Release E121 as 2.2.2 after independent adversarial review; retain the owner's corrected small-release numbering and skip Telegram |
+| E79 | 2026-09-15 | One login and password for every client; legacy chatter key retired end to end (storage v17); named-401 self-healing; «Как начать» page; 2.4.0 |
 
 ## Entries
 
@@ -3965,3 +3966,85 @@ signing. Real-account acceptance and measurement of Fansly's rate behavior
 follow installation; the synthetic checks do not replace that evidence.
 This entry records authorization and validation scope. Successful publication
 must be established by the served feed, signed package hash and release tag.
+
+**E79 (2026-09-15).** PR-E1 of the «Единый аккаунт чаттера» track. The chatter's
+whole story becomes one login and one password: the owner sends an invite link,
+the chatter sets a password there, and that pair signs him into the Fansly
+extension and the OnlyFans desktop app alike.
+
+*Sign-in protocol (plan Р2).* «Войти» calls the kernel's public
+`POST /api/v1/auth/device-tokens/password` with `mode: 'active'` in a
+bearer-less SDK client, and the caller commits the answer in ONE atomic
+`storage.local.set` inside the custody FIFO. The Stage 32 ceremony —
+cookie `login` → `authIssueDeviceToken` → `logout` — is deleted. Two things
+made it wrong here: Firefox carries the hub session in the profile's own cookie
+jar, so signing in from the extension logged the dashboard out of the same
+browser; and the trailing `logout` was best-effort, so a stray session could
+survive. There is no reserve→activate either: this client's custody is a single
+key, and a pending credential parked in the live slot would answer 401 for the
+whole reservation window.
+
+*The legacy chatter key is gone, not deprecated.* Field, `Settings` member,
+`DEFAULT_SETTINGS` entry, `NORMALIZED_STORAGE_STATE_KEYS` member, custody-layout
+repair predicate, `stripSecretSettings`/`serializePersistedState` handling,
+`resolveHubBearer` fallback, the options-page input with its whole
+dirty/snapshot/retry machinery, the double wipe in `signOutAgencyHub` and the
+v12-blob fallback branch all went out together. Storage **v17** REMOVES the
+`agencyHubApiKey` key from `storage.local` — which makes this entry the
+tombstone for **E19**'s «wipe to empty strings, never remove the key» rule *for
+that key only*: the rule protected a fallback READ, and the read shipped out in
+the same release. The live slot keeps the rule (its presence is what the layout
+repair reads). An install that held only the key arrives signed out and is asked
+to sign in; production holds no such install. **The device-token branch of the
+v12 fallback STAYS** — the feed serves only the newest build, so a ≤1.8.0
+install jumps straight to v17 and would otherwise lose a working sign-in
+(pinned: a direct v12→v17 jump carries the credential and drops the key).
+Existing sign-ins are NOT invalidated: nobody re-logs in after this update.
+
+*Address.* `agencyHubBaseUrl` defaults to `https://gosling-agency.ru`, and the
+v17 normalizer fills it in for an install that never had one (a deliberately
+chosen address survives untouched). The field moves under «Дополнительно»: one
+hub serves the agency, so it is not a question a new chatter answers.
+
+*Host permission.* `https://gosling-agency.ru/*` joins `host_permissions`, which
+Firefox grants in the INSTALL prompt. An UPDATE grants nothing (bug 1893232), so
+the runtime `permissions.request` stays and now rides the «Войти» click — the one
+user gesture the flow guarantees — and a refusal stops the sign-in with the
+sentence that explains it instead of an opaque network error. `runtime.onInstalled`
+records which of the two cases this profile is in.
+
+*Errors.* `hub_invalid_api_key` → `hub_unauthorized` (CG-HUB-03), now
+«Agency Hub отклонил вход с этого устройства». New: **CG-HUB-17** «Неверный логин
+или пароль», **CG-HUB-18** «Владелец должен сбросить пароль»
+(`reason: password_change_required`), **CG-HUB-19** «Сессия устройства завершена»
+— the self-healing card. Per §4.5, a 401 clears this device only when (a) the
+server named `token_revoked` or `token_expired`, (b) the rejected bearer is still
+the stored one (sha-256 digests, so no second copy is held) and (c) the check and
+wipe run inside the custody FIFO. A bare 401 fails closed, exactly as before.
+The wipe empties the live slot and removes the retired one.
+
+*Vocabulary (plan §2), enforced.* `tests/copy-vocabulary.test.ts` reads every
+Russian string in `src/options`, `src/popup`, `src/content`, the error registry,
+the three chatter-facing pages and every CG-HUB card, and fails on «токен»,
+«device token», «ключ», «API», «bearer», «активация», «резервация», «префикс».
+Cyrillic look-behinds keep «подключение», «ключевые» and «реактивационный» out of
+the net; a falsifiability case proves the gate still bites. The pane is renamed
+«Аккаунт ChatGoose» and states «Вы вошли как grisha · чаттер» with the Fansly
+pages, plus «Аккаунт» (`${baseUrl}/account`), «Выйти» and «Нужна помощь со
+входом». The first-run checklist becomes the chatter's own three steps: open the
+invite and set a password → sign in → open Fansly. The host permission is no
+longer a step of its own, since «Войти» asks for it.
+
+*Pages and release.* New static `start.html` («Как начать», two tabs:
+Fansly = install + sign in, OnlyFans = download from
+`ext.gosling-agency.ru/desktop/` + sign in) is what the invite, both clients and
+the guide point at. `deploy.sh` carries it through preflight, upload and URL
+verification, and gains `--pages-only`: publish the pages without signing an XPI
+or touching `updates.json`, so the page can be live before the first invite.
+Version **2.4.0** — `v2.3.0` is taken by the withdrawn release (E120/E122), and a
+tag is never reused. Publication only after the kernel's PR-1A is deployed: the
+deploy script's contract-hash gate enforces that by itself.
+
+*Not done here:* `whats-new-3.html`. The per-release convention is
+`CHANGELOG.md` + `changelog.html`, both updated; `whats-new-2.html` was a one-off
+deep dive for 2.0 and stays a fixed historical page.
