@@ -2,7 +2,7 @@
 //
 // Rules:
 // - Every user-visible options string lives here; panes never inline literals.
-// - Technical terms stay in Latin (Agency Hub, device token, Fansly, Spenders,
+// - Technical terms stay in Latin (Agency Hub, Fansly, Spenders,
 //   Fan Summary, Reply/Ping/Fix, Changelog, legacy).
 // - ERROR TEXTS DO NOT BELONG HERE. `src/shared/errors.ts` (E58 registry) is
 //   the canonical source of every error code, message and description; this
@@ -59,13 +59,12 @@ export const COPY = {
     microSetup: 'настройка',
     microNone: '—',
     microOk: '✓',
-    microToken: 'токен',
     microQuota: 'квота',
   },
 
   nav: {
     status: 'Статус',
-    hub: 'Agency Hub',
+    hub: 'Аккаунт ChatGoose',
     personas: 'Персоны',
     accounts: 'Аккаунты',
     generation: 'Генерация',
@@ -170,7 +169,7 @@ export const COPY = {
     hubDegraded: 'ядро деградировано',
     hubDown: 'ядро недоступно',
     hubDbLatency: 'DB latency {n} мс',
-    accessEmpty: 'войди или добавь ключ',
+    accessEmpty: 'вход не выполнен',
     accessUnknown: 'состояние хаба неизвестно',
     accessRejected: 'credential отклонён хабом',
     accessGrantedFor: 'выдан для',
@@ -234,63 +233,64 @@ export const COPY = {
     copyReportFailed: 'Буфер обмена недоступен — скопируй вручную.',
     reLogin: 'Войти заново',
     grantAccess: 'Разрешить доступ',
-    reissue: 'Перевыпустить',
     /** Pills. */
     pillOk: 'ок',
     pillLow: 'на исходе',
     pillNoData: 'нет данных',
-    pillTokenExpired: 'токен истёк',
     reportHint:
       '«Скопировать отчёт» — текстовый снимок этой страницы (версия, статусы, последние ошибки) в буфер, прислать в поддержку одним сообщением.',
     /** Tooltip on the report button — the honesty clause that used to close
      * `reportHint` before the visible hint shrank to a single line. */
-    reportHonesty: 'Скопировать статусы и последние ошибки без паролей и токенов.',
+    reportHonesty: 'Скопировать статусы и последние ошибки — без пароля и без учётных данных.',
   },
 
   /**
-   * First-run checklist. Step order is the plan's corrected one — host access
-   * comes BEFORE sign-in, because sign-in cannot pass without the permission.
+   * First-run checklist (E79). The chatter's own three steps, in the order he
+   * actually lives them: the invite link sets a password, that password signs
+   * the extension in, and then Fansly is opened so the accounts appear.
    */
   onboarding: {
     greeting: 'Здравствуй — это ChatGoose.',
     greetingSubtitle: 'Три шага, и можно работать.',
-    step1Title: 'Адрес Hub и доступ',
+    step1Title: 'Ссылка от владельца',
     step1Hint:
-      'Адрес хаба выдаёт владелец агентства. Firefox спросит разрешение для этого адреса — без него синк не работает.',
-    step1Action: 'Подключить',
+      'Владелец присылает в Telegram ссылку-приглашение. Откройте её и задайте свой пароль — логин там уже написан.',
+    step1Action: 'Как начать',
     step2Title: 'Вход',
     step2Hint:
-      'Логин и пароль выдаёт владелец агентства — вход выпустит device token; пароль на устройстве не хранится.',
+      'Введите здесь тот же логин и пароль. Пароль на этом устройстве не сохраняется.',
     step2Action: 'Войти',
     step3Title: 'Fansly и персона',
     step3Hint:
-      'Открой Fansly под аккаунтом модели — строка появится в «Аккаунтах» сама, останется назначить персону.',
+      'Откройте Fansly под аккаунтом модели — строка появится в «Аккаунтах» сама, останется назначить персону.',
     step3Action: 'К аккаунтам',
     /** Replaces a step's CTA once its state is genuinely satisfied. */
     stepDone: 'готово',
     /** Replaces the CTA when the step can neither be closed nor confirmed: the
-     * credentials are stored, the Hub is not answering, and «Войти» would send
-     * a signed-in chatter back through the login form over someone else's
-     * outage. Not green — a check that never happened is not a pass. */
+     * sign-in is stored, the Hub is not answering, and «Войти» would send a
+     * signed-in chatter back through the form over someone else's outage. Not
+     * green — a check that never happened is not a pass. */
     stepUnknown: 'неизвестно',
     hint:
-      'Тему и вид можно настроить уже сейчас, до подключения; генерация заработает после входа в хаб. Этот чеклист исчезнет, когда все шаги будут закрыты.',
+      'Тему и вид можно настроить уже сейчас, до входа; генерация заработает после входа. Этот чеклист исчезнет, когда все шаги будут закрыты.',
   },
 
   hub: {
-    title: 'Agency Hub',
-    /** Owner-fixed wording (2026-07-25): «ядро»/«хаб», never «кернел»; sign-in
-     * is login+password — the device token is issued BY the sign-in, nobody
-     * signs in «by token». */
-    subtitle: 'Ядро агентства: генерация, персоны, Spenders. Вход — по логину и паролю.',
+    title: 'Аккаунт ChatGoose',
+    /** E79: one account for every client. The chatter knows a login, a password
+     * and his devices — nothing below this line names a credential. */
+    subtitle: 'Один логин и пароль — на расширение и на приложение. Их выдаёт владелец по ссылке-приглашению.',
     /** The four zone captions, in the working order of the pane. */
     zoneConnection: 'Подключение',
     zoneSignIn: 'Вход',
     zoneAccount: 'Аккаунт',
     zoneDiagnostics: 'Диагностика',
-    /** Connection zone. */
+    /** Connection zone. The address is pre-filled and folded away: one hub
+     * serves the whole agency, so it is not a question a new chatter answers. */
+    advancedFold: 'Дополнительно',
     baseUrlLabel: 'Адрес Agency Hub',
-    baseUrlPlaceholder: 'https://адрес-вашего-хаба',
+    baseUrlPlaceholder: 'https://gosling-agency.ru',
+    baseUrlHint: 'Уже заполнено. Меняйте, только если владелец дал другой адрес.',
     /** «Доступ к хосту» status row: pill word per state + the sentence the meta
      * line shows while the state needs fixing (granted shows no sentence — the
      * mono origin on the right already says everything). */
@@ -302,14 +302,14 @@ export const COPY = {
     permPillNoUrl: 'нет адреса',
     permPillInvalidUrl: 'адрес некорректен',
     permPillUnsupported: 'недоступен',
-    permNoUrl: 'Синк выключен: не задан адрес Agency Hub. Укажи базовый URL хаба, затем разреши доступ к этому адресу.',
+    permNoUrl: 'Синк выключен: не задан адрес Agency Hub. Укажи адрес под «Дополнительно», затем разреши доступ к нему.',
     permInvalidUrl: 'Синк выключен: адрес Agency Hub некорректен. Нужен полный URL с http:// или https://.',
     permCheckError: 'Синк выключен: не удалось проверить доступ к хосту. Firefox вернул ошибку при проверке {origin}: {message}.',
-    permDenied: 'Синк выключен: доступ к хосту не выдан. Firefox не выдал доступ для {origin}. Нажми «Разрешить доступ» ещё раз.',
+    permDenied: 'Синк выключен: доступ к хосту не выдан. Firefox не выдал доступ для {origin}. Нажми «Войти» ещё раз и подтверди доступ.',
     permRequestError: 'Синк выключен: запрос доступа не удался. Firefox вернул ошибку при запросе {origin}: {message}.',
     permUnsupported: 'Синк выключен: запрос доступа недоступен в этой сборке. Эта сборка браузера не даёт browser.permissions.request для доступа к Agency Hub.',
-    permAsk: 'Разреши доступ для {origin} — без него ChatGoose не достучится до хаба.',
-    permNoCredential: 'Доступ для {origin} выдан, но нужен вход или legacy-ключ.',
+    permAsk: 'Firefox спросит доступ для {origin} при первом входе — без него ChatGoose не достучится до хаба.',
+    permNoCredential: 'Доступ для {origin} выдан. Осталось войти.',
     /** «Связь» status row: pill word per state + metas. */
     connLabel: 'Связь',
     connPillIdle: 'не проверялась',
@@ -320,64 +320,55 @@ export const COPY = {
      * the raw registry code («CG-HUB-07») in the pill. The code stays — one line
      * below, where the rest of the error already is. */
     connPillFailed: 'нет связи',
-    connIdleMeta: 'Укажи адрес хаба и войди (или добавь legacy-ключ) — тогда проверим связь.',
+    connIdleMeta: 'Войди — тогда проверим связь.',
     connPendingMeta: 'Дописываем изменения настроек перед живой проверкой.',
-    connTestingMeta: 'Проверяем доступность хаба, разрешение и credential.',
-    /** Account zone. The row names what it holds — a login and a role. It used
-     * to repeat its own card's title («Аккаунт» → «Аккаунт») (E67). */
-    identityLabel: 'Логин',
-    pagesLabel: 'Страницы ядра',
+    connTestingMeta: 'Проверяем доступность хаба и доступ к нему.',
+    /** Account zone: who is signed in, and on what pages. */
+    identityLabel: 'Вы вошли как',
+    signedInAs: '{username} · {role}',
+    pagesLabel: 'Страницы Fansly',
     pagesMore: 'и ещё {n}',
-    deviceTokenLabel: 'Device token',
-    /** Second row of the token block: when it was minted. Its own line, not a
-     * «·»-tail on the renewal note — the two are different facts. */
-    deviceTokenIssuedLabel: 'Выпущен',
-    /** Presence, not liveness. The pill is computed from a STRING in storage —
-     * a revoked token is still a string, so «активен» was a claim nothing here
-     * could back. Liveness lives one row below («Выпущен …») and in the
-     * identity-driven «Доступ» row. */
-    deviceTokenStored: 'сохранён',
-    deviceTokenRenews: 'продлевается при использовании',
-    deviceTokenIssued: 'выпущен {date}',
-    deviceTokenUnknown: 'данные появятся после следующего входа',
-    deviceTokenMissing: 'токена ещё нет',
-    signInLoginPlaceholder: 'Логин Hub',
+    roleOwner: 'владелец',
+    roleChatter: 'чаттер',
+    roleStaff: 'стафф',
+    /** This device's own sign-in — presence, stated in the chatter's words. */
+    deviceLabel: 'Это устройство',
+    deviceSignedIn: 'вход выполнен',
+    deviceSignedOut: 'входа нет',
+    deviceSinceLabel: 'Вход',
+    deviceSince: '{date}',
+    signInLoginPlaceholder: 'Логин',
     signInPasswordPlaceholder: 'Пароль',
     signIn: 'Войти',
+    signInAgain: 'Войти заново',
     signInHint:
-      'Адрес и логин выдаёт владелец агентства. Вход выпустит device token — пароль на устройстве не хранится.',
-    signInMissingFields: 'Сначала заполни адрес хаба, логин и пароль.',
+      'Логин и пароль вы задали по ссылке-приглашению от владельца. Пароль на этом устройстве не хранится.',
+    signInMissingFields: 'Введите логин и пароль.',
     signingIn: 'Входим…',
-    signInFailed: 'Вход не удался: {message}',
-    signInIssued: 'Device token {prefix}… выпущен (истекает {date}).',
-    /** Owner-fixed wording: the token is issued BY the login+password sign-in. */
-    tokenFallbackNote:
-      'Вход по логину и паролю выпускает device token; запросы идут по нему, legacy API-ключ — запасной путь.',
+    signInFailed: 'Войти не удалось: {message}',
+    signInDone: 'Готово — вы вошли.',
+    openAccount: 'Аккаунт',
+    openAccountHint: 'Кабинет на сайте: ваши устройства, смена пароля, ваши траты.',
+    helpSignIn: 'Нужна помощь со входом',
     testConnection: 'Проверить связь',
-    reissueToken: 'Перевыпустить токен',
     signOut: 'Выйти…',
     signOutConfirm: 'Точно выйти?',
     signOutCancel: 'Отмена',
     signOutRunning: 'Выходим…',
     /** The four honest outcomes of a sign-out. «Стёрт локально» is never said
-     * about a wipe that failed, and «отозван» never about a revoke the hub did
-     * not confirm. */
-    signOutRevoked: 'Вышли: креды стёрты, токен отозван на хабе.',
-    signOutAlreadyInvalid: 'Вышли: креды стёрты, токен уже был недействителен.',
+     * about a wipe that failed, and «завершён на хабе» never about a sign-out
+     * the hub did not confirm. */
+    signOutRevoked: 'Вышли: на этом устройстве стёрто, на хабе вход завершён.',
+    signOutAlreadyInvalid: 'Вышли: на этом устройстве стёрто, на хабе входа уже не было.',
     signOutUnreachable:
-      'Креды стёрты на этом устройстве. Хаб не подтвердил отзыв — токен истечёт сам.',
+      'На этом устройстве стёрто. Хаб не подтвердил — тогда вход закроется сам по сроку.',
     signOutWipeFailed:
-      'Не удалось стереть креды на этом устройстве — они могли остаться. Перезагрузи Настройки и повтори.',
+      'Не удалось стереть вход на этом устройстве — он мог остаться. Перезагрузи Настройки и повтори.',
     signOutHint:
-      '«Выйти» стирает device token и legacy-ключ на этом устройстве; настройки и маппинги остаются.',
+      '«Выйти» завершает вход на этом устройстве; настройки и маппинги остаются.',
     /** Diagnostics card. The «Ядро» row states what the pane is about and used
      * to exist only on «Статус», though the health response is right here. */
     coreLabel: 'Ядро',
-    /** The «Проверка» diagnostics ROW is gone (E67): it restated the «Связь»
-     * row's own receipt — one `lastConnectionCheck`, printed twice on one
-     * screen. What survives is the vocabulary the surviving row needs. */
-    checkViaDeviceToken: 'через device token',
-    checkViaLegacyKey: 'по legacy-ключу',
     checkDuration: '{n} мс',
     /** The label and the bare «выдан» went with the diagnostics host-access row
      * (E61): «Подключение» already states that fact next to the button that
@@ -395,11 +386,6 @@ export const COPY = {
     fanSummaryLabel: 'Fan Summary',
     fanSummaryLast: 'последний пуш — {when} · {account}',
     fanSummaryEmpty: 'пушей ещё не было',
-    legacyKeyFold: 'Legacy API-ключ (запасной путь)',
-    legacyKeyFieldLabel: 'API-ключ Agency Hub (запасной)',
-    legacyKeyShow: 'Показать',
-    legacyKeyHide: 'Скрыть',
-    legacyKeyRemove: 'Удалить',
   },
 
   personas: {

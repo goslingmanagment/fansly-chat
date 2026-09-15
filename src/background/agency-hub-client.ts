@@ -30,6 +30,10 @@ import {
   toUserError,
 } from '../shared/errors.js';
 import { logWarn } from '../shared/log.js';
+import {
+  healRevokedHubSession,
+  selfHealingUnauthorizedReason,
+} from './hub-custody.js';
 import { isRecapStatusResponse } from '../shared/protocol.js';
 import type {
   AgencyHubAiUsageBatchResponse,
@@ -84,14 +88,15 @@ interface AgencyHubConversationProfileResponse {
 
 type FetchLike = typeof fetch;
 
-/** Hub bearer: device token preferred, legacy chatter key fallback
- * (kernel dual-acceptance holds through the Stage 32 rollout window). */
+/** The hub bearer: the device-bound credential «Войти» minted, and nothing
+ * else. The legacy-key fallback went out with v17 (E79) — a client that finds
+ * no sign-in here asks the chatter to sign in, it does not reach for a second
+ * credential class. */
 export function resolveHubBearer(
-  settings: Pick<Settings, 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
+  settings: Pick<Settings, 'agencyHubDeviceToken'>,
 ): string {
   // Null-safe: legacy runtime message shapes may omit the token field.
-  const deviceToken = (settings.agencyHubDeviceToken ?? '').trim();
-  return deviceToken || (settings.agencyHubApiKey ?? '').trim();
+  return (settings.agencyHubDeviceToken ?? '').trim();
 }
 
 interface AgencyHubResultBase {
@@ -136,7 +141,7 @@ export interface AgencyHubFetchFanProfileResult extends AgencyHubResultBase {
 }
 
 export interface AgencyHubSubmitAiUsageBatchInput {
-  settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>;
+  settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubDeviceToken'>;
   events: AgencyHubAiUsageEvent[];
   signal: AbortSignal;
 }
@@ -237,6 +242,15 @@ export class AgencyHubClient {
       auth: { mode: 'bearer', token: () => bearer },
       headers: clientVersionHeaders(),
       fetch: (input, init) => this.fetchImpl(input, { ...init, signal }),
+      // §4.5 self-healing. The wipe is fire-and-forget on purpose: it re-checks
+      // under the custody FIFO that the bearer THIS request sent is still the
+      // stored one, so a sign-in that landed meanwhile survives, and a 401 the
+      // server gave no reason for never gets here at all.
+      onAuthError: (error) => {
+        if (selfHealingUnauthorizedReason(error)) {
+          void healRevokedHubSession(bearer);
+        }
+      },
     };
   }
 
@@ -274,7 +288,7 @@ export class AgencyHubClient {
         response: responseSnippet,
       });
       const key = error.status === 401 || error.status === 403
-        ? 'hub_invalid_api_key'
+        ? (selfHealingUnauthorizedReason(error) ? 'hub_session_ended' : 'hub_unauthorized')
         : 'hub_request_failed';
       return new ChatGooseError(key, {
         details: {
@@ -394,7 +408,7 @@ export class AgencyHubClient {
    * push's resolvePageLabel, exposed). Null means a configured, reachable Hub
    * had no page match; preflight failures keep their own actionable codes. */
   async resolvePageLabelForUsername(
-    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
+    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubDeviceToken'>,
     pageUsername: string | null,
     signal: AbortSignal,
   ): Promise<string | null> {
@@ -405,7 +419,7 @@ export class AgencyHubClient {
    * voice-notes capability hint. Missing capability data is deliberately
    * false; POST /voice-notes remains the authoritative admission check. */
   async resolvePageForUsername(
-    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
+    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubDeviceToken'>,
     pageUsername: string | null,
     signal: AbortSignal,
   ): Promise<AgencyHubResolvedPage | null> {
@@ -445,7 +459,7 @@ export class AgencyHubClient {
   }
 
   private async resolveVoiceCallContext(
-    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
+    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubDeviceToken'>,
   ): Promise<{ baseUrl: string; bearer: string }> {
     const baseUrl = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
     const bearer = resolveHubBearer(settings);
@@ -461,7 +475,7 @@ export class AgencyHubClient {
    * error responses for the dedicated service, which maps structured voice
    * codes and auth statuses onto its port lane. */
   async createVoiceNote(
-    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
+    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubDeviceToken'>,
     pageLabel: string,
     body: {
       clientRequestId: string;
@@ -479,7 +493,7 @@ export class AgencyHubClient {
   }
 
   async getVoiceNoteStatus(
-    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
+    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubDeviceToken'>,
     pageLabel: string,
     id: number,
     signal: AbortSignal,
@@ -491,7 +505,7 @@ export class AgencyHubClient {
   }
 
   async fetchVoiceNoteAudio(
-    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
+    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubDeviceToken'>,
     pageLabel: string,
     id: number,
     signal: AbortSignal,
@@ -516,7 +530,7 @@ export class AgencyHubClient {
    * confirmed domain "none". Canonical identity (§5): `conversationRef = groupId`,
    * `fanRef = fanAccountId`. */
   async getRecapStatus(
-    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
+    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubDeviceToken'>,
     params: {
       pageLabel: string;
       conversationRef: string;
@@ -570,7 +584,7 @@ export class AgencyHubClient {
    * page/window projection, not a coherent timestamp shared by returned rows.
    * `window` is 'lifetime' or a 'YYYY-MM' calendar month (kernel contract). */
   async fetchTopSpenders(
-    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
+    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubDeviceToken'>,
     pageLabel: string,
     window: string,
     limit: number,
@@ -638,7 +652,7 @@ export class AgencyHubClient {
 
   /** Global persona bodies are admin-only. Chatter clients receive metadata. */
   private async resolvePersonaCallContext(
-    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
+    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubDeviceToken'>,
   ): Promise<{ baseUrl: string; bearer: string }> {
     const baseUrl = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
     const bearer = resolveHubBearer(settings);
@@ -652,7 +666,7 @@ export class AgencyHubClient {
   }
 
   async fetchAiPersonaCatalog(
-    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
+    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubDeviceToken'>,
     signal: AbortSignal,
   ): Promise<Array<{
     key: string;
@@ -721,7 +735,7 @@ export class AgencyHubClient {
    * needs the base URL and host permission (the extension can only reach the
    * hub origin with the granted permission). */
   async checkHealth(
-    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
+    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubDeviceToken'>,
     signal: AbortSignal,
   ): Promise<AgencyHubHealthResponse> {
     const baseUrl = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
@@ -752,7 +766,7 @@ export class AgencyHubClient {
    * renderer keeps the credential badge neutral and lets the Hub row own the
    * grant prompt (health ≠ credential). */
   async checkIdentity(
-    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
+    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubDeviceToken'>,
     signal: AbortSignal,
   ): Promise<AgencyHubIdentityResponse> {
     const baseUrl = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
@@ -781,7 +795,7 @@ export class AgencyHubClient {
   }
 
   async testConnection(
-    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
+    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubDeviceToken'>,
     signal: AbortSignal,
   ): Promise<AgencyHubConnectionTestResponse> {
     const baseUrl = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
@@ -805,38 +819,16 @@ export class AgencyHubClient {
         return { ok: false, error: hubError('hub_timeout') };
       }
 
-      const userError = error instanceof ChatGooseError
-        ? toUserError(error)
-        : hubError('hub_request_failed');
+      // One credential class, one rejection card (E79): the registry entry
+      // already says «войдите заново», so there is nothing left to disambiguate
+      // — the old copy existed only to name WHICH of two credentials was sent.
       return {
         ok: false,
-        error: userError.key === 'hub_invalid_api_key'
-          ? this.describeRejectedBearer(settings, userError)
-          : userError,
+        error: error instanceof ChatGooseError
+          ? toUserError(error)
+          : hubError('hub_request_failed'),
       };
     }
-  }
-
-  /** The rejection copy must name the credential that was actually sent:
-   * resolveHubBearer prefers the device token, so with a stale token stored
-   * the legacy-key advice would point the user at the wrong field. */
-  private describeRejectedBearer(
-    settings: Pick<Settings, 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
-    userError: UserFacingError,
-  ): UserFacingError {
-    const usedDeviceToken = Boolean((settings.agencyHubDeviceToken ?? '').trim());
-    return {
-      ...userError,
-      ...(usedDeviceToken
-        ? {
-            message: 'Agency Hub rejected the device token.',
-            description: 'The token may be revoked or expired. Sign in again in Settings to issue a fresh device token, then retest.',
-          }
-        : {
-            message: 'Agency Hub rejected the API key.',
-            description: 'The key may be mistyped, rotated away by a newer key, revoked, or not a chatter key. Fix it — or sign in above to issue a device token instead.',
-          }),
-    };
   }
 
   async submitAiUsageBatch({

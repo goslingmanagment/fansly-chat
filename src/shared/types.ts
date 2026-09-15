@@ -24,9 +24,8 @@ export type UiThemeSetting = 'system' | 'light' | 'dark';
 
 export interface Settings {
   agencyHubBaseUrl: string;
-  agencyHubApiKey: string;
-  /** Stage 32: device-bound hub credential (agency_hub_device_…); preferred
-   * over agencyHubApiKey when present (kernel dual-acceptance). */
+  /** The device-bound hub credential minted by «Войти» (E79). The ONLY hub
+   * credential this build knows: the legacy chatter key went out with v17. */
   agencyHubDeviceToken: string;
   quickMessageCount: number;
   pingMessageCount: number;
@@ -688,7 +687,7 @@ export type UserErrorKey =
   | 'ai_output_unusable'
   | 'hub_invalid_url'
   | 'hub_missing_api_key'
-  | 'hub_invalid_api_key'
+  | 'hub_unauthorized'
   | 'hub_missing_permission'
   | 'hub_page_match_failed'
   | 'hub_timeout'
@@ -701,6 +700,9 @@ export type UserErrorKey =
   | 'hub_provider_rate_limited'
   | 'hub_provider_unavailable'
   | 'hub_stream_truncated'
+  | 'hub_sign_in_rejected'
+  | 'hub_password_change_required'
+  | 'hub_session_ended'
   | 'voice_disabled'
   | 'voice_not_allowlisted'
   | 'voice_no_profile'
@@ -1353,7 +1355,7 @@ export type ResolveFanChatResponse =
   | { ok: false; error: UserFacingError };
 
 export interface AgencyHubConnectionTestRequest {
-  settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>;
+  settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubDeviceToken'>;
 }
 
 export interface AgencyHubConnectionTestResponse {

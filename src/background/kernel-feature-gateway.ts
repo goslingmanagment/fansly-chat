@@ -14,6 +14,10 @@ import { clientVersionHeaders } from '../shared/client-version.js';
 import type { FeatureType, PingSegment, Settings } from '../shared/types.js';
 import { normalizeAgencyHubBaseUrl } from '../shared/agency-hub.js';
 import { resolveHubBearer } from './agency-hub-client.js';
+import {
+  healRevokedHubSession,
+  selfHealingUnauthorizedReason,
+} from './hub-custody.js';
 import { recordQuotaDenied, recordQuotaSnapshot } from './quota-tracker.js';
 
 export interface KernelFeatureClientContext {
@@ -229,7 +233,12 @@ function isLegacyCoachBodyValidation(error: KernelApiError): boolean {
     /\b(?:chatterQuestion|coachHistory|transcriptCoverage)\b/.test(error.message);
 }
 
-function toChatGooseError(error: unknown, feature?: FeatureType): ChatGooseError {
+function toChatGooseError(
+  error: unknown,
+  feature?: FeatureType,
+  /** The bearer this generation rode on, so a NAMED 401 can clear it (§4.5). */
+  bearer?: string,
+): ChatGooseError {
   if (error instanceof ChatGooseError) {
     return error;
   }
@@ -263,7 +272,17 @@ function toChatGooseError(error: unknown, feature?: FeatureType): ChatGooseError
       return new ChatGooseError('service_unavailable', { message: error.message });
     }
     if (error.status === 401 || error.status === 403) {
-      return new ChatGooseError('hub_invalid_api_key', {
+      // Named reason + our own bearer → sign this device out and say so; a bare
+      // 401 keeps the fail-closed card and leaves the sign-in alone.
+      if (selfHealingUnauthorizedReason(error)) {
+        if (bearer) {
+          void healRevokedHubSession(bearer);
+        }
+        return new ChatGooseError('hub_session_ended', {
+          details: { status: error.status, responseSnippet: error.message.slice(0, 400) },
+        });
+      }
+      return new ChatGooseError('hub_unauthorized', {
         details: { status: error.status, responseSnippet: error.message.slice(0, 400) },
       });
     }
@@ -483,7 +502,7 @@ export function createKernelFeatureGateway(
       try {
         await handle.done;
       } catch (error) {
-        const mapped = toChatGooseError(error, request.feature);
+        const mapped = toChatGooseError(error, request.feature, bearer);
         if (mapped.key === 'chat_changed') {
           refreshPersonaCatalog();
         }

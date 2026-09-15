@@ -1,5 +1,4 @@
 import {
-  AGENCY_HUB_API_KEY_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
   COACH_HISTORY_LIMIT_MAX,
   COACH_HISTORY_LIMIT_MIN,
@@ -8,6 +7,7 @@ import {
   IMPROVE_MAX_MESSAGE_COUNT,
   IMPROVE_MIN_MESSAGE_COUNT,
   KNOWN_ACCOUNTS_KEY,
+  LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY,
   PING_MAX_MESSAGE_COUNT,
   PING_MIN_MESSAGE_COUNT,
   QUICK_MAX_MESSAGE_COUNT,
@@ -57,6 +57,11 @@ function arraysEqual(left: string[], right: string[]): boolean {
 export interface StorageRepairPlan {
   invalidSummaryKeys: string[];
   custodyLayoutNeedsRepair: boolean;
+  /** v17 (E79): the retired legacy-key storage slot is still on disk. Unlike
+   * every other custody write this one REMOVES the key instead of emptying it —
+   * the fallback read that made E19's «never remove» rule necessary is gone
+   * with it, and a key nothing reads is a secret kept for no reason. */
+  legacyApiKeyNeedsRemoval: boolean;
   persistState: boolean;
 }
 
@@ -83,7 +88,6 @@ export const NORMALIZED_STORAGE_STATE_KEYS = [
   'accountAliases',
   KNOWN_ACCOUNTS_KEY,
   AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
-  AGENCY_HUB_API_KEY_STORAGE_KEY,
 ] as const;
 
 const normalizedStorageStateKeySet = new Set<string>(NORMALIZED_STORAGE_STATE_KEYS);
@@ -107,17 +111,18 @@ function materializeStorageState(raw: Record<string, unknown>): StorageStateSnap
   // when schemaVersion already equals the current version.
   const custodyLayoutNeedsRepair =
     !hasOwn(raw, AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY) ||
-    !hasOwn(raw, AGENCY_HUB_API_KEY_STORAGE_KEY) ||
     (rawSettings !== null && (
       hasOwn(rawSettings, 'agencyHubDeviceToken') ||
-      hasOwn(rawSettings, 'agencyHubApiKey')
+      hasOwn(rawSettings, LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY)
     ));
+  const legacyApiKeyNeedsRemoval = hasOwn(raw, LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY);
 
   return {
     state,
     repair: {
       invalidSummaryKeys,
       custodyLayoutNeedsRepair,
+      legacyApiKeyNeedsRemoval,
       persistState:
         (raw.schemaVersion as number | undefined) !== STORAGE_SCHEMA_VERSION,
     },
@@ -165,6 +170,10 @@ export async function readStorageState(
   await ensureLegacyPersonaSnapshot();
   const keys = Array.from(new Set([
     ...NORMALIZED_STORAGE_STATE_KEYS,
+    // Read-only detection of the retired slot: this narrow path never writes,
+    // but seeing the key is what sends the read down the full-snapshot branch
+    // so the coordinator's next startup repair can remove it.
+    LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY,
     ...(options.summaryKeys ?? []),
   ]));
   const narrowSnapshot = materializeStorageState(
@@ -173,7 +182,8 @@ export async function readStorageState(
 
   if (
     !narrowSnapshot.repair.persistState &&
-    !narrowSnapshot.repair.custodyLayoutNeedsRepair
+    !narrowSnapshot.repair.custodyLayoutNeedsRepair &&
+    !narrowSnapshot.repair.legacyApiKeyNeedsRemoval
   ) {
     return narrowSnapshot.state;
   }
@@ -195,6 +205,11 @@ export async function loadStorageState(): Promise<PersistedState> {
         ? repair.invalidSummaryKeys[0]!
         : repair.invalidSummaryKeys,
     );
+  }
+  if (repair.legacyApiKeyNeedsRemoval) {
+    // v17 (E79). Removal, not an empty string: the key is retired, and the
+    // migration that used to read it as a fallback went out in this release.
+    await browser.storage.local.remove(LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY);
   }
   if (repair.persistState) {
     // v13 (A41/I116-4): schema migrations go through the serializer —
@@ -232,7 +247,6 @@ export function sanitizeSettings(input: Partial<Settings>): Settings {
     agencyHubBaseUrl: normalizeAgencyHubBaseUrl(
       String(input.agencyHubBaseUrl ?? defaults.agencyHubBaseUrl),
     ),
-    agencyHubApiKey: String(input.agencyHubApiKey ?? defaults.agencyHubApiKey).trim(),
     agencyHubDeviceToken: String(
       input.agencyHubDeviceToken ?? defaults.agencyHubDeviceToken,
     ).trim(),
@@ -345,9 +359,6 @@ export async function saveSettings(
   };
   if (Object.prototype.hasOwnProperty.call(settingsPatch, 'agencyHubDeviceToken')) {
     items[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY] = nextSettings.agencyHubDeviceToken;
-  }
-  if (Object.prototype.hasOwnProperty.call(settingsPatch, 'agencyHubApiKey')) {
-    items[AGENCY_HUB_API_KEY_STORAGE_KEY] = nextSettings.agencyHubApiKey;
   }
   // Co-writes land in the same set as the credential above — one atomic commit,
   // so the two can never describe different tokens. The documented invariant is

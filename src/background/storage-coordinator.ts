@@ -1,7 +1,7 @@
 import {
-  AGENCY_HUB_API_KEY_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
   KNOWN_ACCOUNTS_KEY,
+  LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY,
   LEGACY_PERSONA_SNAPSHOT_KEY,
   STORAGE_SCHEMA_VERSION,
   SUMMARY_EVICTION_COUNT,
@@ -45,13 +45,12 @@ function applyRawStoragePatch(
   // name a custody key (token issuance, key edit) overrides the seed.
   const raw: Record<string, unknown> = {
     [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: state.settings.agencyHubDeviceToken,
-    [AGENCY_HUB_API_KEY_STORAGE_KEY]: state.settings.agencyHubApiKey,
     ...state,
     ...setItems,
   };
   for (const key of removeKeys) {
     delete raw[key];
-    if (key === AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY || key === AGENCY_HUB_API_KEY_STORAGE_KEY) {
+    if (key === AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY) {
       raw[key] = ''; // an explicit custody-key removal means "credential gone"
     }
   }
@@ -589,6 +588,13 @@ export class StorageCoordinator {
 
     if (repair.invalidSummaryKeys.length > 0) {
       await this.writeStartupRemove(repair.invalidSummaryKeys);
+    }
+
+    // v17 (E79): retire the legacy-key slot itself. Removed AFTER the
+    // full-state write above, so a crash between the two leaves the key on disk
+    // and the next startup repairs it again — never the other way round.
+    if (repair.legacyApiKeyNeedsRemoval) {
+      await this.writeStartupRemove([LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY]);
     }
 
     // Reapply every patch observed since the initial get began. The first

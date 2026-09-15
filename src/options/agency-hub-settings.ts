@@ -60,20 +60,18 @@ export function buildAgencyHubPermissionScopeNote(
 
 export function buildAgencyHubConnectionSignature(
   baseUrl: string,
-  apiKey: string,
-  deviceToken = '',
+  deviceToken: string,
 ): string {
-  return `${normalizeAgencyHubBaseUrl(baseUrl)}|${apiKey.trim()}|${deviceToken.trim()}`;
+  return `${normalizeAgencyHubBaseUrl(baseUrl)}|${deviceToken.trim()}`;
 }
 
-/** A hub connection is testable with EITHER credential: the device token
- * (preferred since 1.7.0) or the legacy chatter key. */
+/** v17 (E79): one credential class. A connection is testable once the chatter
+ * has signed in and an address is known. */
 export function hasAgencyHubConnectionInputs(
   baseUrl: string,
-  apiKey: string,
-  deviceToken = '',
+  deviceToken: string,
 ): boolean {
-  return Boolean(baseUrl.trim() && (apiKey.trim() || deviceToken.trim()));
+  return Boolean(baseUrl.trim() && deviceToken.trim());
 }
 
 export async function getAgencyHubPermissionCheck(

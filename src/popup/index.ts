@@ -204,7 +204,7 @@ async function render(): Promise<void> {
   // The hub lane earns a pill only when it needs attention — a quiet popup
   // means everything is wired up.
   if (!status.hasApiKey) {
-    pills.append(createStatusPill('warn', 'Agency Hub не настроен'));
+    pills.append(createStatusPill('warn', 'Войдите в ChatGoose'));
   }
   title.append(eyebrow, name, pills);
 

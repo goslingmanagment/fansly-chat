@@ -3,7 +3,6 @@ import { normalizeAgencyHubBaseUrl } from '../shared/agency-hub.js';
 const UI_RELEVANT_KEYS = new Set([
   'settings',
   'agencyHubDeviceToken',
-  'agencyHubApiKey',
   'personaCatalog',
   'personaCatalogSource',
   'accountMappings',
@@ -60,9 +59,10 @@ export function shouldInvalidateSpendersForStorageChanges(
     return false;
   }
 
-  // Credentials have dedicated v13 custody keys. A change can alter the
-  // visible Hub pages even when the URL remains the same.
-  if (changes.agencyHubDeviceToken || changes.agencyHubApiKey) {
+  // The sign-in has its own v13 custody key. A change can alter the visible
+  // Hub pages even when the URL remains the same. (v17/E79: the legacy-key slot
+  // is retired — its removal event carries no credential and refreshes nothing.)
+  if (changes.agencyHubDeviceToken) {
     return true;
   }
 

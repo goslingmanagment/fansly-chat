@@ -1,7 +1,7 @@
 import {
-  AGENCY_HUB_API_KEY_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
   COACH_HISTORY_LIMIT_DEFAULT,
+  DEFAULT_AGENCY_HUB_BASE_URL,
   DEEP_DEFAULT_MESSAGE_COUNT,
   IMPROVE_DEFAULT_MESSAGE_COUNT,
   PING_DEFAULT_MESSAGE_COUNT,
@@ -17,8 +17,7 @@ import type { PersistedState, Settings } from './types.js';
 
 export function createDefaultSettings(): Settings {
   return {
-    agencyHubBaseUrl: '',
-    agencyHubApiKey: '',
+    agencyHubBaseUrl: DEFAULT_AGENCY_HUB_BASE_URL,
     agencyHubDeviceToken: '',
     quickMessageCount: QUICK_DEFAULT_MESSAGE_COUNT,
     pingMessageCount: PING_DEFAULT_MESSAGE_COUNT,
@@ -49,7 +48,6 @@ export function createSeedState(): PersistedState {
 
 interface SecretCustody {
   deviceToken: unknown;
-  apiKey: unknown;
 }
 
 function migrateSettingsRecord(
@@ -77,15 +75,20 @@ function migrateSettingsRecord(
   // the two new fields.
   // v16: showToolbarHints ADDED, default-on so upgrading keeps the explanatory
   // layer until the chatter explicitly disables it in «Вид».
+  // v17 (E79): agencyHubApiKey REMOVED — field, custody slot, blob fallback and
+  // storage key. agencyHubBaseUrl gains a real default; an empty stored address
+  // adopts it. The device-token blob fallback below STAYS: the feed serves only
+  // the newest build, so a ≤1.8.0 install (pre-v13) jumps straight to v17 and
+  // would lose a working sign-in without it. The dedicated custody slot always
+  // beats the blob.
   return {
+    // v17: an EMPTY address is the pre-E79 default nobody chose — the fleet has
+    // one hub, so it is filled in rather than left blank for the chatter to
+    // type. A non-empty stored address is a deliberate choice and survives.
     agencyHubBaseUrl:
-      typeof raw?.agencyHubBaseUrl === 'string' ? raw.agencyHubBaseUrl : defaults.agencyHubBaseUrl,
-    agencyHubApiKey:
-      typeof custody.apiKey === 'string'
-        ? custody.apiKey
-        : typeof raw?.agencyHubApiKey === 'string'
-          ? raw.agencyHubApiKey
-          : defaults.agencyHubApiKey,
+      typeof raw?.agencyHubBaseUrl === 'string' && raw.agencyHubBaseUrl.trim()
+        ? raw.agencyHubBaseUrl
+        : defaults.agencyHubBaseUrl,
     agencyHubDeviceToken:
       typeof custody.deviceToken === 'string'
         ? custody.deviceToken
@@ -171,12 +174,8 @@ export class UnsupportedFutureStorageSchemaError extends Error {
  * which live in their own storage keys (per-key custody, A41/I116-4). */
 export function stripSecretSettings(
   settings: Settings,
-): Omit<Settings, 'agencyHubApiKey' | 'agencyHubDeviceToken'> {
-  const {
-    agencyHubApiKey: _apiKey,
-    agencyHubDeviceToken: _deviceToken,
-    ...persisted
-  } = settings;
+): Omit<Settings, 'agencyHubDeviceToken'> {
+  const { agencyHubDeviceToken: _deviceToken, ...persisted } = settings;
   return persisted;
 }
 
@@ -191,7 +190,6 @@ export function serializePersistedState(
     ...state,
     settings: stripSecretSettings(state.settings),
     [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: state.settings.agencyHubDeviceToken,
-    [AGENCY_HUB_API_KEY_STORAGE_KEY]: state.settings.agencyHubApiKey,
   };
 }
 
@@ -207,7 +205,6 @@ function normalizePersistedRecord(
   const defaults = createSeedState();
   const custody: SecretCustody = {
     deviceToken: record[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY],
-    apiKey: record[AGENCY_HUB_API_KEY_STORAGE_KEY],
   };
   // The RAW deep-window bump keys on the record's OWN version, not the target:
   // a record already at the current schema (or written by a future build) must

@@ -5,9 +5,16 @@ import type {
 import { FEATURE_POLICIES } from './features.js';
 import type { FeaturePolicy } from './features.js';
 
+// ─── Agency Hub ──────────────────────────────────────────────────────────
+
+/** The one hub this fleet talks to (E79). Pre-filled so a new install has
+ * nothing to type: the chatter opens «Аккаунт ChatGoose» and signs in. The
+ * field stays editable under «Дополнительно» for a staging/self-hosted core. */
+export const DEFAULT_AGENCY_HUB_BASE_URL = 'https://gosling-agency.ru';
+
 // ─── Storage ─────────────────────────────────────────────────────────────
 
-export const STORAGE_SCHEMA_VERSION = 16;
+export const STORAGE_SCHEMA_VERSION = 17;
 /** Full-recap local cache prefix (legacy/unqualified keys read as FULL). */
 export const SUMMARY_CACHE_PREFIX = 'summary:';
 /** Short-recap local cache prefix (spec §5 persistence-collision rule): a short
@@ -26,7 +33,13 @@ export const PERSONA_CATALOG_FETCHED_AT_STORAGE_KEY = 'personaCatalogFetchedAt';
 // issued mid-edit. The in-memory Settings shape still carries both fields
 // (hydrated at load); only the PERSISTED layout changed.
 export const AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY = 'agencyHubDeviceToken';
-export const AGENCY_HUB_API_KEY_STORAGE_KEY = 'agencyHubApiKey';
+/** TOMBSTONE (E79, v17). The legacy chatter API key is gone — from the UI, the
+ * Settings shape, the bearer resolver and the storage layout. This constant
+ * survives for exactly one purpose: naming the storage.local key the v17
+ * migration REMOVES. E19's «wipe to empty strings, never remove the key» rule
+ * protected a fallback READ that no longer exists, so the key itself is
+ * retired; nothing in this build ever writes or reads it as a credential. */
+export const LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY = 'agencyHubApiKey';
 /** Operational (NOT custody, NOT settings-blob) metadata about the stored
  * device token — its prefix and when it was issued, so the Hub pane can say
  * WHICH token is live without ever reading the token itself. Own key, own
@@ -58,6 +71,11 @@ export const LAST_SEEN_VERSION_STORAGE_KEY = 'chatgoose:lastSeenVersion';
 export const CHANGELOG_URL = 'https://ext.gosling-agency.ru/changelog.html';
 /** Detailed 2.0 release guide; deployed beside the chronological archive. */
 export const WHATS_NEW_2_URL = 'https://ext.gosling-agency.ru/whats-new-2.html';
+/** The 2.4 release note — the sign-in release (E79). */
+export const WHATS_NEW_3_URL = 'https://ext.gosling-agency.ru/whats-new-3.html';
+/** «Как начать»: the one page both clients point a new chatter at (plan §6.2).
+ * Static, published beside the update feed by `scripts/deploy.sh`. */
+export const START_PAGE_URL = 'https://ext.gosling-agency.ru/start.html';
 export const SUMMARY_EVICTION_COUNT = 10;
 
 // Stage 32: model/provider config is kernel-side — the vendor endpoints,
@@ -304,8 +322,7 @@ export const FEATURE_LABELS: Record<FeatureType, string> = {
 // ─── Default Settings ───────────────────────────────────────────────────
 
 export const DEFAULT_SETTINGS: Settings = {
-  agencyHubBaseUrl: '',
-  agencyHubApiKey: '',
+  agencyHubBaseUrl: DEFAULT_AGENCY_HUB_BASE_URL,
   agencyHubDeviceToken: '',
   quickMessageCount: QUICK_DEFAULT_MESSAGE_COUNT,
   pingMessageCount: PING_DEFAULT_MESSAGE_COUNT,
