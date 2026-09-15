@@ -136,10 +136,8 @@ async function installRuntimeApiHarness(fanslyClient: {
   tabContexts?: TabContextStoreClass;
   storageCoordinator?: {
     ensurePersistedState?: () => Promise<unknown>;
-    // A stub can pin `getState` to a deliberately STALE snapshot: the real
-    // coordinator in this harness re-reads storage on every call (its listener
-    // probe is never observed), so only a stub can reproduce the cache lag a
-    // handler sees in Firefox.
+    // A stub can pin `getState` to a deliberately STALE snapshot; by default
+    // this harness reads its storage fixture afresh on every call.
     getState?: () => Promise<unknown>;
   };
 }) {
@@ -229,6 +227,15 @@ async function installRuntimeApiHarness(fanslyClient: {
 
   const sessionStore = new SessionStore();
   const storageCoordinator = options?.storageCoordinator ?? new StorageCoordinator();
+  if (storageCoordinator instanceof StorageCoordinator) {
+    // Runtime tests edit mockStorage directly and historically used the
+    // coordinator's unobserved-listener path to re-read that fixture. Model
+    // that read explicitly instead of waiting for missing browser events on
+    // every RPC. The coordinator suite owns the real startup/repair barrier;
+    // ensureStorageReady tests below inject and assert that barrier separately.
+    const { readStorageState } = await import('../src/shared/storage.js');
+    vi.spyOn(storageCoordinator, 'getState').mockImplementation(() => readStorageState());
+  }
   const agencyHubClient = options?.agencyHubClient ?? {
     testConnection: vi.fn(async () => ({ ok: true })),
     checkHealth: vi.fn(async () => ({ ok: false, reason: 'no_base_url' })),

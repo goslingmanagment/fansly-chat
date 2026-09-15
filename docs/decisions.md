@@ -113,6 +113,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E121 | 2026-09-14 | Creator-wide follower GET pacing and cooldown, human pause/resume, cached proof and lazy conversation preview with clearer progress |
 | E122 | 2026-09-14 | Release E121 as 2.2.2 after independent adversarial review; retain the owner's corrected small-release numbering and skip Telegram |
 | E123 | 2026-09-15 | One login and password for every client; legacy chatter key retired end to end (storage v17); named-401 self-healing; «Как начать» page; 2.4.0 |
+| E124 | 2026-09-15 | Storage readiness waits for event acknowledgements with a one-second deadline instead of counting timer turns; missing acknowledgements still block Settings |
 
 ## Entries
 
@@ -4082,3 +4083,32 @@ a tag is never reused.
 *Not done here:* `whats-new-3.html`. The per-release convention is
 `CHANGELOG.md` + `changelog.html`, both updated; `whats-new-2.html` was a one-off
 deep dive for 2.0 and stays a fixed historical page.
+
+**E124 (2026-09-15).** After updating to 2.4.0, the owner observed
+`ChatGoose Settings Unavailable` repeatedly before Settings eventually opened.
+The page checks storage readiness before discovering Fansly tabs, so opening
+Fansly is not a prerequisite for this barrier. The original failing console
+trace was unavailable after recovery; the precise failed phase in that profile
+is unconfirmed.
+
+The reproducible defect is a premature acknowledgement timeout. The listener
+probe allowed one `setTimeout(0)` turn, and repair set/remove acknowledgements
+allowed three. Timer turns do not bound delivery latency of Firefox's
+asynchronous storage events. A 50 ms delayed event reproduces a rejected
+readiness handshake despite successful storage operations. E123's v17 upgrade
+adds legacy-key removal, including its own arm/completion acknowledgements, to
+the same startup path; the too-short waits predate that release.
+
+All four waits now use an event-driven, **1,000 ms** acknowledgement deadline.
+Observed events resolve immediately and cancel the timer. Three probe attempts,
+the fresh-read-before-repair rule, late self-event suppression, credential
+custody, and the Settings writer barrier remain in force. A missing event still
+fails closed; this is neither a fixed startup sleep nor permission to bypass
+the storage barrier. No settings shape change or schema bump.
+
+Regression coverage delays the probe, full-state write, removal arm and removal
+completion independently; it also verifies timeout rejection and preservation
+of the existing sign-in/mappings. Missing-event tests use virtual time. The
+runtime API harness explicitly reads its fixture on each call instead of
+implicitly obtaining that behavior from perpetually unobserved probes.
+This change is prepared locally; publication is a separate release step.
