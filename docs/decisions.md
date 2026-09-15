@@ -4015,13 +4015,34 @@ records which of the two cases this profile is in.
 
 *Errors.* `hub_invalid_api_key` → `hub_unauthorized` (CG-HUB-03), now
 «Agency Hub отклонил вход с этого устройства». New: **CG-HUB-17** «Неверный логин
-или пароль», **CG-HUB-18** «Владелец должен сбросить пароль»
-(`reason: password_change_required`), **CG-HUB-19** «Сессия устройства завершена»
-— the self-healing card. Per §4.5, a 401 clears this device only when (a) the
-server named `token_revoked` or `token_expired`, (b) the rejected bearer is still
-the stored one (sha-256 digests, so no second copy is held) and (c) the check and
-wipe run inside the custody FIFO. A bare 401 fails closed, exactly as before.
-The wipe empties the live slot and removes the retired one.
+или пароль», **CG-HUB-18** «Владелец должен сбросить пароль», **CG-HUB-19**
+«Сессия устройства завершена» (the self-healing card) and **CG-HUB-20** «Слишком
+много попыток входа» for the route's per-IP rate limit, which would otherwise
+have read as «хаб недоступен» and invited the retry that keeps the limit shut.
+
+CG-HUB-18 is keyed off `body.error`, NOT `body.reason`:
+`PasswordChangeRequiredError` is a plain `AppError`, so the kernel serializes its
+machine code as `error` and attaches no `reason` at all (only `UnauthorizedError`
+declares one). Reading `reason` alone sent a frozen account round the
+«wrong password» loop no password can break.
+
+Per §4.5, a 401 clears this device only when (a) the server named
+`token_revoked` or `token_expired`, (b) the rejected bearer is still the stored
+one (sha-256 digests, so no second copy is held) and (c) the check and wipe run
+inside the custody FIFO. A bare 401 fails closed, exactly as before. The wipe
+empties the live slot and removes the retired one. **The card follows the WIPE,
+not the reason:** a named 401 whose bearer a newer sign-in has already replaced
+heals nothing, and saying «сессия завершена» there would be a lie about a live
+session — so it keeps the fail-closed card. The two callers that can ask to heal
+the same bearer (the SDK's `onAuthError` hook, which covers raw/stream paths, and
+the error mapper, which needs the answer) are reconciled by a per-bearer memo, so
+the second caller cannot report «did not heal» about a device the first just
+signed out.
+
+*Identity.* «Страницы Fansly» lists Fansly pages only. The account is
+platform-neutral — that is the point of this entry — and a chatter can hold pages
+on both platforms (Grisha does), so an unfiltered list promised pages this client
+cannot open.
 
 *Vocabulary (plan §2), enforced.* `tests/copy-vocabulary.test.ts` reads every
 Russian string in `src/options`, `src/popup`, `src/content`, the error registry,
