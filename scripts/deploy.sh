@@ -10,6 +10,7 @@ readonly PRODUCTION_AGENCY_HUB_BASE_URL="https://gosling-agency.ru"
 readonly EXTENSION_ID="chatgoose@gosling.agency"
 readonly INSTALL_PAGE_FILE="$ROOT_DIR/install.html"
 readonly WHATS_NEW_PAGE_FILE="$ROOT_DIR/whats-new-2.html"
+readonly START_PAGE_FILE="$ROOT_DIR/start.html"
 readonly GUIDE_PAGE_FILE="$ROOT_DIR/guide.html"
 readonly CHANGELOG_PAGE_FILE="$ROOT_DIR/changelog.html"
 readonly INSTALL_PAGE_ASSET="$ROOT_DIR/mascot.png"
@@ -18,6 +19,7 @@ readonly REMOTE_UPDATES_PATH="$REMOTE_DIR/updates.json"
 readonly REMOTE_INDEX_PATH="$REMOTE_DIR/index.html"
 readonly REMOTE_MASCOT_PATH="$REMOTE_DIR/mascot.png"
 readonly REMOTE_WHATS_NEW_PATH="$REMOTE_DIR/whats-new-2.html"
+readonly REMOTE_START_PATH="$REMOTE_DIR/start.html"
 readonly REMOTE_GUIDE_PATH="$REMOTE_DIR/guide.html"
 readonly REMOTE_CHANGELOG_PATH="$REMOTE_DIR/changelog.html"
 readonly REMOTE_LATEST_XPI_PATH="$REMOTE_DIR/$LATEST_XPI_NAME"
@@ -407,15 +409,102 @@ verify_http_200_with_retry() {
   done
 }
 
+# `--pages-only`: publish `start.html` and NOTHING else.
+#
+# «Как начать» has to be live before the first invite goes out (plan §6.2),
+# which is BEFORE the release it belongs to. That is the whole reason this mode
+# exists, and it is also why its blast radius is exactly one file:
+#
+# - it must not touch `index.html` or `changelog.html`. Those carry a version
+#   stamp taken from the LOCAL manifest, so publishing them early would put a
+#   landing page advertising an unreleased version next to a feed still serving
+#   the old one — an invited chatter would read about a pane his download does
+#   not have.
+# - it must not touch `updates.json` or any XPI: the feed decides what the fleet
+#   installs, and this path signs nothing.
+# - `start.html` itself carries NO version slot (it describes the ceremony, not
+#   a build), so there is nothing to stamp and `stamp_release_pages` is
+#   deliberately never called here.
+#
+# The full release path publishes `start.html` too, so the two cannot diverge.
+publish_pages_only() {
+  assert_pages_only_preconditions
+
+  local remote_tmp_start
+  remote_tmp_start="$REMOTE_DIR/.start.html.upload.$$"
+
+  log "Publishing start.html only (no stamping, no signing, landing and feed untouched)"
+  ssh "$VPS_HOST" "mkdir -p '$REMOTE_DIR'"
+  scp "$START_PAGE_FILE" "${VPS_HOST}:${remote_tmp_start}"
+
+  ssh "$VPS_HOST" "
+    set -euo pipefail
+    chmod 644 '$remote_tmp_start'
+    mv '$remote_tmp_start' '$REMOTE_START_PATH'
+  "
+
+  log "Verifying public URL"
+  verify_http_200_with_retry "${BASE_URL}/start.html" "start page"
+
+  log "Published: ${BASE_URL}/start.html"
+}
+
+# What `--pages-only` still owes, and what it deliberately does not.
+#
+# Owes: the same provenance guarantees a release has. This path uploads whatever
+# sits in the working tree, from a machine that may well be parked in a feature
+# worktree — without these three asserts it would publish uncommitted work to
+# the public site.
+#
+# Does NOT owe: the contract-hash gate. That gate exists because a signed XPI
+# pins a vendored SDK against the kernel it talks to. `start.html` is prose: it
+# makes no kernel call, ships in no XPI, and its correctness does not depend on
+# which contract production serves. Requiring it here would block the very case
+# this mode was built for — publishing the page BEFORE the kernel work lands.
+assert_pages_only_preconditions() {
+  log "Pages-only preconditions"
+
+  local branch
+  branch="$(git -C "$ROOT_DIR" rev-parse --abbrev-ref HEAD)"
+  if [[ "$branch" != "main" ]]; then
+    fail "Public pages ship from main; current branch is '$branch'"
+  fi
+
+  if [[ -n "$(git -C "$ROOT_DIR" status --porcelain)" ]]; then
+    fail "Working tree is dirty — commit (or stash) first; what gets published must be what is committed"
+  fi
+
+  git -C "$ROOT_DIR" fetch origin main --quiet \
+    || fail "Could not fetch origin/main to verify the publish state"
+  if [[ "$(git -C "$ROOT_DIR" rev-parse HEAD)" != "$(git -C "$ROOT_DIR" rev-parse origin/main)" ]]; then
+    fail "HEAD does not exactly match origin/main — push before publishing pages"
+  fi
+}
+
 main() {
+  local pages_only=0
+  while (($#)); do
+    case "$1" in
+      --pages-only) pages_only=1 ;;
+      *) fail "Unknown argument: $1 (supported: --pages-only)" ;;
+    esac
+    shift
+  done
+
   require_command node
-  require_command pnpm
-  require_command web-ext
   require_command ssh
   require_command scp
   require_command curl
-  require_command shasum
-  require_command git
+
+  require_file "$START_PAGE_FILE"
+
+  cd "$ROOT_DIR"
+
+  if (( pages_only )); then
+    require_command git
+    publish_pages_only
+    return
+  fi
 
   require_file "$INSTALL_PAGE_FILE"
   require_file "$WHATS_NEW_PAGE_FILE"
@@ -423,11 +512,16 @@ main() {
   require_file "$CHANGELOG_PAGE_FILE"
   require_file "$INSTALL_PAGE_ASSET"
 
-  load_env
-  cd "$ROOT_DIR"
-
   local version
   version="$(read_manifest_version "$ROOT_DIR/manifest.json")"
+
+  require_command pnpm
+  require_command web-ext
+  require_command shasum
+  require_command git
+
+  load_env
+
   local min_version
   min_version="$(read_manifest_min_version "$ROOT_DIR/manifest.json")"
 
@@ -527,6 +621,8 @@ EOF
   remote_tmp_guide="$REMOTE_DIR/.guide.html.upload.$$"
   local remote_tmp_changelog
   remote_tmp_changelog="$REMOTE_DIR/.changelog.html.upload.$$"
+  local remote_tmp_start
+  remote_tmp_start="$REMOTE_DIR/.start.html.upload.$$"
 
   log "Uploading signed package to ${VPS_HOST}:${REMOTE_DIR}"
   ssh "$VPS_HOST" "mkdir -p '$REMOTE_DIR'"
@@ -537,15 +633,17 @@ EOF
   scp "$GUIDE_PAGE_FILE" "${VPS_HOST}:${remote_tmp_guide}"
   scp "$CHANGELOG_PAGE_FILE" "${VPS_HOST}:${remote_tmp_changelog}"
   scp "$WHATS_NEW_PAGE_FILE" "${VPS_HOST}:${remote_tmp_whats_new}"
+  scp "$START_PAGE_FILE" "${VPS_HOST}:${remote_tmp_start}"
   restore_release_pages
 
   ssh "$VPS_HOST" "
     set -euo pipefail
-    chmod 644 '$remote_tmp_xpi' '$remote_tmp_updates' '$remote_tmp_index' '$remote_tmp_mascot' '$remote_tmp_guide' '$remote_tmp_changelog' '$remote_tmp_whats_new'
+    chmod 644 '$remote_tmp_xpi' '$remote_tmp_updates' '$remote_tmp_index' '$remote_tmp_mascot' '$remote_tmp_guide' '$remote_tmp_changelog' '$remote_tmp_whats_new' '$remote_tmp_start'
     mv '$remote_tmp_xpi' '$REMOTE_DIR/$xpi_name'
     cp '$REMOTE_DIR/$xpi_name' '$remote_tmp_latest_xpi'
     chmod 644 '$remote_tmp_latest_xpi'
     mv '$remote_tmp_whats_new' '$REMOTE_WHATS_NEW_PATH'
+    mv '$remote_tmp_start' '$REMOTE_START_PATH'
     mv '$remote_tmp_latest_xpi' '$REMOTE_LATEST_XPI_PATH'
     mv '$remote_tmp_updates' '$REMOTE_UPDATES_PATH'
     mv '$remote_tmp_index' '$REMOTE_INDEX_PATH'
@@ -557,6 +655,7 @@ EOF
   log "Verifying public URLs"
   verify_http_200_with_retry "${BASE_URL}/" "install page"
   verify_http_200_with_retry "${BASE_URL}/whats-new-2.html" "2.0 walkthrough"
+  verify_http_200_with_retry "${BASE_URL}/start.html" "start page"
   verify_http_200_with_retry "${BASE_URL}/guide.html" "guide"
   verify_http_200_with_retry "${BASE_URL}/changelog.html" "changelog"
   verify_http_200_with_retry "${BASE_URL}/updates.json" "updates manifest"

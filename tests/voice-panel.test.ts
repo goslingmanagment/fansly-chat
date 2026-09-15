@@ -164,7 +164,6 @@ const SCRIPT = 'Adapted script text';
 const PAGE_LABEL = 'creator-fs';
 const SOURCE_FINGERPRINT = personaCatalogSource({
   agencyHubBaseUrl: 'https://hub.test',
-  agencyHubApiKey: '',
   agencyHubDeviceToken: 'device-token',
 })!;
 

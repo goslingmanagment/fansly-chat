@@ -116,7 +116,6 @@ describe('legacy persona preservation', () => {
       schemaVersion: 12,
       settings: {
         agencyHubBaseUrl: 'https://hub.example.test/path',
-        agencyHubApiKey: 'must-not-be-exported-from-settings',
         agencyHubDeviceToken: 'also-secret',
       },
       personalities: [

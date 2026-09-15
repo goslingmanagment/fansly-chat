@@ -560,7 +560,7 @@ export function isAgencyHubConnectionTestSettings(
 ): value is AgencyHubConnectionTestRequest['settings'] {
   return isObjectRecord(value) &&
     isString(value.agencyHubBaseUrl) &&
-    isString(value.agencyHubApiKey);
+    isString(value.agencyHubDeviceToken);
 }
 
 export function isContentPortMessage(message: unknown): message is ContentPortMessage {

@@ -14,8 +14,11 @@ ChatGoose is a client of the Agency Hub kernel in `../hub`:
   (`POST /api/v1/ai/features/:feature`). The extension contains no provider API
   keys, vendor AI SDKs, or prompt library.
 - Models, prompt assembly, quotas, and AI cost accounting are owned by core.
-- Hub authentication prefers per-device sign-in tokens. The legacy chatter-key
-  path remains only for fleet migration compatibility.
+- Hub authentication is one login and one password, traded for a per-device
+  credential through the kernel's public password route — no cookie, no
+  reserve/activate. The same pair signs the chatter into the OnlyFans desktop
+  app. The legacy chatter key is gone: field, fallback and storage slot were
+  removed in 2.4.0 (storage v17).
 - Money and top-spenders data are served by core; the extension does not compute
   its own financial truth.
 
@@ -63,9 +66,11 @@ pnpm build
 Open `about:debugging#/runtime/this-firefox`, choose **Load Temporary Add-on**,
 and select `dist/manifest.json`.
 
-In extension settings, configure the Agency Hub URL and sign in with the
-chatter's assigned account/device flow. Do not create or paste Anthropic,
-OpenRouter, or other provider keys into the extension.
+In extension settings, open **Аккаунт ChatGoose** and sign in with the login and
+password the chatter set through the owner's invite link. The hub address ships
+pre-filled and lives under «Дополнительно»; the first sign-in also asks Firefox
+for access to that origin. Do not create or paste Anthropic, OpenRouter, or other
+provider credentials into the extension — it holds none.
 
 ## Development
 
@@ -114,6 +119,12 @@ Important references:
 
 ## Release
 
+Release 2.4.0 replaces the sign-in ceremony: one login and one password, issued
+to the chatter as an invite link by the owner, work in both the extension and the
+OnlyFans desktop app. The legacy chatter key is removed end to end, and a 401 the
+kernel gives a reason for (revoked / expired) now signs this device out by itself
+instead of leaving a dead session in place. `start.html` is the shared
+«Как начать» page both clients point at.
 Release 2.2.1 adds the opt-in new-follower diagnostic journal described above.
 The accidentally assigned 2.3.0 number was withdrawn and is retained only in
 release history; its implementation is preserved in 2.2.1.
@@ -136,8 +147,9 @@ update `CHANGELOG.md` and `changelog.html`, run `pnpm check`, then use
 self-hosted feed, and verifies served version consistency.
 
 The public pages ship together: `install.html` becomes the versionless product
-landing at `index.html`; `whats-new-2.html` is the detailed 2.0 walkthrough;
-`guide.html` explains everyday use; `changelog.html` retains version history.
+landing at `index.html`; `start.html` is the shared onboarding page for both
+clients; `whats-new-2.html` is the detailed 2.0 walkthrough; `guide.html`
+explains everyday use; `changelog.html` retains version history.
 The extension links to both the walkthrough and archive from Settings and the
 popup. Both deploy scripts publish the walkthrough before any new entry point
 links to it. Keep the fixed 2.0 title and URL independent of future version stamps.

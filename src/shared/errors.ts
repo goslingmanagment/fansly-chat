@@ -121,18 +121,19 @@ const ERROR_REGISTRY: Record<UserErrorKey, ErrorRegistryEntry> = {
   hub_missing_api_key: {
     key: 'hub_missing_api_key',
     code: 'CG-HUB-02',
-    // Fires when NEITHER credential exists (resolveHubBearer came up empty).
-    message: 'Нет учётных данных Agency Hub.',
-    description: 'Войдите, чтобы получить токен устройства, или добавьте API-ключ Hub в Настройках.',
+    // Fires when this device holds no sign-in at all (resolveHubBearer empty).
+    message: 'Вы не вошли в ChatGoose.',
+    description: 'Откройте Настройки и войдите логином и паролем.',
     settingsLink: true,
   },
-  hub_invalid_api_key: {
-    key: 'hub_invalid_api_key',
+  hub_unauthorized: {
+    key: 'hub_unauthorized',
     code: 'CG-HUB-03',
-    // Credential-neutral: outside the connection test we don't know whether
-    // the rejected bearer was the device token or the legacy key.
-    message: 'Agency Hub отклонил учётные данные.',
-    description: 'Проверьте токен устройства или API-ключ Hub в Настройках и снова протестируйте подключение.',
+    // E123: the chatter's word is «вход», never the credential that carried it.
+    // A bare 401 — one the server gave no reason for — is deliberately NOT
+    // self-healed: this card is what a fail-closed rejection looks like.
+    message: 'Agency Hub отклонил вход с этого устройства.',
+    description: 'Откройте Настройки и войдите заново логином и паролем.',
     settingsLink: true,
   },
   hub_missing_permission: {
@@ -193,7 +194,7 @@ const ERROR_REGISTRY: Record<UserErrorKey, ErrorRegistryEntry> = {
     key: 'hub_provider_auth',
     code: 'CG-HUB-13',
     message: 'AI-провайдер отклонил доступ Agency Hub.',
-    description: 'Это не ваш ключ Agency Hub: провайдер отклонил серверный ключ или права Hub. Сообщите менеджеру — повтор не поможет.',
+    description: 'Это не про ваш вход: провайдер отклонил доступ самого Agency Hub. Сообщите менеджеру — повтор не поможет.',
   },
   hub_provider_rate_limited: {
     key: 'hub_provider_rate_limited',
@@ -212,6 +213,39 @@ const ERROR_REGISTRY: Record<UserErrorKey, ErrorRegistryEntry> = {
     code: 'CG-HUB-16',
     message: 'Генерация оборвалась, результат не показан.',
     description: 'ChatGoose не получил подтверждённое окончание потока. Запустите генерацию заново вручную.',
+  },
+  // ── E123 (PR-E1): the sign-in family. One login and one password, nothing
+  // else the chatter has to hold. ──
+  hub_sign_in_rejected: {
+    key: 'hub_sign_in_rejected',
+    code: 'CG-HUB-17',
+    message: 'Неверный логин или пароль.',
+    description: 'Проверьте логин и пароль и попробуйте ещё раз. Если забыли пароль — попросите владельца прислать ссылку для нового.',
+    settingsLink: true,
+  },
+  hub_password_change_required: {
+    key: 'hub_password_change_required',
+    code: 'CG-HUB-18',
+    message: 'Владелец должен сбросить пароль.',
+    description: 'Для этого логина вход закрыт до смены пароля. Попросите владельца прислать ссылку и задайте новый пароль.',
+    settingsLink: true,
+  },
+  hub_sign_in_throttled: {
+    key: 'hub_sign_in_throttled',
+    code: 'CG-HUB-20',
+    message: 'Слишком много попыток входа.',
+    description: 'Подождите минуту и попробуйте снова. Если пароль потерялся — попросите владельца прислать ссылку для нового.',
+    settingsLink: true,
+  },
+  hub_session_ended: {
+    key: 'hub_session_ended',
+    // The self-healing card (§4.5): shown ONLY when the server named a reason
+    // (отозван / истёк) AND the rejected bearer was the one stored here, so the
+    // wipe that precedes it can never throw away a working sign-in.
+    code: 'CG-HUB-19',
+    message: 'Сессия устройства завершена.',
+    description: 'Войди заново в Настройках — логином и паролем.',
+    settingsLink: true,
   },
   voice_disabled: {
     key: 'voice_disabled',

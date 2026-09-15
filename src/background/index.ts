@@ -20,7 +20,11 @@ import { StorageCoordinator } from './storage-coordinator.js';
 import { TabContextStore } from './tab-context.js';
 import { VoiceAttemptRepository } from './voice-attempt-store.js';
 import { VoiceService } from './voice-service.js';
-import { VOICE_CAPABILITY_BUDGET_MS } from '../shared/constants.js';
+import {
+  DEFAULT_AGENCY_HUB_BASE_URL,
+  VOICE_CAPABILITY_BUDGET_MS,
+} from '../shared/constants.js';
+import { buildAgencyHubOriginPattern } from '../shared/agency-hub.js';
 import { readStorageState } from '../shared/storage.js';
 import { FollowersService } from './followers-service.js';
 import { registerFollowersRuntime } from './followers-runtime.js';
@@ -175,6 +179,28 @@ browser.storage.onChanged.addListener((changes, areaName) => {
     void coordinator.refreshAllTabs(refreshMessage);
   }
 });
+
+// Firefox grants `host_permissions` in the INSTALL prompt only — an extension
+// that gains a new origin in an update gets nothing (bug 1893232). So the one
+// fact worth recording at this moment is whether this profile actually holds
+// the hub origin: a fresh install does, an upgraded one does not and will be
+// asked on the first «Войти». Status only — a listener cannot request a
+// permission, that needs a user gesture.
+if (typeof browser.runtime.onInstalled?.addListener === 'function') {
+  browser.runtime.onInstalled.addListener((details) => {
+    const origin = buildAgencyHubOriginPattern(DEFAULT_AGENCY_HUB_BASE_URL);
+    if (!origin || typeof browser.permissions?.contains !== 'function') return;
+    void browser.permissions.contains({ origins: [origin] })
+      .then((granted) => {
+        console.info(
+          `[host-access] ${details.reason}: ${origin} ${granted ? 'granted' : 'not granted'}`,
+        );
+      })
+      .catch((error: unknown) => {
+        console.warn('[host-access] permission check failed', error);
+      });
+  });
+}
 
 void storageCoordinator.init().then(() => {
   void personaCatalog.refresh()

@@ -57,9 +57,10 @@ import {
   getUserErrorDescription,
 } from '../shared/errors.js';
 import {
-  AGENCY_HUB_API_KEY_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
   CHANGELOG_URL,
+  DEFAULT_AGENCY_HUB_BASE_URL,
+  START_PAGE_URL,
   WHATS_NEW_2_URL,
   COACH_HISTORY_LIMIT_MAX,
   COACH_HISTORY_LIMIT_MIN,
@@ -747,7 +748,6 @@ async function render(): Promise<void> {
   // checklist that was still explaining the next two steps.
   const freshAtMount =
     !state.settings.agencyHubDeviceToken.trim() &&
-    !state.settings.agencyHubApiKey.trim() &&
     state.knownAccounts.length === 0;
 
   const onboardingSection = document.createElement('section');
@@ -765,7 +765,7 @@ async function render(): Promise<void> {
   const onboardingList = document.createElement('ol');
   onboardingList.className = 'chatgoose-onboarding-steps';
 
-  type OnboardingStepKey = 'access' | 'signIn' | 'fansly';
+  type OnboardingStepKey = 'invite' | 'signIn' | 'fansly';
   const buildOnboardingStep = (
     key: OnboardingStepKey,
     ordinal: number,
@@ -812,21 +812,24 @@ async function render(): Promise<void> {
     return { root: item, action, done, unknown };
   };
 
-  // Step order per E41's own flow: the host permission comes BEFORE sign-in,
-  // because sign-in cannot pass without it (a `no_permission` hub read is not a
-  // credential problem, and telling the chatter to log in first would send them
-  // into the failure).
+  // Step order is the chatter's own (E123): the invite link sets the password,
+  // the password signs this device in, Fansly comes last. The host permission
+  // is no longer a step of its own — «Войти» asks for it on the same click.
   const onboardingSteps: Record<
     OnboardingStepKey,
     { root: HTMLElement; action: HTMLButtonElement; done: HTMLElement; unknown: HTMLElement }
   > = {
-    access: buildOnboardingStep(
-      'access',
+    invite: buildOnboardingStep(
+      'invite',
       1,
       COPY.onboarding.step1Title,
       COPY.onboarding.step1Hint,
       COPY.onboarding.step1Action,
-      () => navigateTo('hub'),
+      () => {
+        void browser.tabs.create({ url: START_PAGE_URL }).catch((error: unknown) => {
+          console.error('Failed to open the start page', error);
+        });
+      },
     ),
     signIn: buildOnboardingStep(
       'signIn',
@@ -1490,26 +1493,6 @@ async function render(): Promise<void> {
   agencyHubUrlInput.placeholder = COPY.hub.baseUrlPlaceholder;
   agencyHubUrlInput.value = state.settings.agencyHubBaseUrl;
 
-  const agencyHubKeyInput = document.createElement('input');
-  agencyHubKeyInput.type = 'password';
-  agencyHubKeyInput.autocomplete = 'off';
-  agencyHubKeyInput.className = 'chatgoose-input';
-  agencyHubKeyInput.value = state.settings.agencyHubApiKey;
-
-  const agencyHubToggle = createButton(COPY.hub.legacyKeyShow, true);
-  agencyHubToggle.addEventListener('click', () => {
-    agencyHubKeyInput.type = agencyHubKeyInput.type === 'password' ? 'text' : 'password';
-    agencyHubToggle.textContent = agencyHubKeyInput.type === 'password'
-      ? COPY.hub.legacyKeyShow
-      : COPY.hub.legacyKeyHide;
-  });
-
-  const agencyHubKeyRow = document.createElement('div');
-  agencyHubKeyRow.style.display = 'grid';
-  agencyHubKeyRow.style.gridTemplateColumns = '1fr auto';
-  agencyHubKeyRow.style.gap = '8px';
-  agencyHubKeyRow.append(agencyHubKeyInput, agencyHubToggle);
-
   // «Доступ к хосту» / «Связь» — the two status rows of the Подключение zone:
   // label · pill · mono meta at the right edge. The pill element keeps the old
   // variable names — every state renderer below writes through them.
@@ -1582,15 +1565,12 @@ async function render(): Promise<void> {
   /** Assigned by the «Статус» block below; every earlier producer calls it
    * through this hook so nothing depends on declaration order. */
   let renderHubDiagnostics: () => void = () => undefined;
-  /** Last live connection test: when, outcome, how long, and WHICH credential
-   * carried it. The bearer kind is a LOCAL mirror of the same preference the
-   * background applies (device token first, legacy key as fallback) — the
-   * connection-test response is deliberately not extended to report it. */
+  /** Last live connection test: when, outcome and how long. There is only one
+   * credential class since v17, so there is nothing left to disambiguate. */
   let lastConnectionCheck: {
     at: number;
     ok: boolean;
     durationMs: number;
-    viaDeviceToken: boolean;
     code?: string;
   } | null = null;
   /** True while THIS page owns a custody write — the sign-in / re-issue RPC or
@@ -1607,12 +1587,14 @@ async function render(): Promise<void> {
   const connectionReceipt = (check: NonNullable<typeof lastConnectionCheck>): string => [
     formatClockTime(check.at),
     COPY.hub.checkDuration.replace('{n}', String(check.durationMs)),
-    check.viaDeviceToken ? COPY.hub.checkViaDeviceToken : COPY.hub.checkViaLegacyKey,
   ].join(' · ');
 
   const renderAgencyHubConnectionState = (): void => {
     const normalizedBaseUrl = normalizeAgencyHubBaseUrl(agencyHubUrlInput.value);
-    const hasInputs = hasAgencyHubConnectionInputs(agencyHubUrlInput.value, agencyHubKeyInput.value, state.settings.agencyHubDeviceToken);
+    const hasInputs = hasAgencyHubConnectionInputs(
+      agencyHubUrlInput.value,
+      state.settings.agencyHubDeviceToken,
+    );
 
     agencyHubConnectionButton.disabled =
       agencyHubConnectionFeedback.kind === 'testing' || !hasInputs;
@@ -1668,7 +1650,10 @@ async function render(): Promise<void> {
 
   const markAgencyHubConnectionPending = (): void => {
     agencyHubConnectionVersion += 1;
-    if (!hasAgencyHubConnectionInputs(agencyHubUrlInput.value, agencyHubKeyInput.value, state.settings.agencyHubDeviceToken)) {
+    if (!hasAgencyHubConnectionInputs(
+      agencyHubUrlInput.value,
+      state.settings.agencyHubDeviceToken,
+    )) {
       agencyHubConnectionFeedback = { kind: 'idle' };
       lastAgencyHubConnectionSignature = null;
     } else {
@@ -1685,8 +1670,8 @@ async function render(): Promise<void> {
 
   // Also assigned below: the pre-sign-out quiesce of that same writer. «Выйти»
   // destroys credentials background-side, and this page's debounced chain writes
-  // `agencyHubApiKey` OUTSIDE the auth FIFO — a save that lands during the
-  // (up-to-5s) revoke would restore a usable legacy key after the wipe.
+  // settings OUTSIDE the auth FIFO — a save landing during the (up-to-5s)
+  // revoke used to be able to restore a credential after the wipe.
   let quiesceSettingsBeforeSignOut: () => Promise<void> = async () => undefined;
 
   const runAgencyHubConnectionTest = async (options?: {
@@ -1695,11 +1680,13 @@ async function render(): Promise<void> {
   }): Promise<void> => {
     const signature = buildAgencyHubConnectionSignature(
       agencyHubUrlInput.value,
-      agencyHubKeyInput.value,
       state.settings.agencyHubDeviceToken,
     );
 
-    if (!hasAgencyHubConnectionInputs(agencyHubUrlInput.value, agencyHubKeyInput.value, state.settings.agencyHubDeviceToken)) {
+    if (!hasAgencyHubConnectionInputs(
+      agencyHubUrlInput.value,
+      state.settings.agencyHubDeviceToken,
+    )) {
       agencyHubConnectionFeedback = { kind: 'idle' };
       lastAgencyHubConnectionSignature = null;
       renderAgencyHubConnectionState();
@@ -1723,11 +1710,9 @@ async function render(): Promise<void> {
       // Time only the round trip the hub actually answers — not the local save
       // above, which would inflate the reported latency.
       const startedAt = performance.now();
-      const viaDeviceToken = Boolean(state.settings.agencyHubDeviceToken.trim());
       const response = await sendRuntimeRequest('testAgencyHubConnection', {
         settings: {
           agencyHubBaseUrl: agencyHubUrlInput.value,
-          agencyHubApiKey: agencyHubKeyInput.value.trim(),
           agencyHubDeviceToken: state.settings.agencyHubDeviceToken,
         },
       });
@@ -1748,12 +1733,10 @@ async function render(): Promise<void> {
         at: Date.now(),
         ok: response.ok,
         durationMs,
-        viaDeviceToken,
         ...(response.ok ? {} : { code: (response.error ?? createUserError('hub_request_failed')).code }),
       };
       lastAgencyHubConnectionSignature = buildAgencyHubConnectionSignature(
         agencyHubUrlInput.value,
-        agencyHubKeyInput.value,
         state.settings.agencyHubDeviceToken,
       );
     } catch (error) {
@@ -1787,7 +1770,7 @@ async function render(): Promise<void> {
     const normalizedBaseUrl = normalizeAgencyHubBaseUrl(agencyHubUrlInput.value);
     const originPattern = buildAgencyHubOriginPattern(normalizedBaseUrl);
     const permissionScopeNote = buildAgencyHubPermissionScopeNote(normalizedBaseUrl);
-    const hasApiKey = agencyHubKeyInput.value.trim().length > 0 || state.settings.agencyHubDeviceToken.trim().length > 0;
+    const signedIn = state.settings.agencyHubDeviceToken.trim().length > 0;
     const permissionCheck = await getAgencyHubPermissionCheck(originPattern);
     const permissionGranted = permissionCheck.granted;
 
@@ -1895,7 +1878,7 @@ async function render(): Promise<void> {
       return;
     }
 
-    if (!hasApiKey) {
+    if (!signedIn) {
       setPermissionState('warn', COPY.hub.permPillNeedsCredential, appendAgencyHubMeta(
         COPY.hub.permNoCredential.replace('{origin}', originPattern ?? ''),
         permissionScopeNote,
@@ -1903,8 +1886,8 @@ async function render(): Promise<void> {
       return;
     }
 
-    // Never claim readiness here: this is a local check (permission + a
-    // non-empty credential) — only the live connection test below proves sync.
+    // Never claim readiness here: this is a local check (permission + a stored
+    // sign-in) — only the live connection test below proves sync.
     setPermissionState(
       'ok',
       COPY.hub.permPillGranted,
@@ -1916,7 +1899,6 @@ async function render(): Promise<void> {
   agencyHubPermissionButton.addEventListener('click', () => {
     const settingsPatch = {
       agencyHubBaseUrl: normalizeAgencyHubBaseUrl(agencyHubUrlInput.value),
-      agencyHubApiKey: agencyHubKeyInput.value.trim(),
     };
     const originPattern = buildAgencyHubOriginPattern(settingsPatch.agencyHubBaseUrl);
 
@@ -2007,7 +1989,26 @@ async function render(): Promise<void> {
   hubSignInMeta.dataset.role = 'hub-signin-meta';
 
   let hubSignInFormExpanded = false;
-  const hubReissueButton = createButton(COPY.hub.reissueToken, true);
+  const hubReissueButton = createButton(COPY.hub.signInAgain, true);
+  // «Аккаунт» opens the chatter's own cabinet on the hub — devices, password,
+  // spend. It is a plain link to the SAVED address, never the form's draft: the
+  // cabinet belongs to the hub that actually holds the sign-in.
+  const hubAccountLink = createButton(COPY.hub.openAccount, true);
+  hubAccountLink.addEventListener('click', () => {
+    const baseUrl = normalizeAgencyHubBaseUrl(state.settings.agencyHubBaseUrl);
+    if (!baseUrl) return;
+    void browser.tabs.create({ url: `${baseUrl}/account` }).catch((error: unknown) => {
+      console.error('Failed to open the hub account page', error);
+    });
+  });
+  // The one page a stuck chatter is sent to — the same «Как начать» the invite
+  // and the desktop app point at.
+  const hubHelpLink = createButton(COPY.hub.helpSignIn, true);
+  hubHelpLink.addEventListener('click', () => {
+    void browser.tabs.create({ url: START_PAGE_URL }).catch((error: unknown) => {
+      console.error('Failed to open the start page', error);
+    });
+  });
   // Destructive: wears the danger outline and lives in the bottom danger zone.
   const hubSignOutButton = createButton(COPY.hub.signOut, false, true);
   const hubSignOutConfirmButton = createButton(COPY.hub.signOut.replace('…', ''), false, true);
@@ -2030,19 +2031,17 @@ async function render(): Promise<void> {
   hubSignOutHint.className = 'chatgoose-meta';
   hubSignOutHint.textContent = COPY.hub.signOutHint;
 
-  // «Device token»: state on one line (label · pill · «продлевается при
-  // использовании» in mono at the right edge), provenance on the next. Both used
-  // to be one «·»-joined sentence that wrapped across two lines next to the pill
-  // (E61). The expiry date is deliberately NOT shown — hub expiry slides on use.
-  // The deep-link anchor sits on the BLOCK: CG-HUB-02/03 are about the token as
-  // a whole, and its two facts now live on two rows.
+  // «Это устройство»: whether a sign-in lives here, and since when. The block
+  // says nothing about the credential — no prefix, no expiry, no renewal note
+  // (E123 vocabulary). The deep-link anchor stays on the BLOCK, so CG-HUB-02/03
+  // and the self-healing CG-HUB-19 all land on the sign-in the chatter must fix.
   const hubTokenBlock = document.createElement('div');
   hubTokenBlock.dataset.hubDetail = 'device-token';
   const hubTokenRow = document.createElement('div');
   hubTokenRow.className = 'chatgoose-hub-srow';
   const hubTokenLabel = document.createElement('span');
   hubTokenLabel.className = 'chatgoose-hub-srow-label';
-  hubTokenLabel.textContent = COPY.hub.deviceTokenLabel;
+  hubTokenLabel.textContent = COPY.hub.deviceLabel;
   const hubTokenPill = document.createElement('span');
   const hubTokenRenews = document.createElement('span');
   hubTokenRenews.className = 'chatgoose-hub-srow-meta';
@@ -2052,13 +2051,24 @@ async function render(): Promise<void> {
   hubTokenIssuedRow.className = 'chatgoose-hub-srow';
   const hubTokenIssuedLabel = document.createElement('span');
   hubTokenIssuedLabel.className = 'chatgoose-hub-srow-label';
-  hubTokenIssuedLabel.textContent = COPY.hub.deviceTokenIssuedLabel;
+  hubTokenIssuedLabel.textContent = COPY.hub.deviceSinceLabel;
   const hubTokenMeta = document.createElement('span');
   hubTokenMeta.className = 'chatgoose-hub-srow-fact';
   hubTokenIssuedRow.append(hubTokenIssuedLabel, hubTokenMeta);
   hubTokenBlock.append(hubTokenRow, hubTokenIssuedRow);
 
   let deviceTokenMeta: AgencyHubDeviceTokenMeta | null = null;
+
+  /** The wire role in the chatter's own words. An unknown value (a role added
+   * by a newer kernel) is shown verbatim rather than mistranslated. */
+  const humanHubRole = (role: string): string => {
+    switch (role) {
+      case 'owner': return COPY.hub.roleOwner;
+      case 'chatter': return COPY.hub.roleChatter;
+      case 'team_lead': return COPY.hub.roleStaff;
+      default: return role;
+    }
+  };
 
   const renderHubSignInState = (): void => {
     const hasToken = Boolean(state.settings.agencyHubDeviceToken.trim());
@@ -2076,39 +2086,33 @@ async function render(): Promise<void> {
     hubSignInRow.hidden = hasToken && !hubSignInFormExpanded;
     hubSignInRow.style.display = hubSignInRow.hidden ? 'none' : 'grid';
     hubReissueButton.hidden = !hasToken || hubSignInFormExpanded;
-    hubSignOutButton.hidden = !hasToken && !state.settings.agencyHubApiKey.trim();
+    hubAccountLink.hidden = !hasToken;
+    hubSignOutButton.hidden = !hasToken;
     if (hubSignOutButton.hidden) {
       hubSignOutConfirmRow.hidden = true;
     }
 
-    // `hasToken` is a STRING check — it knows the token exists, never that the
-    // kernel still honours it. A revoked token is still a string (and it also
-    // shadows a working legacy key, `resolveHubBearer` prefers it), so the pill
-    // may only claim custody: «сохранён». Liveness is the «Доступ» row's word.
+    // A STORED sign-in is not a LIVE one: this reads a string on disk, never
+    // the kernel's opinion of it. So the pill claims custody only — «вход
+    // выполнен». Liveness is the «Вы вошли как» row's word, and it comes from a
+    // live read.
     setStatusPill(
       hubTokenPill,
       hasToken ? 'ok' : 'neutral',
-      hasToken ? COPY.hub.deviceTokenStored : COPY.hub.deviceTokenMissing,
+      hasToken ? COPY.hub.deviceSignedIn : COPY.hub.deviceSignedOut,
     );
-    // The renewal note belongs to the token's STATE (right edge of line one);
-    // provenance is line two, and the «Выпущен» row disappears with the token.
-    // It also disappears when there is no provenance to state (E67): a token
-    // issued before the metadata existed used to hold a whole row open to say
-    // «данные появятся после следующего входа», which is a fact about the row,
-    // not about the token. No date, no row — the row returns the moment a
-    // sign-in records one.
-    hubTokenRenews.textContent = hasToken ? COPY.hub.deviceTokenRenews : '';
+    // When the sign-in happened — one date, no identifiers. No date, no row:
+    // a sign-in recorded before the metadata existed says nothing here rather
+    // than holding a whole row open to explain itself (E67).
+    hubTokenRenews.textContent = '';
     hubTokenIssuedRow.hidden = !hasToken || deviceTokenMeta === null;
     if (!hasToken || !deviceTokenMeta) {
       hubTokenMeta.textContent = '';
     } else {
-      hubTokenMeta.textContent = [
-        `${deviceTokenMeta.keyPrefix}…`,
-        COPY.hub.deviceTokenIssued.replace(
-          '{date}',
-          new Date(deviceTokenMeta.issuedAt).toLocaleDateString(),
-        ),
-      ].join(' · ');
+      hubTokenMeta.textContent = COPY.hub.deviceSince.replace(
+        '{date}',
+        new Date(deviceTokenMeta.issuedAt).toLocaleDateString(),
+      );
     }
 
     // The danger zone exists only while it has something to say: a sign-out to
@@ -2134,6 +2138,34 @@ async function render(): Promise<void> {
       }
       hubSignInButton.disabled = true;
       hubSignInMeta.textContent = COPY.hub.signingIn;
+      // Firefox grants `host_permissions` only at INSTALL time (bug 1893232),
+      // so an install that upgraded into this release has no access to the hub
+      // origin yet. «Войти» is the one user gesture the flow guarantees, so the
+      // runtime request rides it — and a refusal stops here with the sentence
+      // that explains it, rather than as an opaque network failure.
+      const signInOrigin = buildAgencyHubOriginPattern(
+        normalizeAgencyHubBaseUrl(agencyHubUrlInput.value),
+      );
+      if (signInOrigin && typeof browser.permissions?.request === 'function') {
+        try {
+          const granted = await browser.permissions.request({ origins: [signInOrigin] });
+          if (!granted) {
+            agencyHubPermissionFeedback = { kind: 'denied', originPattern: signInOrigin };
+            hubSignInMeta.textContent = COPY.hub.permDenied.replace('{origin}', signInOrigin);
+            hubSignInButton.disabled = false;
+            await refreshAgencyHubPermissionState();
+            return;
+          }
+          agencyHubPermissionFeedback = null;
+        } catch (error) {
+          console.error('Agency Hub permission request failed', error);
+          agencyHubPermissionFeedback = {
+            kind: 'request_error',
+            originPattern: signInOrigin,
+            errorMessage: formatAgencyHubError(error),
+          };
+        }
+      }
       // THIS tab is about to make the background write custody. The storage event
       // for that write lands in the cross-tab fence below; the claim is held until
       // the refresh chain this path owns has run, so the fence never doubles it.
@@ -2164,9 +2196,7 @@ async function render(): Promise<void> {
           );
           hubSignInPasswordInput.value = '';
           hubSignInFormExpanded = false;
-          hubSignInMeta.textContent = COPY.hub.signInIssued
-            .replace('{prefix}', response.keyPrefix)
-            .replace('{date}', new Date(response.expiresAt).toLocaleDateString());
+          hubSignInMeta.textContent = COPY.hub.signInDone;
           // The fresh token arrived OUTSIDE the save-hook path (direct
           // storage re-read), so the signature-change refresh never fires on
           // its own — without this the diagnostics card and the hero pill
@@ -2226,12 +2256,10 @@ async function render(): Promise<void> {
       ownCustodyWriteInFlight = true;
       let ownRefreshStarted = false;
       try {
-        // Quiesce this page's settings writer FIRST. A debounced snapshot still
-        // pending here carries `agencyHubApiKey`, and letting it land during the
-        // background's revoke window would resurrect a usable key after the wipe
-        // — the handler would then honestly report `revoked` about a credential
-        // that is back on disk. Cancel the pending write and join any already-
-        // running one before the wipe begins.
+        // Quiesce this page's settings writer FIRST. Since v17 it owns no
+        // credential of its own, but a pending snapshot can still land mid-wipe
+        // and rewrite the address the revoke is aimed at. Cancel the pending
+        // write and join any already-running one before the wipe begins.
         await quiesceSettingsBeforeSignOut();
         if (disposed) return;
         // The background owns the whole sequence — capture, wipe, revoke — so a
@@ -2259,9 +2287,6 @@ async function render(): Promise<void> {
         deviceTokenMeta = asDeviceTokenMeta(
           await sendRuntimeRequest('getAgencyHubDeviceTokenMeta').catch(() => null),
         );
-        agencyHubApiKeyDirty = false;
-        agencyHubKeyInput.value = state.settings.agencyHubApiKey;
-
         hubSignOutStatus.textContent = {
           revoked: COPY.hub.signOutRevoked,
           'already-invalid': COPY.hub.signOutAlreadyInvalid,
@@ -2307,9 +2332,15 @@ async function render(): Promise<void> {
   const hubTokenActions = document.createElement('div');
   hubTokenActions.className = 'chatgoose-card-actions';
   hubTokenActions.append(hubReissueButton);
-  const hubTokenFallbackNote = document.createElement('div');
-  hubTokenFallbackNote.className = 'chatgoose-status-hint';
-  hubTokenFallbackNote.textContent = COPY.hub.tokenFallbackNote;
+  // «Аккаунт» and «Нужна помощь со входом» ride one row under the form: one is
+  // where the chatter manages the account he just used, the other is where he
+  // goes when he could not use it.
+  const hubSignInLinks = document.createElement('div');
+  hubSignInLinks.className = 'chatgoose-card-actions';
+  hubSignInLinks.append(hubAccountLink, hubHelpLink);
+  const hubAccountHint = document.createElement('div');
+  hubAccountHint.className = 'chatgoose-status-hint';
+  hubAccountHint.textContent = COPY.hub.openAccountHint;
   // Order (E61): state → form → what just happened → the explanation. The
   // «Перевыпустить токен» button moved OUT of this stack and into the card head,
   // where it stops sitting between two paragraphs of explanatory text.
@@ -2317,26 +2348,13 @@ async function render(): Promise<void> {
     hubTokenBlock,
     hubSignInRow,
     hubSignInMeta,
-    hubTokenFallbackNote,
+    hubSignInLinks,
   );
 
   // The connect-zone card is assembled in the pane layout below — the base-URL
   // field it opens with is created there.
   const agencyHubConnectCard = document.createElement('div');
   agencyHubConnectCard.className = 'chatgoose-zone-body';
-
-  // The device token is the main path (E9d) — the legacy key stays reachable
-  // but folded, open only when one is actually stored.
-  const legacyKeyDetails = document.createElement('details');
-  legacyKeyDetails.className = 'chatgoose-details';
-  legacyKeyDetails.open = Boolean(state.settings.agencyHubApiKey.trim());
-  const legacyKeySummary = document.createElement('summary');
-  legacyKeySummary.textContent = COPY.hub.legacyKeyFold;
-  legacyKeyDetails.append(
-    legacyKeySummary,
-    labeledField(COPY.hub.legacyKeyFieldLabel, agencyHubKeyRow),
-  );
-  hubSignInWrap.append(legacyKeyDetails);
 
   // ── Danger zone: sign-out and its two-step confirm, fenced off at the bottom ──
   const hubDangerRow = document.createElement('div');
@@ -2479,19 +2497,33 @@ async function render(): Promise<void> {
   );
 
   // Tagged so a `CG-HUB-01` (invalid URL) deep link can highlight the field the
-  // code is actually about.
+  // code is actually about. E123 folds it away: the fleet has ONE hub, the
+  // address ships pre-filled, and a new chatter has nothing to answer here.
   const hubBaseUrlField = labeledField(COPY.hub.baseUrlLabel, agencyHubUrlInput);
   hubBaseUrlField.dataset.hubField = 'base-url';
+  const hubBaseUrlHint = document.createElement('div');
+  hubBaseUrlHint.className = 'chatgoose-status-hint';
+  hubBaseUrlHint.textContent = COPY.hub.baseUrlHint;
+  const hubAdvancedDetails = document.createElement('details');
+  hubAdvancedDetails.className = 'chatgoose-details';
+  hubAdvancedDetails.dataset.hubDetail = 'advanced';
+  // Open only when the stored address is NOT the shipped default: someone chose
+  // it deliberately, so hiding it would hide the explanation of what they see.
+  hubAdvancedDetails.open =
+    normalizeAgencyHubBaseUrl(state.settings.agencyHubBaseUrl) !== DEFAULT_AGENCY_HUB_BASE_URL;
+  const hubAdvancedSummary = document.createElement('summary');
+  hubAdvancedSummary.textContent = COPY.hub.advancedFold;
+  hubAdvancedDetails.append(hubAdvancedSummary, hubBaseUrlField, hubBaseUrlHint);
 
   // Address, host access and the live test share one fate — one card. «Проверить
   // связь» is NOT in this stack: since E67 it rides the card HEAD, where the
   // «Вход» card already keeps «Перевыпустить токен» — one action pattern per
   // pane, and the card stops growing a button-height tail below its last row.
   agencyHubConnectCard.append(
-    hubBaseUrlField,
     agencyHubHostAccessBlock,
     agencyHubConnectionRow.root,
     agencyHubConnectionMeta,
+    hubAdvancedDetails,
   );
 
   // ── Pane layout (E61, columns re-cut in E67): four zone CARDS in two columns.
@@ -2524,7 +2556,7 @@ async function render(): Promise<void> {
   hubRightCol.className = 'chatgoose-panecol';
   // The sign-out fence belongs to the card that owns the credential, at its
   // bottom edge — not to the pane, below everything else.
-  hubSignInWrap.append(hubDangerZone);
+  hubSignInWrap.append(hubAccountHint, hubDangerZone);
   hubLeftCol.append(
     hubZoneCard(COPY.hub.zoneConnection, agencyHubConnectCard, agencyHubActionRow),
     hubZoneCard(COPY.hub.zoneDiagnostics, hubDiagnosticsCard),
@@ -2749,17 +2781,14 @@ async function render(): Promise<void> {
     return COPY.status.actionWordMany;
   };
 
-  /** Whether a hub credential is actually STORED for this install: a usable
-   * address plus a bearer (the device token, or the legacy chatter key). This
-   * is the precondition for calling the hub step «неизвестно» instead of
-   * «open» — with nothing stored, «подключить Agency Hub» is true advice and
-   * the step is genuinely open. Reads the PERSISTED settings on purpose: the
+  /** Whether this install actually holds a sign-in: a usable address plus the
+   * stored device credential. This is the precondition for calling the hub step
+   * «неизвестно» instead of «open» — with nothing stored, «войти» is true advice
+   * and the step is genuinely open. Reads the PERSISTED settings on purpose: the
    * identity check runs background-side against exactly those. */
   const hubCredentialsStored = (): boolean =>
     Boolean(normalizeAgencyHubBaseUrl(state.settings.agencyHubBaseUrl)) &&
-    Boolean(
-      state.settings.agencyHubDeviceToken.trim() || state.settings.agencyHubApiKey.trim(),
-    );
+    Boolean(state.settings.agencyHubDeviceToken.trim());
 
   /** The one place that decides what a failed identity read MEANS. `unreachable`
    * and `no_permission` say nothing about the credential — the kernel is down,
@@ -2800,9 +2829,14 @@ async function render(): Promise<void> {
       {
         key: 'access',
         label: COPY.status.stepAccess,
-        // Only a definite `false` is an open step; `null` means «not checked yet»
-        // (no hub address entered), which the hub step already covers.
-        state: hubPermissionGranted !== false ? 'done' : 'open',
+        // Only a definite `false` is an open step; `null` means «not checked yet».
+        // E123 adds a second condition: before the chatter has signed in, the host
+        // permission is not a chore of his own — «Войти» asks Firefox for it on
+        // the same click. Listing it separately on a fresh install would demand
+        // an action that the very next step performs by itself.
+        state: hubPermissionGranted === false && state.settings.agencyHubDeviceToken.trim()
+          ? 'open'
+          : 'done',
       },
       {
         key: 'fansly',
@@ -2822,12 +2856,13 @@ async function render(): Promise<void> {
 
   /** The checklist is live: every step reads the same sources the «Статус» rows
    * do, so a step turns green the moment its state is genuinely satisfied — and
-   * only then. Step 1 demands a granted permission (not merely «not refused»):
-   * on a fresh install nothing has been granted yet, and the readiness row's
-   * lenient `!== false` would show step 1 as done before anything happened. */
+   * only then. */
   const onboardingStepStates = (): Record<OnboardingStepKey, ReadinessStepState> => ({
-    access: Boolean(normalizeAgencyHubBaseUrl(agencyHubUrlInput.value)) &&
-      hubPermissionGranted === true
+    // A sign-in — stored here, or confirmed live by the kernel — is proof the
+    // invite link was opened and a password set: there is no other way to get
+    // one. The custody half is what lets this step go green while step 2 is
+    // still «неизвестно» over a kernel outage.
+    invite: state.settings.agencyHubDeviceToken.trim() || hubStepState() === 'done'
       ? 'done'
       : 'open',
     // A live identity read is the only proof a credential actually works —
@@ -2881,8 +2916,8 @@ async function render(): Promise<void> {
       step.root.dataset.done = state === 'done' ? 'true' : 'false';
       step.root.dataset.stepState = state;
       // An unverifiable step has nothing to press — «Войти» would send a chatter
-      // who already holds a device token back through the login form over an
-      // outage that is not theirs. It gets the neutral «неизвестно» instead.
+      // who is already signed in back through the form over an outage that is
+      // not theirs. It gets the neutral «неизвестно» instead.
       step.action.hidden = state !== 'open';
       step.done.hidden = state !== 'done';
       step.unknown.hidden = state !== 'indeterminate';
@@ -2931,10 +2966,12 @@ async function render(): Promise<void> {
   renderHubDiagnostics = (): void => {
     if (disposed) return;
 
-    // Аккаунт + Страницы ядра (identity)
+    // «Вы вошли как …» + «Страницы Fansly» (identity)
     const identity = statusModel.identity;
     if (identity?.ok) {
-      hubIdentityRow.value.textContent = `${identity.username} · ${identity.role}`;
+      hubIdentityRow.value.textContent = COPY.hub.signedInAs
+        .replace('{username}', identity.username)
+        .replace('{role}', humanHubRole(identity.role));
       // A bare number: the «· {n}» template this used to share with the «Статус»
       // pane's detail read as an orphan middot after the label's grid gap (E61).
       hubPagesRow.value.textContent = String(identity.pages.length);
@@ -2954,7 +2991,7 @@ async function render(): Promise<void> {
     } else {
       hubIdentityRow.value.textContent = identity === null
         ? COPY.common.unknown
-        : COPY.status.accessEmpty;
+        : COPY.hub.deviceSignedOut;
       hubPagesRow.value.textContent = COPY.common.unknown;
       hubPagesChips.replaceChildren();
     }
@@ -3222,7 +3259,6 @@ async function render(): Promise<void> {
   const currentHubSignature = (): string =>
     buildAgencyHubConnectionSignature(
       agencyHubUrlInput.value,
-      agencyHubKeyInput.value,
       state.settings.agencyHubDeviceToken,
     );
   // The signature of the SAVED settings — what mount, the sign-in success path,
@@ -3232,7 +3268,6 @@ async function render(): Promise<void> {
   const storedHubSignature = (): string =>
     buildAgencyHubConnectionSignature(
       state.settings.agencyHubBaseUrl,
-      state.settings.agencyHubApiKey,
       state.settings.agencyHubDeviceToken,
     );
   // Monotonic run id: a newer run bumps it, so an older same-signature run that
@@ -3640,12 +3675,10 @@ async function render(): Promise<void> {
     saveToast.remove();
   });
 
-  let agencyHubApiKeyDirty = false;
   const settingsFormSignature = (): string => JSON.stringify([
     getSelectedTheme(),
     toolbarHintsInput.checked,
     agencyHubUrlInput.value,
-    agencyHubKeyInput.value,
     quickInput.value,
     pingInput.value,
     improveInput.value,
@@ -3654,7 +3687,7 @@ async function render(): Promise<void> {
     coachRecapSelect.value,
     debugInput.checked,
   ]);
-  const collectSettingsPatch = (forceHubSnapshot = false): Partial<Settings> => {
+  const collectSettingsPatch = (): Partial<Settings> => {
     const patch: Partial<Settings> = {
       uiTheme: getSelectedTheme(),
       showToolbarHints: toolbarHintsInput.checked,
@@ -3667,39 +3700,24 @@ async function render(): Promise<void> {
       coachAutoRecap: coachRecapSelect.value as Settings['coachAutoRecap'],
       debugMode: debugInput.checked,
     };
-    // The API key has its own custody key. A theme/count save from a stale
-    // Options tab must not write the old visible value over a rotation made by
-    // another tab or the background. Only an explicit edit owns this field.
-    if (
-      agencyHubApiKeyDirty ||
-      (forceHubSnapshot && agencyHubKeyInput.value !== state.settings.agencyHubApiKey)
-    ) {
-      patch.agencyHubApiKey = agencyHubKeyInput.value;
-    }
+    // v17 (E123): this page persists NO credential. The sign-in lives in its own
+    // custody key, written background-side inside the FIFO — so a stale Options
+    // tab saving a theme can no longer race a sign-in at all.
     return patch;
   };
 
-  const mergeSavedFormSettings = (
-    savedSettings: Settings,
-    patch: Partial<Settings>,
-  ): Settings => ({
+  const mergeSavedFormSettings = (savedSettings: Settings): Settings => ({
     ...savedSettings,
-    // Device tokens are background-issued and never form-owned. Preserve a
-    // newer sign-in/re-read if an older local write acknowledges afterwards.
+    // The sign-in is background-issued and never form-owned. Preserve a newer
+    // sign-in/re-read if an older local write acknowledges afterwards.
     agencyHubDeviceToken: state.settings.agencyHubDeviceToken,
-    // Likewise, a patch that did not explicitly own the custody key must not
-    // make this page's in-memory view regress to its stale base snapshot.
-    agencyHubApiKey: Object.prototype.hasOwnProperty.call(patch, 'agencyHubApiKey')
-      ? savedSettings.agencyHubApiKey
-      : state.settings.agencyHubApiKey,
   });
 
   let settingsSaveChain: Promise<void> | null = null;
   let settingsDirty = false;
   let settingsSnapshotVersion = 0;
-  let agencyHubApiKeySnapshotVersion = 0;
   let settingsSaveChainSignature: string | null = null;
-  const queueSettingsSave = (forceHubSnapshot = false): Promise<void> => {
+  const queueSettingsSave = (): Promise<void> => {
     if (futureSchemaObserved !== null) {
       settingsDirty = false;
       return Promise.resolve();
@@ -3708,11 +3726,8 @@ async function render(): Promise<void> {
     // storage read must not be allowed to finish after a newer edit and put an
     // older form snapshot back into storage.
     const formSignature = settingsFormSignature();
-    const patch = collectSettingsPatch(forceHubSnapshot);
+    const patch = collectSettingsPatch();
     const snapshotVersion = ++settingsSnapshotVersion;
-    if (Object.prototype.hasOwnProperty.call(patch, 'agencyHubApiKey')) {
-      agencyHubApiKeySnapshotVersion = snapshotVersion;
-    }
     settingsDirty = false;
     const persist = async (): Promise<void> => {
       // A snapshot may have waited behind an older write. Recheck the live
@@ -3723,21 +3738,7 @@ async function render(): Promise<void> {
       const savedSettings = await saveSettings(patch, state.settings, {
         observedSchemaVersion: futureSchemaObserved ?? state.schemaVersion,
       });
-      if (
-        Object.prototype.hasOwnProperty.call(patch, 'agencyHubApiKey') &&
-        snapshotVersion === agencyHubApiKeySnapshotVersion &&
-        agencyHubKeyInput.value === patch.agencyHubApiKey
-      ) {
-        // A newer non-credential snapshot may already exist, but it is queued
-        // behind this one and needs the successfully-written custody value as
-        // its base. Move only the field this snapshot explicitly owned.
-        agencyHubApiKeyDirty = false;
-        state.settings = {
-          ...state.settings,
-          agencyHubApiKey: savedSettings.agencyHubApiKey,
-        };
-      }
-      const mergedSettings = mergeSavedFormSettings(savedSettings, patch);
+      const mergedSettings = mergeSavedFormSettings(savedSettings);
       if (snapshotVersion !== settingsSnapshotVersion) {
         return;
       }
@@ -3749,9 +3750,6 @@ async function render(): Promise<void> {
       showSaveToast();
 
       agencyHubUrlInput.value = mergedSettings.agencyHubBaseUrl;
-      if (!agencyHubApiKeyDirty && document.activeElement !== agencyHubKeyInput) {
-        agencyHubKeyInput.value = mergedSettings.agencyHubApiKey;
-      }
 
       // Reflect the sanitized/clamped counts back into the fields so an
       // out-of-range or blank entry doesn't keep displaying a value that differs
@@ -3785,7 +3783,6 @@ async function render(): Promise<void> {
 
       const hubSignature = buildAgencyHubConnectionSignature(
         mergedSettings.agencyHubBaseUrl,
-        mergedSettings.agencyHubApiKey,
         mergedSettings.agencyHubDeviceToken,
       );
       if (hubSignature !== lastAgencyHubConnectionSignature) {
@@ -3870,17 +3867,15 @@ async function render(): Promise<void> {
     // when values were assigned programmatically (no input/change event), or
     // when the current form differs from the active queued snapshot.
     saveSettingsDebounced.cancel();
-    return queueSettingsSave(true);
+    return queueSettingsSave();
   };
 
   quiesceSettingsBeforeSignOut = async (): Promise<void> => {
-    // DROP the pending snapshot rather than flushing it: it may carry the very
-    // legacy key the sign-out is about to destroy, and writing it seconds before
-    // the wipe only widens the resurrection window. Clearing the dirty flags
+    // DROP the pending snapshot rather than flushing it: it may still rewrite
+    // the hub address the sign-out's revoke is aimed at. Clearing the dirty flag
     // also stops a queued blur from re-scheduling the same snapshot.
     saveSettingsDebounced.cancel();
     settingsDirty = false;
-    agencyHubApiKeyDirty = false;
     // An already-running write is past cancellation — join it so the wipe
     // strictly follows it. `settingsSaveChain` never rejects (queueSettingsSave
     // attaches its own catch), so this cannot fail the sign-out.
@@ -3899,7 +3894,6 @@ async function render(): Promise<void> {
     ...themeRadios,
     toolbarHintsInput,
     agencyHubUrlInput,
-    agencyHubKeyInput,
     quickInput,
     pingInput,
     improveInput,
@@ -3909,15 +3903,9 @@ async function render(): Promise<void> {
     debugInput,
   ].forEach((element) => {
     element.addEventListener('input', () => {
-      if (element === agencyHubKeyInput) {
-        agencyHubApiKeyDirty = true;
-      }
       scheduleSettingsSave();
     });
     element.addEventListener('change', () => {
-      if (element === agencyHubKeyInput) {
-        agencyHubApiKeyDirty = true;
-      }
       scheduleSettingsSave();
       void saveSettingsDebounced.flush();
     });
@@ -3930,14 +3918,6 @@ async function render(): Promise<void> {
     void refreshAgencyHubPermissionState();
   });
   agencyHubUrlInput.addEventListener('change', () => {
-    markAgencyHubConnectionPending();
-    void refreshAgencyHubPermissionState();
-  });
-  agencyHubKeyInput.addEventListener('input', () => {
-    markAgencyHubConnectionPending();
-    void refreshAgencyHubPermissionState();
-  });
-  agencyHubKeyInput.addEventListener('change', () => {
     markAgencyHubConnectionPending();
     void refreshAgencyHubPermissionState();
   });
@@ -4186,33 +4166,18 @@ async function render(): Promise<void> {
     saveSettingsDebounced.cancel();
     if (futureSchemaObserved !== null) {
       settingsDirty = false;
-      agencyHubApiKeyDirty = false;
       return;
     }
-    if (settingsDirty || agencyHubApiKeyDirty) {
+    if (settingsDirty) {
       settingsDirty = false;
       const patch = collectSettingsPatch();
       const snapshotVersion = ++settingsSnapshotVersion;
-      if (Object.prototype.hasOwnProperty.call(patch, 'agencyHubApiKey')) {
-        agencyHubApiKeySnapshotVersion = snapshotVersion;
-      }
       void saveSettings(patch, state.settings, {
         observedSchemaVersion: futureSchemaObserved ?? state.schemaVersion,
       })
         .then((savedSettings) => {
-          if (
-            Object.prototype.hasOwnProperty.call(patch, 'agencyHubApiKey') &&
-            snapshotVersion === agencyHubApiKeySnapshotVersion &&
-            agencyHubKeyInput.value === patch.agencyHubApiKey
-          ) {
-            agencyHubApiKeyDirty = false;
-            state.settings = {
-              ...state.settings,
-              agencyHubApiKey: savedSettings.agencyHubApiKey,
-            };
-          }
           if (snapshotVersion === settingsSnapshotVersion) {
-            state.settings = mergeSavedFormSettings(savedSettings, patch);
+            state.settings = mergeSavedFormSettings(savedSettings);
           }
         })
         .catch((error: unknown) => {
@@ -4336,6 +4301,10 @@ async function render(): Promise<void> {
     'CG-HUB-03': '[data-hub-detail="device-token"]',
     'CG-HUB-04': '[data-hub-detail="host-access"]',
     'CG-HUB-05': '[data-hub-detail="pages"]',
+    // The sign-in family (E123) all points at the one block that fixes it.
+    'CG-HUB-17': '[data-hub-detail="device-token"]',
+    'CG-HUB-18': '[data-hub-detail="device-token"]',
+    'CG-HUB-19': '[data-hub-detail="device-token"]',
     'CG-FLOW-01': '.chatgoose-persona-rows',
     'CG-FLOW-02': '.chatgoose-account-rows',
   };
@@ -4590,9 +4559,7 @@ async function render(): Promise<void> {
       futureSchemaObserved = Math.max(futureSchemaObserved ?? 0, storedVersion);
       if (root.querySelector('[data-future-schema-barrier="true"]')) return;
       settingsDirty = false;
-      agencyHubApiKeyDirty = false;
       settingsSnapshotVersion += 1;
-      agencyHubApiKeySnapshotVersion = settingsSnapshotVersion;
       saveSettingsDebounced.cancel();
       // The barrier freezes editors, not navigation: the read-only emergency
       // mode must keep every pane reachable through the rail.
@@ -4621,23 +4588,18 @@ async function render(): Promise<void> {
      *
      * The single-options-tab guarantee covers only the paths `openOptions` owns —
      * a manually opened second settings tab is real. Without this fence that tab
-     * keeps the wiped token in `state.settings` after the other tab's «Выйти»:
-     * it still renders «Device token active ✓», still offers «Выйти», and a
+     * keeps the wiped credential in `state.settings` after the other tab's
+     * «Выйти»: it still shows «вход выполнен», still offers «Выйти», and a
      * connection test from it would send a credential that no longer exists on
-     * disk. So the fresh custody values are applied here and the hub state is
-     * repainted from them (signed-out, after an external wipe).
+     * disk. So the fresh custody value is applied here and the hub state is
+     * repainted from it (signed-out, after an external wipe).
      *
-     * A local unsaved edit wins over the input FIELD only: `agencyHubApiKeyDirty`
-     * means the chatter typed a key in THIS tab and has not saved it yet, so the
-     * typed text stays — but `state.settings` and every signed-in indicator still
-     * describe what is actually stored. E19 holds throughout: a wipe arrives as
-     * EMPTY strings, never as removed keys.
+     * Since v17 the page owns no credential FIELD of its own, so there is no
+     * unsaved draft to protect — only state to apply. The live slot still
+     * arrives as an EMPTY STRING on a wipe, never as a removed key.
      */
     const applyExternalCustodyChange = (persisted: Settings): void => {
-      if (
-        persisted.agencyHubDeviceToken === state.settings.agencyHubDeviceToken &&
-        persisted.agencyHubApiKey === state.settings.agencyHubApiKey
-      ) {
+      if (persisted.agencyHubDeviceToken === state.settings.agencyHubDeviceToken) {
         // Already in sync — this tab's own write echoed back, or an unrelated
         // (settings / persona-catalog) event. Nothing to apply, and no reason to
         // re-run the hub checks the writing path already fired. This equality
@@ -4645,44 +4607,11 @@ async function render(): Promise<void> {
         // this on every applied read instead of trusting a per-event flag.
         return;
       }
-      const tokenChanged = persisted.agencyHubDeviceToken !== state.settings.agencyHubDeviceToken;
-      const hadCredential = Boolean(
-        state.settings.agencyHubDeviceToken.trim() || state.settings.agencyHubApiKey.trim(),
-      );
-      const wipedExternally = hadCredential &&
-        !persisted.agencyHubDeviceToken.trim() &&
-        !persisted.agencyHubApiKey.trim();
+      const tokenChanged = true;
       state.settings = {
         ...state.settings,
         agencyHubDeviceToken: persisted.agencyHubDeviceToken,
-        agencyHubApiKey: persisted.agencyHubApiKey,
       };
-      if (!agencyHubApiKeyDirty && document.activeElement !== agencyHubKeyInput) {
-        agencyHubKeyInput.value = persisted.agencyHubApiKey;
-      }
-      if (wipedExternally) {
-        // Another tab (or the background) destroyed the credentials. THIS tab's
-        // pending credential write must not resurrect them: the wave-B quiesce
-        // only covers the tab that pressed «Выйти», so a debounced snapshot armed
-        // here — 350 ms is easily inside the revoke window — would persist the
-        // typed key AFTER the wipe, exactly the hole the sign-out quiesce closes
-        // locally. Cancel that pending write, drop the credential's dirty claim,
-        // and stale-out any ALREADY RUNNING one (the snapshot-version bump is the
-        // same instrument the future-schema barrier uses, so an in-flight persist
-        // can no longer move `state.settings.agencyHubApiKey` back). The typed
-        // text stays in the field as a non-persisting draft; an explicit later
-        // edit re-arms it deliberately.
-        saveSettingsDebounced.cancel();
-        agencyHubApiKeyDirty = false;
-        settingsSnapshotVersion += 1;
-        agencyHubApiKeySnapshotVersion = settingsSnapshotVersion;
-        // The cancelled snapshot is deliberately NOT re-armed for its
-        // non-credential half: `persist` writes the STORED key back into the field
-        // whenever the dirty claim is gone, which would erase the draft this fence
-        // just promised to keep. `settingsDirty` stays set, so the next edit, blur
-        // or pagehide still persists those edits — without the credential, because
-        // `collectSettingsPatch` only includes it for a dirty claim.
-      }
       // Immediate, synchronous truth: the token pill, the folded sign-in form and
       // the «Выйти» button all read `state.settings` only. The meta line is
       // cleared first: `renderHubSignInState` only fills it when empty, so a stale
@@ -4734,7 +4663,6 @@ async function render(): Promise<void> {
         !(
           changes.settings ||
           changes[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY] ||
-          changes[AGENCY_HUB_API_KEY_STORAGE_KEY] ||
           changes[PERSONA_CATALOG_STORAGE_KEY] ||
           changes[PERSONA_CATALOG_SOURCE_STORAGE_KEY] ||
           changes[PERSONA_CATALOG_FETCHED_AT_STORAGE_KEY] ||

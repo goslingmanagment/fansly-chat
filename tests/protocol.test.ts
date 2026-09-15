@@ -3,6 +3,7 @@ import {
   getRuntimeRequestType,
   isBackgroundPortMessage,
   isContentPortMessage,
+  isAgencyHubConnectionTestSettings,
   isRecapStatusResponse, isCoachTurnContext } from '../src/shared/protocol.js';
 
 function withoutKey(
@@ -1168,5 +1169,36 @@ describe('protocol boundary guards', () => {
       type: 'tab:state',
       state: null,
     })).toBe(false);
+  });
+});
+
+describe('isAgencyHubConnectionTestSettings', () => {
+  it('accepts the v17 shape: an address and this device\'s sign-in', () => {
+    expect(isAgencyHubConnectionTestSettings({
+      agencyHubBaseUrl: 'https://hub.example',
+      agencyHubDeviceToken: 'agency_hub_device_x',
+    })).toBe(true);
+    // Empty is a valid VALUE — «signed out» is a state the test reports on.
+    expect(isAgencyHubConnectionTestSettings({
+      agencyHubBaseUrl: '',
+      agencyHubDeviceToken: '',
+    })).toBe(true);
+  });
+
+  it('refuses a pre-v17 message that still carries only the retired key', () => {
+    // An old options page (or a stale content script) must not be able to push
+    // a legacy credential through this boundary: it is not a sign-in any more.
+    expect(isAgencyHubConnectionTestSettings({
+      agencyHubBaseUrl: 'https://hub.example',
+      agencyHubApiKey: 'legacy-key',
+    })).toBe(false);
+    expect(isAgencyHubConnectionTestSettings({
+      agencyHubBaseUrl: 'https://hub.example',
+    })).toBe(false);
+    expect(isAgencyHubConnectionTestSettings({
+      agencyHubDeviceToken: 'agency_hub_device_x',
+    })).toBe(false);
+    expect(isAgencyHubConnectionTestSettings(null)).toBe(false);
+    expect(isAgencyHubConnectionTestSettings('nope')).toBe(false);
   });
 });

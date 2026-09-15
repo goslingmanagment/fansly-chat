@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 import {
-  AGENCY_HUB_API_KEY_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
   STORAGE_SCHEMA_VERSION,
 } from '../src/shared/constants.js';
@@ -43,8 +42,7 @@ function makeState(overrides?: Partial<PersistedState['settings']>): PersistedSt
     schemaVersion: STORAGE_SCHEMA_VERSION,
     settings: {
       agencyHubBaseUrl: 'http://localhost:3000',
-      agencyHubApiKey: 'hub-key',
-      agencyHubDeviceToken: '',
+      agencyHubDeviceToken: 'hub-key',
       quickMessageCount: 30,
       pingMessageCount: 30,
       improveMessageCount: 45,
@@ -174,7 +172,6 @@ async function loadOptionsPage(
   const storageRecord: Record<string, unknown> = {
     ...state,
     settings: stripSecretSettings(state.settings),
-    [AGENCY_HUB_API_KEY_STORAGE_KEY]: state.settings.agencyHubApiKey,
     [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: state.settings.agencyHubDeviceToken,
   };
 
@@ -235,13 +232,13 @@ async function loadOptionsPage(
 
   await import('../src/options/index.js');
   await vi.waitFor(() => {
-    getSectionByTitle('Agency Hub');
+    getSectionByTitle('Аккаунт ChatGoose');
   }, { timeout: 2000 });
 
   return { permissionsOnAdded, permissionsOnRemoved };
 }
 
-describe('Options page - Agency Hub section', () => {
+describe('Options page — «Аккаунт ChatGoose»', () => {
   beforeEach(() => {
     vi.resetModules();
     installDom();
@@ -252,35 +249,32 @@ describe('Options page - Agency Hub section', () => {
     vi.unstubAllGlobals();
   });
 
-  it('renders the Agency Hub fields and permission status', async () => {
+  it('renders the sign-in pane with the address folded away, and the host status', async () => {
     await loadOptionsPage(makeState());
 
-    const section = getSectionByTitle('Agency Hub');
+    const section = getSectionByTitle('Аккаунт ChatGoose');
     const urlInput = section.querySelector<HTMLInputElement>('input[type="url"]');
-    const keyInput = section.querySelector<HTMLInputElement>('input[type="password"][autocomplete="off"]');
 
+    // E123: no credential field of any kind lives on this page.
+    expect(section.querySelector('input[type="password"][autocomplete="off"]')).toBeNull();
+    // The address is still editable, but under «Дополнительно».
     expect(urlInput?.value).toBe('http://localhost:3000');
-    expect(keyInput?.value).toBe('hub-key');
-    expect(section.textContent).toContain('Разреши доступ для http://localhost/*');
+    expect(urlInput?.closest('details')?.textContent).toContain('Дополнительно');
     expect(section.textContent).toContain('http://localhost/*');
     expect(permissionsContains).toHaveBeenCalled();
   });
 
-  it('saves the Agency Hub URL and API key through the shared settings path', async () => {
+  it('persists an edited hub address, and never a credential', async () => {
     await loadOptionsPage(makeState({
       agencyHubBaseUrl: '',
-      agencyHubApiKey: '',
       agencyHubDeviceToken: '',
     }));
 
-    const section = getSectionByTitle('Agency Hub');
+    const section = getSectionByTitle('Аккаунт ChatGoose');
     const urlInput = section.querySelector<HTMLInputElement>('input[type="url"]')!;
-    const keyInput = section.querySelector<HTMLInputElement>('input[type="password"][autocomplete="off"]')!;
 
     urlInput.value = ' http://localhost:3000/ ';
     urlInput.dispatchEvent(new Event('input'));
-    keyInput.value = ' hub-key ';
-    keyInput.dispatchEvent(new Event('input'));
 
     await vi.waitFor(() => {
       if (!savedSettings) {
@@ -288,12 +282,12 @@ describe('Options page - Agency Hub section', () => {
       }
     }, { timeout: 2000 });
 
-    // v13 custody: the blob carries no credentials; the edited key rides its
-    // own storage key, and the untouched token key is not written at all.
+    // v17 custody: the blob carries no credential, and this page writes none —
+    // the sign-in is minted and stored background-side, inside the FIFO.
     expect(savedSettings).toMatchObject({ agencyHubBaseUrl: 'http://localhost:3000' });
     expect(savedSettings).not.toHaveProperty('agencyHubApiKey');
     expect(savedSettings).not.toHaveProperty('agencyHubDeviceToken');
-    expect(savedCustody).toEqual({ agencyHubApiKey: 'hub-key' });
+    expect(savedCustody).toEqual({});
   });
 
   it('requests host access before storage writes and refreshes the status', async () => {
@@ -314,7 +308,7 @@ describe('Options page - Agency Hub section', () => {
       },
     });
 
-    const section = getSectionByTitle('Agency Hub');
+    const section = getSectionByTitle('Аккаунт ChatGoose');
     const button = getGrantAccessButton(section);
 
     callOrder.length = 0;
@@ -346,7 +340,7 @@ describe('Options page - Agency Hub section', () => {
       permissionsRequestImpl: async () => false,
     });
 
-    const section = getSectionByTitle('Agency Hub');
+    const section = getSectionByTitle('Аккаунт ChatGoose');
     const button = getGrantAccessButton(section);
 
     button.click();
@@ -366,7 +360,7 @@ describe('Options page - Agency Hub section', () => {
       },
     });
 
-    const section = getSectionByTitle('Agency Hub');
+    const section = getSectionByTitle('Аккаунт ChatGoose');
     const button = getGrantAccessButton(section);
 
     button.click();
@@ -400,12 +394,11 @@ describe('Options page - Agency Hub section', () => {
       runtimeSendMessageImpl: runtimeSendMessage,
     });
 
-    const section = getSectionByTitle('Agency Hub');
+    const section = getSectionByTitle('Аккаунт ChatGoose');
     await vi.waitFor(() => {
-      // Success: the pill flips to «есть» and the mono receipt names the
-      // credential that carried the test (no device token here — the key did).
+      // Success: the pill flips to «есть» and the mono receipt states when the
+      // check ran and how long it took. One credential class — nothing to name.
       expect(section.textContent).toContain('есть');
-      expect(section.textContent).toContain('по legacy-ключу');
       expect(section.textContent).toContain('мс');
     }, { timeout: 2000 });
 
@@ -413,8 +406,7 @@ describe('Options page - Agency Hub section', () => {
       type: 'testAgencyHubConnection',
       settings: {
         agencyHubBaseUrl: 'http://localhost:3000',
-        agencyHubApiKey: 'hub-key',
-        agencyHubDeviceToken: '',
+        agencyHubDeviceToken: 'hub-key',
       },
     });
   });
@@ -438,7 +430,7 @@ describe('Options page - Agency Hub section', () => {
       runtimeSendMessageImpl: runtimeSendMessage,
     });
 
-    const section = getSectionByTitle('Agency Hub');
+    const section = getSectionByTitle('Аккаунт ChatGoose');
     await vi.waitFor(() => {
       expect(section.textContent).toContain('CG-HUB-07');
       expect(section.textContent).toContain('Ошибка запроса к Agency Hub.');
@@ -446,7 +438,7 @@ describe('Options page - Agency Hub section', () => {
     }, { timeout: 2000 });
   });
 
-  it('keeps the live connection test idle until both Hub fields are present', async () => {
+  it('keeps the live connection test idle until this device is signed in', async () => {
     const runtimeSendMessage = vi.fn(async (message: {
       type: string;
       settings?: AgencyHubConnectionTestRequest['settings'];
@@ -462,21 +454,18 @@ describe('Options page - Agency Hub section', () => {
 
     await loadOptionsPage(makeState({
       agencyHubBaseUrl: 'http://localhost:3000',
-      agencyHubApiKey: '',
       agencyHubDeviceToken: '',
     }), {
       permissionsContainsImpl: async () => true,
       runtimeSendMessageImpl: runtimeSendMessage,
     });
 
-    const section = getSectionByTitle('Agency Hub');
+    const section = getSectionByTitle('Аккаунт ChatGoose');
     const button = getTestConnectionButton(section);
 
     expect(button.disabled).toBe(true);
     expect(section.textContent).toContain('не проверялась');
-    expect(section.textContent).toContain(
-      'Укажи адрес хаба и войди (или добавь legacy-ключ) — тогда проверим связь.',
-    );
+    expect(section.textContent).toContain('Войди — тогда проверим связь.');
     expect(runtimeSendMessage).not.toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'testAgencyHubConnection',
@@ -501,7 +490,7 @@ describe('Options page - Agency Hub section', () => {
       },
     });
 
-    const section = getSectionByTitle('Agency Hub');
+    const section = getSectionByTitle('Аккаунт ChatGoose');
     await vi.waitFor(() => {
       expect(section.textContent).toContain('CG-HUB-07');
       expect(section.textContent).toContain('Ошибка запроса к Agency Hub.');
@@ -525,10 +514,10 @@ describe('Options page - Agency Hub section', () => {
         return {
           ok: false,
           error: {
-            key: 'hub_invalid_api_key',
+            key: 'hub_unauthorized',
             code: 'CG-HUB-03',
-            message: 'Agency Hub API key is invalid.',
-            description: 'Check the key in Agency Hub settings and try again.',
+            message: 'Agency Hub отклонил вход с этого устройства.',
+            description: 'Откройте Настройки и войдите заново логином и паролем.',
             httpStatus: 401,
             serverDetail: '{"message":"Unauthorized"}',
           },
@@ -537,34 +526,32 @@ describe('Options page - Agency Hub section', () => {
       return undefined;
     });
 
+    // Signed in already — the retest is about the ADDRESS the chatter just
+    // corrected under «Дополнительно», not about a credential.
     await loadOptionsPage(makeState({
       agencyHubBaseUrl: '',
-      agencyHubApiKey: '',
-      agencyHubDeviceToken: '',
+      agencyHubDeviceToken: 'hub-key',
     }), {
       permissionsContainsImpl: async () => true,
       runtimeSendMessageImpl: runtimeSendMessage,
     });
 
-    const section = getSectionByTitle('Agency Hub');
+    const section = getSectionByTitle('Аккаунт ChatGoose');
     const urlInput = section.querySelector<HTMLInputElement>('input[type="url"]')!;
-    const keyInput = section.querySelector<HTMLInputElement>('input[type="password"][autocomplete="off"]')!;
     const button = getTestConnectionButton(section);
 
     urlInput.value = ' http://localhost:3000/ ';
     urlInput.dispatchEvent(new Event('input'));
-    keyInput.value = ' invalid-key ';
-    keyInput.dispatchEvent(new Event('input'));
     button.click();
 
     await vi.waitFor(() => {
       expect(savedSettings).toMatchObject({
         agencyHubBaseUrl: 'http://localhost:3000',
       });
-      expect(savedCustody).toEqual({ agencyHubApiKey: 'invalid-key' });
+      expect(savedCustody).toEqual({});
       expect(section.textContent).toContain('CG-HUB-03');
-      expect(section.textContent).toContain('Agency Hub API key is invalid.');
-      expect(section.textContent).toContain('Check the key in Agency Hub settings and try again.');
+      expect(section.textContent).toContain('Agency Hub отклонил вход с этого устройства.');
+      expect(section.textContent).toContain('Откройте Настройки и войдите заново логином и паролем.');
       expect(section.textContent).toContain('HTTP 401 • {"message":"Unauthorized"}');
     }, { timeout: 2000 });
 
@@ -574,8 +561,7 @@ describe('Options page - Agency Hub section', () => {
       type: 'testAgencyHubConnection',
       settings: {
         agencyHubBaseUrl: 'http://localhost:3000',
-        agencyHubApiKey: 'invalid-key',
-        agencyHubDeviceToken: '',
+        agencyHubDeviceToken: 'hub-key',
       },
     });
   });

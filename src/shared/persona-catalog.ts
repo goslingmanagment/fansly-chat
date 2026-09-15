@@ -8,10 +8,10 @@ function credentialFingerprint(value: string): string {
 
 /** Stable, credential-safe binding for catalog bytes in local storage. */
 export function personaCatalogSource(
-  settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'>,
+  settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubDeviceToken'>,
 ): string | null {
   const baseUrl = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
-  const bearer = settings.agencyHubDeviceToken.trim() || settings.agencyHubApiKey.trim();
+  const bearer = settings.agencyHubDeviceToken.trim();
   if (!baseUrl || !bearer) return null;
   return `${baseUrl}|${credentialFingerprint(bearer)}`;
 }

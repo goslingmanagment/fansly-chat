@@ -5,7 +5,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { routeSchemas } from '@kernel/sdk';
 import {
-  AGENCY_HUB_API_KEY_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
   DEEP_OPERATION_LLM_IDLE_TIMEOUT_MS,
   DEEP_OPERATION_LLM_MAX_STREAM_TIMEOUT_MS,
@@ -434,7 +433,6 @@ describe(`OperationCoordinator (${part})`, () => {
       schemaVersion: STORAGE_SCHEMA_VERSION,
       settings: {
         agencyHubBaseUrl: '',
-        agencyHubApiKey: '',
         agencyHubDeviceToken: '',
         quickMessageCount: 100,
         pingMessageCount: 100,
@@ -769,10 +767,8 @@ describe(`OperationCoordinator (${part})`, () => {
       const settings = {
         ...migrateState(mockStorage).settings,
         agencyHubBaseUrl: 'http://localhost:3000',
-        agencyHubApiKey: 'hub-key',
       };
       mockStorage.settings = stripSecretSettings(settings);
-      mockStorage[AGENCY_HUB_API_KEY_STORAGE_KEY] = settings.agencyHubApiKey;
       mockStorage[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY] = settings.agencyHubDeviceToken;
       (mockStorage['summary:group-1'] as Record<string, unknown>).personaCatalogSource =
         personaCatalogSource(settings);
@@ -1383,8 +1379,7 @@ describe(`OperationCoordinator (${part})`, () => {
     mockStorage.settings = {
       ...(mockStorage.settings as Record<string, unknown>),
       agencyHubBaseUrl: 'http://hub-a.test',
-      agencyHubApiKey: 'hub-key',
-      agencyHubDeviceToken: '',
+      agencyHubDeviceToken: 'hub-key',
     };
     const fanslyClient = buildFanslyClientMock();
     let resolveIdentity: ((value: string) => void) | null = null;
@@ -2124,8 +2119,7 @@ describe(`OperationCoordinator (${part})`, () => {
     mockStorage.settings = {
       ...(mockStorage.settings as Record<string, unknown>),
       agencyHubBaseUrl: 'http://hub-a.test',
-      agencyHubApiKey: 'hub-key',
-      agencyHubDeviceToken: '',
+      agencyHubDeviceToken: 'hub-key',
     };
     await mockCompareCards([
       {
@@ -2201,8 +2195,7 @@ describe(`OperationCoordinator (${part})`, () => {
     mockStorage.settings = {
       ...(mockStorage.settings as Record<string, unknown>),
       agencyHubBaseUrl: 'http://hub-a.test',
-      agencyHubApiKey: 'hub-key',
-      agencyHubDeviceToken: '',
+      agencyHubDeviceToken: 'hub-key',
     };
     await mockCompareCards([
       {
@@ -2884,8 +2877,7 @@ describe(`OperationCoordinator (${part})`, () => {
     mockStorage.settings = {
       ...(mockStorage.settings as Record<string, unknown>),
       agencyHubBaseUrl: 'http://localhost:3000',
-      agencyHubApiKey: 'hub-key',
-      agencyHubDeviceToken: '',
+      agencyHubDeviceToken: 'hub-key',
     };
     const fanslyClient = buildFanslyClientMock();
     fanslyClient.getGroup.mockResolvedValue({ users: [{ userId: 'account-1' }] });
@@ -4045,8 +4037,7 @@ describe(`OperationCoordinator (${part})`, () => {
     mockStorage.settings = {
       ...(mockStorage.settings as Record<string, unknown>),
       agencyHubBaseUrl: 'http://localhost:3000',
-      agencyHubApiKey: 'hub-key',
-      agencyHubDeviceToken: '',
+      agencyHubDeviceToken: 'hub-key',
     };
     (mockStorage['summary:group-1'] as Record<string, unknown>).personaCatalogSource =
       personaCatalogSource(migrateState(mockStorage).settings);
@@ -4094,8 +4085,7 @@ describe(`OperationCoordinator (${part})`, () => {
     mockStorage.settings = {
       ...(mockStorage.settings as Record<string, unknown>),
       agencyHubBaseUrl: 'http://localhost:3000',
-      agencyHubApiKey: 'hub-key',
-      agencyHubDeviceToken: '',
+      agencyHubDeviceToken: 'hub-key',
     };
 
     const agencyHubClient = {
@@ -4171,8 +4161,7 @@ describe(`OperationCoordinator (${part})`, () => {
     mockStorage.settings = {
       ...(mockStorage.settings as Record<string, unknown>),
       agencyHubBaseUrl: 'http://localhost:3000',
-      agencyHubApiKey: 'hub-key',
-      agencyHubDeviceToken: '',
+      agencyHubDeviceToken: 'hub-key',
     };
     const fanslyClient = buildFanslyClientMock();
     fanslyClient.getEarnings.mockResolvedValue(buildAggregatedEarnings());
@@ -4311,8 +4300,7 @@ describe(`OperationCoordinator (${part})`, () => {
     mockStorage.settings = {
       ...(mockStorage.settings as Record<string, unknown>),
       agencyHubBaseUrl: 'http://localhost:3000',
-      agencyHubApiKey: 'hub-key',
-      agencyHubDeviceToken: '',
+      agencyHubDeviceToken: 'hub-key',
     };
     const fanslyClient = buildFanslyClientMock();
     if (verified) {
@@ -4553,8 +4541,7 @@ describe(`OperationCoordinator (${part})`, () => {
     mockStorage.settings = {
       ...(mockStorage.settings as Record<string, unknown>),
       agencyHubBaseUrl: 'http://localhost:3000',
-      agencyHubApiKey: 'hub-key',
-      agencyHubDeviceToken: '',
+      agencyHubDeviceToken: 'hub-key',
     };
 
     const agencyHubClient = {
@@ -4609,8 +4596,7 @@ describe(`OperationCoordinator (${part})`, () => {
     mockStorage.settings = {
       ...(mockStorage.settings as Record<string, unknown>),
       agencyHubBaseUrl: 'http://localhost:3000',
-      agencyHubApiKey: 'hub-key',
-      agencyHubDeviceToken: '',
+      agencyHubDeviceToken: 'hub-key',
     };
 
     const agencyHubClient = {
@@ -4672,8 +4658,7 @@ describe(`OperationCoordinator (${part})`, () => {
     mockStorage.settings = {
       ...(mockStorage.settings as Record<string, unknown>),
       agencyHubBaseUrl: 'http://localhost:3000',
-      agencyHubApiKey: 'hub-key',
-      agencyHubDeviceToken: '',
+      agencyHubDeviceToken: 'hub-key',
     };
 
     const agencyHubClient = {
@@ -4726,8 +4711,7 @@ describe(`OperationCoordinator (${part})`, () => {
     mockStorage.settings = {
       ...(mockStorage.settings as Record<string, unknown>),
       agencyHubBaseUrl: 'http://localhost:3000',
-      agencyHubApiKey: 'hub-key',
-      agencyHubDeviceToken: '',
+      agencyHubDeviceToken: 'hub-key',
     };
 
     const agencyHubClient = {
@@ -4806,8 +4790,7 @@ describe(`OperationCoordinator (${part})`, () => {
     mockStorage.settings = {
       ...(mockStorage.settings as Record<string, unknown>),
       agencyHubBaseUrl: 'http://localhost:3000',
-      agencyHubApiKey: 'hub-key',
-      agencyHubDeviceToken: '',
+      agencyHubDeviceToken: 'hub-key',
     };
     const fetchMock = vi.fn(async (url: URL | string) => {
       const href = String(url);
@@ -4895,8 +4878,7 @@ describe(`OperationCoordinator (${part})`, () => {
     mockStorage.settings = {
       ...(mockStorage.settings as Record<string, unknown>),
       agencyHubBaseUrl: 'http://localhost:3000',
-      agencyHubApiKey: 'hub-key',
-      agencyHubDeviceToken: '',
+      agencyHubDeviceToken: 'hub-key',
     };
     delete mockStorage['summary:group-1'];
     const fetchMock = vi.fn(async (url: URL | string) => {
@@ -5030,8 +5012,7 @@ describe(`OperationCoordinator (${part})`, () => {
     mockStorage.settings = {
       ...(mockStorage.settings as Record<string, unknown>),
       agencyHubBaseUrl: 'http://localhost:3000',
-      agencyHubApiKey: 'hub-key',
-      agencyHubDeviceToken: '',
+      agencyHubDeviceToken: 'hub-key',
     };
     (mockStorage as Record<string, unknown>)['summary:group-1'] = {
       summary: 'Cached summary',
@@ -5123,8 +5104,7 @@ describe(`OperationCoordinator (${part})`, () => {
     mockStorage.settings = {
       ...(mockStorage.settings as Record<string, unknown>),
       agencyHubBaseUrl: 'http://localhost:3000',
-      agencyHubApiKey: 'hub-key',
-      agencyHubDeviceToken: '',
+      agencyHubDeviceToken: 'hub-key',
     };
     (browser as Record<string, unknown>).permissions = {
       contains: vi.fn(async () => false),
@@ -5181,8 +5161,7 @@ describe(`OperationCoordinator (${part})`, () => {
     mockStorage.settings = {
       ...(mockStorage.settings as Record<string, unknown>),
       agencyHubBaseUrl: 'http://localhost:3000',
-      agencyHubApiKey: 'hub-key',
-      agencyHubDeviceToken: '',
+      agencyHubDeviceToken: 'hub-key',
     };
 
     const fetchMock = vi.fn(async () => jsonResponse({ error: 'bad gateway' }, 503));
@@ -5234,8 +5213,7 @@ describe(`OperationCoordinator (${part})`, () => {
     mockStorage.settings = {
       ...(mockStorage.settings as Record<string, unknown>),
       agencyHubBaseUrl: 'http://hub-a.test',
-      agencyHubApiKey: 'hub-key',
-      agencyHubDeviceToken: '',
+      agencyHubDeviceToken: 'hub-key',
     };
     (mockStorage as Record<string, unknown>)['summary:group-1'] = {
       summary: 'Cached summary',

@@ -51,7 +51,7 @@ type VoiceNoteErrorContext =
   | { source: 'status' | 'audio'; voiceNoteId: number };
 type HubSettings = Pick<
   Settings,
-  'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'
+  'agencyHubBaseUrl' | 'agencyHubDeviceToken'
 >;
 
 const VOICE_CAPABILITY_TTL_MS = 5 * 60_000;
@@ -217,7 +217,7 @@ function noteFailure(error: unknown): { code: string; message: string; status: n
   // A real kernel voice code is more specific than the transport status.
   // Only generic 401/403 bodies map to the credential guidance.
   const code = (status === 401 || status === 403) && structuredCode === 'hub_request_failed'
-    ? 'hub_invalid_api_key'
+    ? 'hub_unauthorized'
     : structuredCode;
   return {
     code,

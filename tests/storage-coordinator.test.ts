@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  AGENCY_HUB_API_KEY_STORAGE_KEY,
+  LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
   PERSONA_CATALOG_FETCHED_AT_STORAGE_KEY,
   PERSONA_CATALOG_SOURCE_STORAGE_KEY,
@@ -23,7 +23,6 @@ function createStorage(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     schemaVersion: STORAGE_SCHEMA_VERSION,
     settings: stripSecretSettings(createDefaultSettings()),
-    [AGENCY_HUB_API_KEY_STORAGE_KEY]: '',
     [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: '',
     personalities,
     legacyPersonaSnapshotV1: {
@@ -298,7 +297,6 @@ describe('StorageCoordinator', () => {
     const nextSettings = stripSecretSettings({
       ...createDefaultSettings(),
       uiTheme: 'dark',
-      agencyHubApiKey: 'fresh-key',
       agencyHubDeviceToken: 'fresh-token',
     });
     const nextPersonalities = [
@@ -322,7 +320,6 @@ describe('StorageCoordinator', () => {
             settings: nextSettings,
             personalities: nextPersonalities,
             accountMappings: nextMappings,
-            [AGENCY_HUB_API_KEY_STORAGE_KEY]: 'fresh-key',
             [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'fresh-token',
           });
         },
@@ -334,7 +331,6 @@ describe('StorageCoordinator', () => {
     expect(storageSet).toHaveBeenCalledTimes(1);
     expect(state.settings).toMatchObject({
       uiTheme: 'dark',
-      agencyHubApiKey: 'fresh-key',
       agencyHubDeviceToken: 'fresh-token',
     });
     expect(state.personalities).toEqual(nextPersonalities);
@@ -342,7 +338,6 @@ describe('StorageCoordinator', () => {
     expect(mockStorage.settings).toEqual(nextSettings);
     expect(mockStorage.personalities).toEqual(nextPersonalities);
     expect(mockStorage.accountMappings).toEqual(nextMappings);
-    expect(mockStorage[AGENCY_HUB_API_KEY_STORAGE_KEY]).toBe('fresh-key');
     expect(mockStorage[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]).toBe('fresh-token');
   });
 
@@ -366,15 +361,13 @@ describe('StorageCoordinator', () => {
     expect(mockStorage.schemaVersion).toBe(STORAGE_SCHEMA_VERSION);
   });
 
-  it('refuses an external writer until current-schema legacy credentials are durably repaired', async () => {
+  it('refuses an external writer until a current-schema custody layout is durably repaired', async () => {
     mockStorage = createStorage({
       settings: {
         ...createDefaultSettings(),
-        agencyHubApiKey: 'legacy-key',
         agencyHubDeviceToken: 'legacy-token',
       },
     });
-    delete mockStorage[AGENCY_HUB_API_KEY_STORAGE_KEY];
     delete mockStorage[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY];
     const { coordinator, enableProbeEvents, storageSet } =
       await installStorageCoordinatorHarness({ disableProbeEvents: true });
@@ -387,14 +380,31 @@ describe('StorageCoordinator', () => {
     enableProbeEvents();
     await expect(coordinator.ensurePersistedState()).resolves.toMatchObject({
       settings: {
-        agencyHubApiKey: 'legacy-key',
         agencyHubDeviceToken: 'legacy-token',
       },
     });
-    expect(mockStorage[AGENCY_HUB_API_KEY_STORAGE_KEY]).toBe('legacy-key');
     expect(mockStorage[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]).toBe('legacy-token');
     expect(mockStorage.settings).not.toHaveProperty('agencyHubApiKey');
     expect(mockStorage.settings).not.toHaveProperty('agencyHubDeviceToken');
+  });
+
+  it('v17: removes the retired legacy-key slot it finds on disk, and keeps the sign-in', async () => {
+    // E123 tombstones the slot rather than emptying it: the fallback READ that
+    // made E19's «never remove» rule necessary went out in the same release, so
+    // a key nothing can read is a secret kept for no reason.
+    mockStorage = createStorage({
+      schemaVersion: 12,
+      agencyHubApiKey: 'legacy-key',
+      [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'agency_hub_device_live',
+    });
+    const { coordinator } = await installStorageCoordinatorHarness();
+
+    const state = await coordinator.getState();
+
+    expect(state.settings.agencyHubDeviceToken).toBe('agency_hub_device_live');
+    expect(mockStorage[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]).toBe('agency_hub_device_live');
+    expect(LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY in mockStorage).toBe(false);
+    expect(mockStorage.schemaVersion).toBe(STORAGE_SCHEMA_VERSION);
   });
 
   it('fresh-reads current storage after an initially unobserved barrier', async () => {
@@ -428,7 +438,6 @@ describe('StorageCoordinator', () => {
       schemaVersion: 12,
       settings: {
         ...createDefaultSettings(),
-        agencyHubApiKey: 'old-key',
         agencyHubDeviceToken: 'old-token',
       },
       personalities: [{ id: 'p1', name: 'Closer', content: 'old instructions', updatedAt: 1 }],
@@ -442,7 +451,6 @@ describe('StorageCoordinator', () => {
     const nextSettings = stripSecretSettings({
       ...createDefaultSettings(),
       uiTheme: 'dark',
-      agencyHubApiKey: 'fresh-key',
       agencyHubDeviceToken: 'fresh-token',
     });
     const nextPersonalities = [
@@ -454,14 +462,12 @@ describe('StorageCoordinator', () => {
       settings: nextSettings,
       personalities: nextPersonalities,
       accountMappings: nextMappings,
-      [AGENCY_HUB_API_KEY_STORAGE_KEY]: 'fresh-key',
       [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'fresh-token',
     });
     coordinator.applyStorageChanges({
       settings: { newValue: nextSettings },
       personalities: { newValue: nextPersonalities },
       accountMappings: { newValue: nextMappings },
-      [AGENCY_HUB_API_KEY_STORAGE_KEY]: { newValue: 'fresh-key' },
       [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: { newValue: 'fresh-token' },
     }, 'local');
     releaseFirstGet();
@@ -469,7 +475,6 @@ describe('StorageCoordinator', () => {
     const state = await loading;
     expect(state.settings).toMatchObject({
       uiTheme: 'dark',
-      agencyHubApiKey: 'fresh-key',
       agencyHubDeviceToken: 'fresh-token',
     });
     expect(state.personalities).toEqual(nextPersonalities);
@@ -478,7 +483,6 @@ describe('StorageCoordinator', () => {
       schemaVersion: STORAGE_SCHEMA_VERSION,
       personalities: nextPersonalities,
       accountMappings: nextMappings,
-      [AGENCY_HUB_API_KEY_STORAGE_KEY]: 'fresh-key',
       [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'fresh-token',
     });
     expect(mockStorage.settings).toEqual(nextSettings);
@@ -490,7 +494,6 @@ describe('StorageCoordinator', () => {
       schemaVersion: 12,
       settings: {
         ...createDefaultSettings(),
-        agencyHubApiKey: 'old-key',
         agencyHubDeviceToken: 'old-token',
       },
       personalities: [{ id: 'p1', name: 'Closer', content: 'old instructions', updatedAt: 1 }],
@@ -504,7 +507,6 @@ describe('StorageCoordinator', () => {
     const nextSettings = stripSecretSettings({
       ...createDefaultSettings(),
       uiTheme: 'dark',
-      agencyHubApiKey: 'fresh-key',
       agencyHubDeviceToken: 'fresh-token',
     });
     const nextPersonalities = [
@@ -516,14 +518,12 @@ describe('StorageCoordinator', () => {
       settings: nextSettings,
       personalities: nextPersonalities,
       accountMappings: nextMappings,
-      [AGENCY_HUB_API_KEY_STORAGE_KEY]: 'fresh-key',
       [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'fresh-token',
     });
     coordinator.applyStorageChanges({
       settings: { newValue: nextSettings },
       personalities: { newValue: nextPersonalities },
       accountMappings: { newValue: nextMappings },
-      [AGENCY_HUB_API_KEY_STORAGE_KEY]: { newValue: 'fresh-key' },
       [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: { newValue: 'fresh-token' },
     }, 'local');
     releaseFirstSet();
@@ -531,7 +531,6 @@ describe('StorageCoordinator', () => {
     const state = await loading;
     expect(state.settings).toMatchObject({
       uiTheme: 'dark',
-      agencyHubApiKey: 'fresh-key',
       agencyHubDeviceToken: 'fresh-token',
     });
     expect(state.personalities).toEqual(nextPersonalities);
@@ -539,7 +538,6 @@ describe('StorageCoordinator', () => {
     expect(mockStorage.settings).toEqual(nextSettings);
     expect(mockStorage.personalities).toEqual(nextPersonalities);
     expect(mockStorage.accountMappings).toEqual(nextMappings);
-    expect(mockStorage[AGENCY_HUB_API_KEY_STORAGE_KEY]).toBe('fresh-key');
     expect(mockStorage[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]).toBe('fresh-token');
   });
 

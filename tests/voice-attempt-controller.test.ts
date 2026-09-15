@@ -324,7 +324,7 @@ describe('VoiceAttemptController', () => {
   });
 
   it.each([
-    { status: 401, code: 'hub_invalid_api_key' },
+    { status: 401, code: 'hub_unauthorized' },
     { status: 404, code: 'hub_request_failed' },
     { status: 503, code: 'voice_provider_unavailable' },
   ])('clears a definite $status/$code create rejection', async ({ status, code }) => {
@@ -682,8 +682,8 @@ describe('VoiceAttemptController', () => {
 
   it.each([
     { status: 400, code: 'hub_request_failed' },
-    { status: 401, code: 'hub_invalid_api_key' },
-    { status: 403, code: 'hub_invalid_api_key' },
+    { status: 401, code: 'hub_unauthorized' },
+    { status: 403, code: 'hub_unauthorized' },
     { status: 404, code: 'hub_request_failed' },
     { status: 409, code: 'idempotency_mismatch' },
     { status: 429, code: 'rate_limited' },

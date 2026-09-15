@@ -14,6 +14,10 @@ import { clientVersionHeaders } from '../shared/client-version.js';
 import type { FeatureType, PingSegment, Settings } from '../shared/types.js';
 import { normalizeAgencyHubBaseUrl } from '../shared/agency-hub.js';
 import { resolveHubBearer } from './agency-hub-client.js';
+import {
+  healRevokedHubSession,
+  selfHealingUnauthorizedReason,
+} from './hub-custody.js';
 import { recordQuotaDenied, recordQuotaSnapshot } from './quota-tracker.js';
 
 export interface KernelFeatureClientContext {
@@ -229,7 +233,12 @@ function isLegacyCoachBodyValidation(error: KernelApiError): boolean {
     /\b(?:chatterQuestion|coachHistory|transcriptCoverage)\b/.test(error.message);
 }
 
-function toChatGooseError(error: unknown, feature?: FeatureType): ChatGooseError {
+async function toChatGooseError(
+  error: unknown,
+  feature?: FeatureType,
+  /** The bearer this generation rode on, so a NAMED 401 can clear it (§4.5). */
+  bearer?: string,
+): Promise<ChatGooseError> {
   if (error instanceof ChatGooseError) {
     return error;
   }
@@ -263,9 +272,18 @@ function toChatGooseError(error: unknown, feature?: FeatureType): ChatGooseError
       return new ChatGooseError('service_unavailable', { message: error.message });
     }
     if (error.status === 401 || error.status === 403) {
-      return new ChatGooseError('hub_invalid_api_key', {
-        details: { status: error.status, responseSnippet: error.message.slice(0, 400) },
-      });
+      // «Сессия устройства завершена» is a claim about THIS device, so it waits
+      // for the wipe's answer: a named reason whose bearer has already been
+      // replaced by a newer sign-in heals nothing and keeps the fail-closed
+      // card. A bare 401 never even asks.
+      const healed = selfHealingUnauthorizedReason(error) && bearer
+        ? await healRevokedHubSession(bearer)
+        : false;
+      const details = { status: error.status, responseSnippet: error.message.slice(0, 400) };
+      // Literal keys on both arms: the registry-producer gate reads the source.
+      return healed
+        ? new ChatGooseError('hub_session_ended', { details })
+        : new ChatGooseError('hub_unauthorized', { details });
     }
     if (error.category === 'network' && error.code === 'aborted') {
       throw new DOMException('The operation was aborted.', 'AbortError');
@@ -483,7 +501,7 @@ export function createKernelFeatureGateway(
       try {
         await handle.done;
       } catch (error) {
-        const mapped = toChatGooseError(error, request.feature);
+        const mapped = await toChatGooseError(error, request.feature, bearer);
         if (mapped.key === 'chat_changed') {
           refreshPersonaCatalog();
         }

@@ -47,7 +47,7 @@ export function formatFollowerTraceReport(run: FollowersTraceReport): string {
     `Аккаунт: ${run.creatorName ? `@${run.creatorName}` : 'не определён'} (${run.creatorId ?? '?'}) · Период: ${run.hours} ч`,
     `Начало: ${new Date(run.startedAt).toISOString()} · Последнее событие: +${run.elapsedMs.toFixed(3)} ms · Состояние: ${run.state}`,
     'Время: UTC; +ms и durationMs измерены монотонными часами performance.now(). Параллельные этапы перекрываются.',
-    'Содержимое сообщений, промпты, токены и подписанные URL не записываются. Hub-этапы измеряют вызов целиком; HTTP-события — фактические запросы Fansly.',
+    'Содержимое сообщений, промпты, учётные данные и подписанные URL не записываются. Hub-этапы измеряют вызов целиком; HTTP-события — фактические запросы Fansly.',
     `Счётчики: ${JSON.stringify(run.counters)}`,
     `События: ${run.events.length} из ${run.eventCount}. Удалено самых ранних из-за лимита: ${run.droppedEvents}.`,
     '', ...run.events.map((event) => formatFollowerTraceEvent(run, event)), '',

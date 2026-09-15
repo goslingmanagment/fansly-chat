@@ -17,7 +17,7 @@ export function formatUsd(value: number, approximate = false): string {
 }
 
 export function formatSpendPrimary(spend: LlmSpendSummary): string {
-  return `${formatUsd(spend.totalUsd, spend.approximate)} · ${formatCompactTokens(spend.totalTokens)} tokens`;
+  return `${formatUsd(spend.totalUsd, spend.approximate)} · ${formatCompactTokens(spend.totalTokens)} usage`;
 }
 
 export function formatSpendSecondary(spend: LlmSpendSummary): string {

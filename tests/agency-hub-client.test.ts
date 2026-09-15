@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AgencyHubClient } from '../src/background/agency-hub-client.js';
+import { resetHealedBearerMemo } from '../src/background/hub-custody.js';
 import { KERNEL_CONTRACT_HASH } from '@kernel/sdk';
 import vendorManifest from '../vendor/kernel-sdk/kernel-sdk.vendor.json';
 import { createDefaultSettings } from '../src/shared/migrations.js';
@@ -16,8 +17,7 @@ function makeSettings(overrides: Partial<ReturnType<typeof createDefaultSettings
   return {
     ...createDefaultSettings(),
     agencyHubBaseUrl: 'http://localhost:3000',
-    agencyHubApiKey: 'hub-key',
-    agencyHubDeviceToken: '',
+    agencyHubDeviceToken: 'hub-key',
     ...overrides,
   };
 }
@@ -345,7 +345,7 @@ describe('AgencyHubClient', () => {
       'lifetime',
       1000,
       new AbortController().signal,
-    )).rejects.toMatchObject({ key: 'hub_invalid_api_key' });
+    )).rejects.toMatchObject({ key: 'hub_unauthorized' });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -757,8 +757,7 @@ describe('AgencyHubClient', () => {
     const result = await client.testConnection(
       {
         agencyHubBaseUrl: 'http://localhost:3000',
-        agencyHubApiKey: 'hub-key',
-        agencyHubDeviceToken: '',
+        agencyHubDeviceToken: 'hub-key',
       },
       new AbortController().signal,
     );
@@ -784,8 +783,7 @@ describe('AgencyHubClient', () => {
     const result = await client.testConnection(
       {
         agencyHubBaseUrl: 'http://localhost:3000',
-        agencyHubApiKey: 'hub-key',
-        agencyHubDeviceToken: '',
+        agencyHubDeviceToken: 'hub-key',
       },
       new AbortController().signal,
     );
@@ -813,8 +811,7 @@ describe('AgencyHubClient', () => {
     const result = await client.testConnection(
       {
         agencyHubBaseUrl: 'http://localhost:3000',
-        agencyHubApiKey: 'hub-key',
-        agencyHubDeviceToken: '',
+        agencyHubDeviceToken: 'hub-key',
       },
       new AbortController().signal,
     );
@@ -822,15 +819,15 @@ describe('AgencyHubClient', () => {
     expect(result).toMatchObject({
       ok: false,
       error: {
-        key: 'hub_invalid_api_key',
+        key: 'hub_unauthorized',
         code: 'CG-HUB-03',
         httpStatus: 401,
       },
     });
-    // Copy names the credential that was actually sent (legacy key here) and
-    // points at the preferred fix — issuing a device token.
-    expect(result.error?.message).toContain('API key');
-    expect(result.error?.description).toContain('device token');
+    // E123: one credential class, one card — the chatter is told to sign in
+    // again, never which of two credentials was rejected.
+    expect(result.error?.message).toBe('Agency Hub отклонил вход с этого устройства.');
+    expect(result.error?.description).toContain('войдите заново');
     expect(result.error?.serverDetail).toContain('unauthorized');
     // The failure is also visible in the background console.
     expect(consoleWarn).toHaveBeenCalledWith(
@@ -839,7 +836,62 @@ describe('AgencyHubClient', () => {
     );
   });
 
-  it('blames the device token, not the key, when the token was the bearer', async () => {
+  it('says «сессия завершена» only when this device was ACTUALLY signed out (§4.5)', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const store: Record<string, unknown> = { agencyHubDeviceToken: 'agency_hub_device_x' };
+    (globalThis as Record<string, unknown>).browser = {
+      permissions: { contains: vi.fn(async () => true) },
+      storage: {
+        local: {
+          get: vi.fn(async (keys: string | string[] | null) => {
+            if (keys === null || keys === undefined) return { ...store };
+            const list = Array.isArray(keys) ? keys : [keys];
+            return Object.fromEntries(list.filter((k) => k in store).map((k) => [k, store[k]]));
+          }),
+          set: vi.fn(async (items: Record<string, unknown>) => { Object.assign(store, items); }),
+          remove: vi.fn(async (keys: string | string[]) => {
+            for (const k of Array.isArray(keys) ? keys : [keys]) delete store[k];
+          }),
+        },
+      },
+    };
+    resetHealedBearerMemo();
+
+    const reject = (body: Record<string, unknown>) =>
+      new AgencyHubClient(async () => jsonResponse(body, 401)).testConnection(
+        { agencyHubBaseUrl: 'http://localhost:3000', agencyHubDeviceToken: 'agency_hub_device_x' },
+        new AbortController().signal,
+      );
+
+    // Named reason + the stored bearer → the device really is signed out here,
+    // so the card may say so.
+    const named = await reject(
+      { error: 'Unauthorized', message: 'revoked', statusCode: 401, reason: 'token_revoked' },
+    );
+    expect(named.error?.code).toBe('CG-HUB-19');
+    expect(named.error?.message).toBe('Сессия устройства завершена.');
+    expect(store.agencyHubDeviceToken).toBe('');
+
+    // No reason from the server → no verdict from us: the sign-in survives and
+    // the chatter gets the fail-closed card.
+    resetHealedBearerMemo();
+    store.agencyHubDeviceToken = 'agency_hub_device_x';
+    const bare = await reject({ error: 'Unauthorized', message: 'nope', statusCode: 401 });
+    expect(bare.error?.code).toBe('CG-HUB-03');
+    expect(store.agencyHubDeviceToken).toBe('agency_hub_device_x');
+
+    // Named reason, but a NEWER sign-in already replaced the rejected bearer:
+    // nothing was wiped, so claiming «сессия завершена» would be a lie.
+    resetHealedBearerMemo();
+    store.agencyHubDeviceToken = 'agency_hub_device_FRESH';
+    const stale = await reject(
+      { error: 'Unauthorized', message: 'revoked', statusCode: 401, reason: 'token_revoked' },
+    );
+    expect(stale.error?.code).toBe('CG-HUB-03');
+    expect(store.agencyHubDeviceToken).toBe('agency_hub_device_FRESH');
+  });
+
+  it('says «войдите заново» without naming the credential (E123 vocabulary)', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ error: 'unauthorized' }, 401)));
     (globalThis as Record<string, unknown>).browser = {
@@ -852,7 +904,6 @@ describe('AgencyHubClient', () => {
     const result = await client.testConnection(
       {
         agencyHubBaseUrl: 'http://localhost:3000',
-        agencyHubApiKey: 'hub-key',
         agencyHubDeviceToken: 'agency_hub_device_stale',
       },
       new AbortController().signal,
@@ -860,8 +911,8 @@ describe('AgencyHubClient', () => {
 
     expect(result.ok).toBe(false);
     expect(result.error?.code).toBe('CG-HUB-03');
-    expect(result.error?.message).toContain('device token');
-    expect(result.error?.message).not.toContain('API key');
+    expect(result.error?.message).not.toMatch(/device token|API|ключ|токен/i);
+    expect(result.error?.description).not.toMatch(/device token|API|ключ|токен/i);
   });
 
   it('returns a failed result on non-ok or network failures without throwing', async () => {
@@ -1350,9 +1401,8 @@ describe('AgencyHubClient', () => {
   });
 });
 
-const HUB: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubApiKey' | 'agencyHubDeviceToken'> = {
+const HUB: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubDeviceToken'> = {
   agencyHubBaseUrl: 'https://hub.example',
-  agencyHubApiKey: '',
   agencyHubDeviceToken: 'agency_hub_device_abc',
 };
 
@@ -1457,6 +1507,33 @@ describe('AgencyHubClient.checkIdentity', () => {
       .toEqual({ ok: true, username: 'lilly-chatter', role: 'chatter', pages: ['Lilly'] });
   });
 
+  it('lists FANSLY pages only for a chatter who works both platforms', async () => {
+    // Grisha is the live case: one account, pages on Fansly AND OnlyFans. The
+    // row is «Страницы Fansly», so an OnlyFans page here would promise a page
+    // this client cannot open.
+    const client = new AgencyHubClient(async () => jsonResponse({
+      authMethod: 'device_token',
+      user: {
+        id: 17,
+        username: 'grisha',
+        role: 'chatter',
+        mustChangePassword: false,
+        assignedPages: [
+          { id: 3, label: 'Lilly', platform: 'fansly', modelSlug: 'lilly', modelName: 'Lilly' },
+          { id: 9, label: 'lora-of', platform: 'onlyfans', modelSlug: 'lora', modelName: 'Lora' },
+          { id: 4, label: 'Lilly VIP', platform: 'fansly', modelSlug: 'lilly', modelName: 'Lilly' },
+        ],
+      },
+    }, 200));
+
+    expect(await client.checkIdentity(HUB, new AbortController().signal)).toEqual({
+      ok: true,
+      username: 'grisha',
+      role: 'chatter',
+      pages: ['Lilly', 'Lilly VIP'],
+    });
+  });
+
   it('maps 401 to unauthorized', async () => {
     const client = new AgencyHubClient(async () => jsonResponse({ error: 'Unauthorized' }, 401));
     expect(await client.checkIdentity(HUB, new AbortController().signal))
@@ -1466,7 +1543,7 @@ describe('AgencyHubClient.checkIdentity', () => {
   it('reports no_credential with no bearer', async () => {
     const client = new AgencyHubClient(async () => jsonResponse(meBody(), 200));
     expect(await client.checkIdentity(
-      { ...HUB, agencyHubDeviceToken: '', agencyHubApiKey: '' },
+      { ...HUB, agencyHubDeviceToken: '' },
       new AbortController().signal,
     )).toEqual({ ok: false, reason: 'no_credential' });
   });

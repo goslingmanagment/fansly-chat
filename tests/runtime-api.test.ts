@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import manifest from '../manifest.json';
 import {
-  AGENCY_HUB_API_KEY_STORAGE_KEY,
+  LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
   AGENCY_HUB_PREFETCH_TIMEOUT_MS,
@@ -847,7 +847,7 @@ describe('runtime-api getPopupStatus', () => {
       settings: {
         ...createDefaultSettings(),
         agencyHubBaseUrl: 'http://localhost:3000',
-        agencyHubApiKey: 'hub-key',
+        agencyHubDeviceToken: 'hub-key',
       },
     });
     const { sessionStore, tabsQuery } = await installRuntimeApiHarness({
@@ -1013,8 +1013,7 @@ describe('runtime-api testAgencyHubConnection', () => {
 
     const settings = {
       agencyHubBaseUrl: 'http://hub.test',
-      agencyHubApiKey: 'hub-key',
-      agencyHubDeviceToken: '',
+      agencyHubDeviceToken: 'hub-key',
     };
     const result = await onMessageListener?.({
       type: 'testAgencyHubConnection',
@@ -1070,8 +1069,7 @@ describe('runtime-api testAgencyHubConnection', () => {
       type: 'testAgencyHubConnection',
       settings: {
         agencyHubBaseUrl: 'https://hub.test',
-        agencyHubApiKey: 'key',
-        agencyHubDeviceToken: '',
+        agencyHubDeviceToken: 'key',
       },
     };
 
@@ -1123,25 +1121,15 @@ describe('runtime-api issueAgencyHubDeviceToken', () => {
         status: 200,
         headers: { 'content-type': 'application/json' },
       });
-      if (href.endsWith('/api/v1/auth/login')) {
-        return json({
-          authMethod: 'session',
-          user: {
-            id: 7, username: 'dasha', role: 'chatter', mustChangePassword: false, assignedPages: [],
-          },
-        });
-      }
-      if (href.endsWith('/api/v1/auth/device-tokens')) {
+      if (href.endsWith('/api/v1/auth/device-tokens/password')) {
         return json({
           token: 'agency_hub_device_from_hub_b',
           id: 12,
-          label: 'chatgoose-extension firefox',
+          label: 'Firefox · Windows',
           keyPrefix: 'bbb',
-          expiresAt: '2026-10-04T00:00:00.000Z',
+          expiresAt: '2026-12-14T00:00:00.000Z',
+          mode: 'active',
         });
-      }
-      if (href.endsWith('/api/v1/auth/logout')) {
-        return json({ ok: true });
       }
       throw new Error(`Unexpected URL: ${href}`);
     }));
@@ -1189,10 +1177,10 @@ describe('runtime-api signOutAgencyHub', () => {
     vi.clearAllMocks();
   });
 
-  it('wipes BOTH custody keys and the token metadata, and reports "revoked"', async () => {
+  it('wipes the sign-in and the token metadata, retires the legacy slot, and reports "revoked"', async () => {
     mockStorage = createStorage({
       [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'agency_hub_device_abc',
-      [AGENCY_HUB_API_KEY_STORAGE_KEY]: 'legacy-key',
+      [LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY]: 'legacy-key',
       [AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY]: {
         version: 1, keyPrefix: 'abc', issuedAt: 1, expiresAt: '2026-08-01T00:00:00.000Z',
       },
@@ -1210,7 +1198,7 @@ describe('runtime-api signOutAgencyHub', () => {
     const response = await send({ type: 'signOutAgencyHub' });
     expect(response).toEqual({ outcome: 'revoked' });
     expect(mockStorage[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]).toBe(''); // EMPTY, not removed
-    expect(mockStorage[AGENCY_HUB_API_KEY_STORAGE_KEY]).toBe('');
+    expect(LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY in mockStorage).toBe(false);
     // The operational metadata described a token that no longer exists here.
     expect(mockStorage[AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY]).toBeUndefined();
     // Revoke used the CAPTURED token (the stored copy is already wiped by now).
@@ -1281,22 +1269,22 @@ describe('runtime-api signOutAgencyHub', () => {
     // AFTER the wipe, while this handler still answered `revoked`.
     mockStorage = createStorage({
       [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'agency_hub_device_abc',
-      [AGENCY_HUB_API_KEY_STORAGE_KEY]: 'legacy-key',
+      [LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY]: 'legacy-key',
     });
     const agencyHubClient = {
       testConnection: vi.fn(async () => ({ ok: true })),
       revokeDeviceToken: vi.fn(async () => {
         // The wipe already landed…
-        expect(mockStorage[AGENCY_HUB_API_KEY_STORAGE_KEY]).toBe('');
+        expect(LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY in mockStorage).toBe(false);
         // …and now a stale page write resurrects the key mid-revoke.
-        mockStorage[AGENCY_HUB_API_KEY_STORAGE_KEY] = 'legacy-key-resurrected';
+        mockStorage[LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY] = 'legacy-key-resurrected';
         return 'revoked' as const;
       }),
     };
     const { send } = await installRuntimeApiHarness(fanslyClient, { agencyHubClient });
     expect(await send({ type: 'signOutAgencyHub' })).toEqual({ outcome: 'revoked' });
     // EMPTY string, never removal (E19) — and never the resurrected value.
-    expect(mockStorage[AGENCY_HUB_API_KEY_STORAGE_KEY]).toBe('');
+    expect(LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY in mockStorage).toBe(false);
     expect(mockStorage[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]).toBe('');
   });
 
@@ -1304,7 +1292,7 @@ describe('runtime-api signOutAgencyHub', () => {
     // Background durability: the wipe must land even if the page closes mid-revoke.
     mockStorage = createStorage({
       [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'agency_hub_device_abc',
-      [AGENCY_HUB_API_KEY_STORAGE_KEY]: 'legacy-key',
+      [LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY]: 'legacy-key',
     });
     const release = createDeferred<'revoked'>();
     const agencyHubClient = {
@@ -1312,7 +1300,7 @@ describe('runtime-api signOutAgencyHub', () => {
       revokeDeviceToken: vi.fn(async () => {
         // By the time the revoke runs the wipe has already committed.
         expect(mockStorage[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]).toBe('');
-        expect(mockStorage[AGENCY_HUB_API_KEY_STORAGE_KEY]).toBe('');
+        expect(LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY in mockStorage).toBe(false);
         return release.promise;
       }),
     };
@@ -1322,10 +1310,10 @@ describe('runtime-api signOutAgencyHub', () => {
     expect(await pending).toEqual({ outcome: 'revoked' });
   });
 
-  it('no token to revoke → "already-invalid", and STILL wipes any leftover apiKey', async () => {
+  it('no sign-in to revoke → "already-invalid", and STILL retires a leftover legacy slot', async () => {
     mockStorage = createStorage({
       [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: '',
-      [AGENCY_HUB_API_KEY_STORAGE_KEY]: 'legacy-key',
+      [LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY]: 'legacy-key',
     });
     const agencyHubClient = {
       testConnection: vi.fn(async () => ({ ok: true })),
@@ -1335,7 +1323,7 @@ describe('runtime-api signOutAgencyHub', () => {
     const response = await send({ type: 'signOutAgencyHub' });
     expect(response).toEqual({ outcome: 'already-invalid' });
     expect(agencyHubClient.revokeDeviceToken).not.toHaveBeenCalled(); // nothing to revoke
-    expect(mockStorage[AGENCY_HUB_API_KEY_STORAGE_KEY]).toBe(''); // apiKey still wiped
+    expect(LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY in mockStorage).toBe(false);
   });
 
   it('maps a 401/403 revoke to "unreachable" when NO metadata names the issuing hub', async () => {
@@ -1358,7 +1346,7 @@ describe('runtime-api signOutAgencyHub', () => {
     expect(agencyHubClient.revokeDeviceToken).toHaveBeenCalledTimes(1);
     // …and the local wipe still happened — EMPTY strings, never removal (E19).
     expect(mockStorage[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]).toBe('');
-    expect(mockStorage[AGENCY_HUB_API_KEY_STORAGE_KEY]).toBe('');
+    expect(LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY in mockStorage).toBe(false);
     vi.restoreAllMocks();
   });
 
@@ -1455,10 +1443,10 @@ describe('runtime-api signOutAgencyHub', () => {
     expect(agencyHubClient.revokeDeviceToken).not.toHaveBeenCalled(); // wipe threw first
   });
 
-  it('writes ONLY the two custody keys, never the settings blob — a concurrent blob write survives', async () => {
+  it('writes ONLY the custody key, never the settings blob — a concurrent blob write survives', async () => {
     mockStorage = createStorage({
       [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'agency_hub_device_abc',
-      [AGENCY_HUB_API_KEY_STORAGE_KEY]: 'legacy-key',
+      [LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY]: 'legacy-key',
       settings: { ...createDefaultSettings(), uiTheme: 'dark' },
     });
     const agencyHubClient = {
@@ -1485,14 +1473,14 @@ describe('runtime-api signOutAgencyHub', () => {
     const wipe = setCalls.find((call) => AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY in call);
     expect(wipe).toBeDefined();
     expect(Object.keys(wipe!).sort()).toEqual(
-      [AGENCY_HUB_API_KEY_STORAGE_KEY, AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY].sort(),
+      [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY],
     );
     // No set call in the whole sign-out rewrote the settings blob…
     expect(setCalls.some((call) => 'settings' in call)).toBe(false);
     // …so the concurrent uiTheme write survived, and custody is empty.
     expect((mockStorage.settings as Record<string, unknown>).uiTheme).toBe('light');
     expect(mockStorage[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]).toBe('');
-    expect(mockStorage[AGENCY_HUB_API_KEY_STORAGE_KEY]).toBe('');
+    expect(LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY in mockStorage).toBe(false);
   });
 
   it('serializes a concurrent sign-in behind a held sign-out — no interleaving (auth FIFO)', async () => {
@@ -2148,7 +2136,7 @@ describe('runtime-api getSpendersList', () => {
       const settings = {
         ...createDefaultSettings(),
         agencyHubBaseUrl: 'http://localhost:3000',
-        agencyHubApiKey: 'hub-key',
+        agencyHubDeviceToken: 'hub-key',
       };
       const service = new SpendersService(
         fanslyClient as never,

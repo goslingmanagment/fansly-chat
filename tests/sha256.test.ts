@@ -19,12 +19,10 @@ describe('sha256Hex', () => {
   it('separates credentials that collide under the former 32-bit fingerprint', () => {
     const first = personaCatalogSource({
       agencyHubBaseUrl: 'https://hub.example.test',
-      agencyHubApiKey: '',
       agencyHubDeviceToken: 'agency_hub_device_suyzzdhnyxplxhdz',
     });
     const second = personaCatalogSource({
       agencyHubBaseUrl: 'https://hub.example.test',
-      agencyHubApiKey: '',
       agencyHubDeviceToken: 'agency_hub_device_zcukrkeehhfwyizc',
     });
 

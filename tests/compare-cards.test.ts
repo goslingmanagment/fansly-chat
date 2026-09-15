@@ -9,7 +9,6 @@ function createStorage(overrides?: Partial<PersistedState>): PersistedState {
     schemaVersion: STORAGE_SCHEMA_VERSION,
     settings: {
       agencyHubBaseUrl: '',
-      agencyHubApiKey: '',
       agencyHubDeviceToken: '',
       quickMessageCount: 100,
       pingMessageCount: 100,

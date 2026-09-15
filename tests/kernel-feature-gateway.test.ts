@@ -3,6 +3,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { createKernelFeatureGateway } from '../src/background/kernel-feature-gateway.js';
+import { resetHealedBearerMemo } from '../src/background/hub-custody.js';
 import type { KernelFeatureRequest } from '../src/background/kernel-feature-gateway.js';
 import { ChatGooseError } from '../src/shared/errors.js';
 import { resolveAbortChatGooseError } from '../src/background/operation-utils.js';
@@ -14,7 +15,6 @@ function settings() {
   return {
     ...createDefaultSettings(),
     agencyHubBaseUrl: 'http://localhost:3000',
-    agencyHubApiKey: 'hub-key',
     agencyHubDeviceToken: 'agency_hub_device_x',
   };
 }
@@ -328,6 +328,27 @@ describe('kernel feature gateway', () => {
   });
 
   it('maps quota/auth failures and fails closed with a dedicated truncated-stream card', async () => {
+    // §4.5 needs real custody to answer: the card says «сессия завершена» only
+    // when this device was actually signed out, so the stored credential has to
+    // be the one the request carried.
+    const store: Record<string, unknown> = { agencyHubDeviceToken: 'agency_hub_device_x' };
+    (globalThis as Record<string, unknown>).browser = {
+      storage: {
+        local: {
+          get: async (keys: string | string[] | null) => {
+            if (keys === null || keys === undefined) return { ...store };
+            const list = Array.isArray(keys) ? keys : [keys];
+            return Object.fromEntries(list.filter((k) => k in store).map((k) => [k, store[k]]));
+          },
+          set: async (items: Record<string, unknown>) => { Object.assign(store, items); },
+          remove: async (keys: string | string[]) => {
+            for (const k of Array.isArray(keys) ? keys : [keys]) delete store[k];
+          },
+        },
+      },
+    };
+    resetHealedBearerMemo();
+
     const failWith = async (response: Response): Promise<ChatGooseError> => {
       const gateway = createKernelFeatureGateway(
         vi.fn(async () => response) as unknown as typeof fetch,
@@ -351,7 +372,42 @@ describe('kernel feature gateway', () => {
     expect(quotaDenied.key).toBe('hub_quota_exceeded');
     expect(quotaDenied.code).toBe('CG-HUB-09');
     expect((await failWith(new Response('{"message":"down"}', { status: 503 }))).key).toBe('service_unavailable');
-    expect((await failWith(new Response('{"message":"nope"}', { status: 401 }))).key).toBe('hub_invalid_api_key');
+    // A bare 401 fails closed: the sign-in stays, the chatter gets the honest
+    // «Agency Hub отклонил вход» card (§4.5).
+    expect((await failWith(new Response('{"message":"nope"}', { status: 401 }))).key).toBe('hub_unauthorized');
+    // …a 401 the kernel gave a reason for signs this device out and says so.
+    const revoked = await failWith(new Response(
+      '{"error":"Unauthorized","message":"revoked","statusCode":401,"reason":"token_revoked"}',
+      { status: 401 },
+    ));
+    expect(revoked.key).toBe('hub_session_ended');
+    expect(revoked.code).toBe('CG-HUB-19');
+    const expired = await failWith(new Response(
+      '{"error":"Unauthorized","message":"expired","statusCode":401,"reason":"token_expired"}',
+      { status: 401 },
+    ));
+    expect(expired.key).toBe('hub_session_ended');
+    // A reason this client does not act on is NOT self-healed.
+    const unknownReason = await failWith(new Response(
+      '{"error":"Unauthorized","message":"?","statusCode":401,"reason":"user_disabled"}',
+      { status: 401 },
+    ));
+    expect(unknownReason.key).toBe('hub_unauthorized');
+    // The device WAS signed out — once, by the first named 401 above.
+    expect(store.agencyHubDeviceToken).toBe('');
+
+    // …and a named 401 for a bearer that is no longer the stored one heals
+    // nothing, so it must NOT claim the session ended: a newer sign-in is live.
+    resetHealedBearerMemo();
+    store.agencyHubDeviceToken = 'agency_hub_device_FRESH';
+    const staleRejection = await failWith(new Response(
+      '{"error":"Unauthorized","message":"revoked","statusCode":401,"reason":"token_revoked"}',
+      { status: 401 },
+    ));
+    expect(staleRejection.key).toBe('hub_unauthorized');
+    expect(store.agencyHubDeviceToken).toBe('agency_hub_device_FRESH');
+
+    delete (globalThis as Record<string, unknown>).browser;
 
     // Missing terminal frame = truncated generation → never presented as done.
     const truncated = await failWith(sseResponse([META, { type: 'content_delta', text: 'partial' }]));

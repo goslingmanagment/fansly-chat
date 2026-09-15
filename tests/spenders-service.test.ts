@@ -165,7 +165,7 @@ describe('SpendersService (kernel source)', () => {
     const settings = {
       ...createDefaultSettings(),
       agencyHubBaseUrl: 'http://localhost:3000',
-      agencyHubApiKey: 'hub-key',
+      agencyHubDeviceToken: 'hub-key',
       ...overrides.settings,
     };
     const service = new SpendersService(client, kernelSource, async () => settings, overrides.tuning);
@@ -187,7 +187,7 @@ describe('SpendersService (kernel source)', () => {
     // Lifetime + month windows, ZERO per-fan earnings calls, one enumeration.
     expect(fetchTopSpenders).toHaveBeenCalledTimes(2);
     expect(fetchTopSpenders).toHaveBeenCalledWith(
-      expect.objectContaining({ agencyHubApiKey: 'hub-key' }),
+      expect.objectContaining({ agencyHubDeviceToken: 'hub-key' }),
       'creator-fs',
       'lifetime',
       1000,
@@ -263,7 +263,7 @@ describe('SpendersService (kernel source)', () => {
     const { service, settings } = makeKernelHarness();
     const hub = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
     await service.getList(kernelSession(), new AbortController().signal);
-    expect(await getLatestSpendersObservation(hub, settings.agencyHubApiKey))
+    expect(await getLatestSpendersObservation(hub, settings.agencyHubDeviceToken))
       .toMatchObject({ outcome: 'ok', streamState: 'ramped' });
   });
 
@@ -277,7 +277,7 @@ describe('SpendersService (kernel source)', () => {
     const result = await service.getList(kernelSession(), new AbortController().signal);
 
     expect(result.pageLabel).toBe('creator-fs');
-    expect(await getLatestSpendersObservation(hub, settings.agencyHubApiKey))
+    expect(await getLatestSpendersObservation(hub, settings.agencyHubDeviceToken))
       .toMatchObject({
         pageLabel: 'creator-fs',
         builtAt: Date.parse('2026-07-05T00:00:00.000Z'),
@@ -295,7 +295,7 @@ describe('SpendersService (kernel source)', () => {
 
     await expect(service.getList(kernelSession(), new AbortController().signal)).rejects.toBeDefined();
 
-    expect(await getLatestSpendersObservation(hub, settings.agencyHubApiKey))
+    expect(await getLatestSpendersObservation(hub, settings.agencyHubDeviceToken))
       .toMatchObject({ outcome: 'fail', streamState: null, pageLabel: 'creator-fs' });
   });
 
@@ -309,7 +309,7 @@ describe('SpendersService (kernel source)', () => {
 
     await expect(service.getList(kernelSession(), new AbortController().signal)).rejects.toBeDefined();
 
-    expect(await getLatestSpendersObservation(hub, settings.agencyHubApiKey))
+    expect(await getLatestSpendersObservation(hub, settings.agencyHubDeviceToken))
       .toMatchObject({
         outcome: 'fail',
         pageLabel: 'creator-fs',
@@ -326,7 +326,7 @@ describe('SpendersService (kernel source)', () => {
       throw new ChatGooseError('hub_page_match_failed');
     });
     await expect(service.getList(kernelSession(), new AbortController().signal)).rejects.toBeDefined();
-    expect(await getLatestSpendersObservation(hub, settings.agencyHubApiKey))
+    expect(await getLatestSpendersObservation(hub, settings.agencyHubDeviceToken))
       .toMatchObject({ outcome: 'fail', pageLabel: null, builtAt: null });
   });
 
@@ -338,7 +338,7 @@ describe('SpendersService (kernel source)', () => {
       throw new ChatGooseError('hub_page_match_failed');
     });
     await expect(service.getList(kernelSession(), new AbortController().signal)).rejects.toBeDefined();
-    expect(await getLatestSpendersObservation(hub, settings.agencyHubApiKey))
+    expect(await getLatestSpendersObservation(hub, settings.agencyHubDeviceToken))
       .toMatchObject({ outcome: 'fail', streamState: null });
   });
 
@@ -348,7 +348,7 @@ describe('SpendersService (kernel source)', () => {
     const { service, settings } = makeKernelHarness();
     const hub = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
     await service.getList(kernelSession(), new AbortController().signal);
-    expect(await getLatestSpendersObservation(hub, settings.agencyHubApiKey))
+    expect(await getLatestSpendersObservation(hub, settings.agencyHubDeviceToken))
       .toMatchObject({ outcome: 'ok' });
     expect(await getLatestSpendersObservation(hub, 'a-different-key')).toBeNull();
   });
@@ -363,7 +363,7 @@ describe('SpendersService (kernel source)', () => {
     controller.abort(new DOMException(SPENDERS_BUILD_TIMEOUT_REASON, 'AbortError'));
     await expect(service.getList(kernelSession(), controller.signal))
       .rejects.toMatchObject({ name: 'AbortError' });
-    expect(await getLatestSpendersObservation(hub, settings.agencyHubApiKey))
+    expect(await getLatestSpendersObservation(hub, settings.agencyHubDeviceToken))
       .toMatchObject({ outcome: 'fail', streamState: null });
   });
 
@@ -371,14 +371,14 @@ describe('SpendersService (kernel source)', () => {
     const { service, settings } = makeKernelHarness();
     const hub = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
     // Seed the exact source getList uses (creator|hub|sha256(bearer)) with a fresh OK board.
-    const sourceIdentity = `creator-1|${spendersObservationScope(hub, settings.agencyHubApiKey)}`;
+    const sourceIdentity = `creator-1|${spendersObservationScope(hub, settings.agencyHubDeviceToken)}`;
     await recordSpendersObservation({ sourceIdentity, streamState: 'ramped', outcome: 'ok' });
     const controller = new AbortController();
     controller.abort(); // plain cancel — no timeout reason
     await expect(service.getList(kernelSession(), controller.signal))
       .rejects.toMatchObject({ name: 'AbortError' });
     // The cancel recorded nothing, so the seeded OK observation still stands.
-    expect(await getLatestSpendersObservation(hub, settings.agencyHubApiKey))
+    expect(await getLatestSpendersObservation(hub, settings.agencyHubDeviceToken))
       .toMatchObject({ outcome: 'ok', streamState: 'ramped' });
   });
 

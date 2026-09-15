@@ -1,8 +1,6 @@
 import {
-  AGENCY_HUB_API_KEY_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_REVOKE_TIMEOUT_MS,
-  AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
   AGENCY_HUB_PREFETCH_TIMEOUT_MS,
   LAST_SEEN_VERSION_STORAGE_KEY,
   ONBOARDING_STORAGE_KEY,
@@ -11,6 +9,11 @@ import {
   SPENDERS_RESOLVE_TIMEOUT_MS,
   VOICE_CAPABILITY_BUDGET_MS,
 } from '../shared/constants.js';
+import {
+  buildDeviceLabel,
+  wipeHubCustody,
+  withAgencyHubCustodyLock,
+} from './hub-custody.js';
 import { getCompareDraftCount, resolveMappedPersonalityId } from '../shared/compare-cards.js';
 import { createUserError, toUserError } from '../shared/errors.js';
 import {
@@ -63,28 +66,6 @@ import {
 } from './voice-attempt-store.js';
 
 const SESSION_IDENTITY_TIMEOUT_MS = 5_000;
-
-// Serialize every device-token custody mutation — sign-in / re-issue (issue +
-// store) and sign-out (capture + wipe + revoke) — through ONE FIFO promise
-// queue. Without it, a sign-in landing mid-sign-out could interleave so a
-// freshly issued token is stored locally, then the sign-out's wipe erases it
-// while its revoke kills a DIFFERENT (captured) token — leaving a live,
-// un-revocable token orphaned on the hub. Under the lock each critical section
-// (which captures the token to revoke only INSIDE the section, right before the
-// wipe) runs to completion before the next begins, so the two never observe
-// each other's half-written state. Re-issue rides the same `issue` path, so it
-// is covered by the same lock.
-let agencyHubCustodyQueue: Promise<unknown> = Promise.resolve();
-function withAgencyHubCustodyLock<T>(critical: () => Promise<T>): Promise<T> {
-  // Chain onto the tail regardless of how the previous holder settled, so one
-  // rejection never poisons the queue for the next waiter.
-  const run = agencyHubCustodyQueue.then(critical, critical);
-  agencyHubCustodyQueue = run.then(
-    () => undefined,
-    () => undefined,
-  );
-  return run;
-}
 
 /** Drop the metadata record describing a token that no longer exists here.
  *
@@ -542,7 +523,7 @@ export function registerRuntimeApi({
         // Stage 32: readiness = kernel lane configured (hub transport up).
         hasApiKey: Boolean(
           normalizeAgencyHubBaseUrl(state.settings.agencyHubBaseUrl) &&
-          (state.settings.agencyHubDeviceToken.trim() || state.settings.agencyHubApiKey.trim()),
+          state.settings.agencyHubDeviceToken.trim().length > 0,
         ),
         voiceNotesCapable,
         hasPersonalities: getActivePersonaCatalog(state.personaCatalog).length > 0,
@@ -1141,7 +1122,9 @@ export function registerRuntimeApi({
             baseUrl,
             username: input.username,
             password: input.password,
-            label: `chatgoose-extension ${navigator.userAgent.includes('Firefox') ? 'firefox' : 'browser'}`,
+            // Р7 naming convention: the chatter and the owner both read this
+            // as a DEVICE, not as a credential — «Firefox · Windows».
+            label: buildDeviceLabel(navigator.userAgent),
           });
           const meta: AgencyHubDeviceTokenMeta = {
             version: 1,
@@ -1227,10 +1210,7 @@ export function registerRuntimeApi({
         // never key removal (removal would reopen the pre-v13 blob fallback —
         // E19).
         try {
-          await browser.storage.local.set({
-            [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: '',
-            [AGENCY_HUB_API_KEY_STORAGE_KEY]: '',
-          });
+          await wipeHubCustody();
         } catch (error) {
           // The loud case: credentials may still be on disk. Do NOT proceed to
           // revoke, and leave the metadata alone — it still describes what is
@@ -1242,19 +1222,15 @@ export function registerRuntimeApi({
         // The metadata describes a token that no longer exists here.
         await clearDeviceTokenMeta();
 
-        // (d) The SECOND, idempotent wipe. The revoke below can take up to 5s,
-        // and the options page's debounced settings chain writes
-        // `agencyHubApiKey` outside this lock: a delayed autosave (or a second
-        // options tab) landing in that window would restore a usable legacy key
-        // AFTER the wipe while this handler still reported `revoked`. Re-wiping
-        // once the revoke has settled closes that window. EMPTY strings again,
-        // never key removal (E19), and never the settings blob.
+        // (d) The SECOND, idempotent wipe. The revoke below can take up to 5s;
+        // re-wiping once it has settled closes the window in which a delayed
+        // write from an options tab could put a credential back on disk after
+        // the wipe while this handler still reported `revoked`. (v17/E123 shrank
+        // that window: the options page no longer persists any credential of
+        // its own — the legacy field it used to autosave is gone.)
         const rewipeCustody = async (): Promise<string | null> => {
           try {
-            await browser.storage.local.set({
-              [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: '',
-              [AGENCY_HUB_API_KEY_STORAGE_KEY]: '',
-            });
+            await wipeHubCustody();
             return null;
           } catch (error) {
             return error instanceof Error ? error.message.slice(0, 200) : String(error);
