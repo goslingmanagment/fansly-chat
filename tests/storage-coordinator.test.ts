@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
@@ -55,6 +55,9 @@ async function installStorageCoordinatorHarness(options?: {
   stallFirstSet?: boolean;
   rejectFirstSet?: boolean;
   repairEventDelayTasks?: number;
+  probeEventDelayMs?: number;
+  repairEventDelayMs?: number;
+  removalEventDelayMs?: number;
   missFirstProbeEvent?: boolean;
   disableProbeEvents?: boolean;
   afterMissedFirstProbe?: () => void;
@@ -139,7 +142,7 @@ async function installStorageCoordinatorHarness(options?: {
           emitStorageChanges?.({
             __chatgooseStorageListenerProbeV1: { newValue: probeValue },
           });
-        }, 0);
+        }, options?.probeEventDelayMs ?? 0);
       }
       return;
     }
@@ -151,10 +154,14 @@ async function installStorageCoordinatorHarness(options?: {
       key,
       { oldValue: oldValues[key], newValue },
     ]));
-    emitAfterTasks(
-      changes,
-      setCallCount === 1 ? (options?.repairEventDelayTasks ?? 0) : 0,
-    );
+    if (options?.repairEventDelayMs) {
+      setTimeout(() => emitStorageChanges?.(changes), options.repairEventDelayMs);
+    } else {
+      emitAfterTasks(
+        changes,
+        setCallCount === 1 ? (options?.repairEventDelayTasks ?? 0) : 0,
+      );
+    }
   });
 
   (globalThis as Record<string, unknown>).browser = {
@@ -172,7 +179,11 @@ async function installStorageCoordinatorHarness(options?: {
             delete mockStorage[key];
           }
           if (Object.keys(changes).length > 0) {
-            emitStorageChanges?.(changes);
+            if (options?.removalEventDelayMs) {
+              setTimeout(() => emitStorageChanges?.(changes), options.removalEventDelayMs);
+            } else {
+              emitStorageChanges?.(changes);
+            }
           }
         }),
       },
@@ -202,6 +213,10 @@ async function installStorageCoordinatorHarness(options?: {
 }
 
 describe('StorageCoordinator', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   beforeEach(() => {
     mockStorage = {};
     vi.clearAllMocks();
@@ -342,6 +357,7 @@ describe('StorageCoordinator', () => {
   });
 
   it('returns normalized state without repair when no probe is observed, then retries safely', async () => {
+    vi.useFakeTimers();
     mockStorage = createStorage({
       schemaVersion: 12,
       personalities: [{ id: 'p1', name: 'Closer', content: 'legacy state', updatedAt: 1 }],
@@ -349,19 +365,20 @@ describe('StorageCoordinator', () => {
     const { coordinator, enableProbeEvents, probeSetCount, storageSet } =
       await installStorageCoordinatorHarness({ disableProbeEvents: true });
 
-    const fallback = await coordinator.getState();
+    const [fallback] = await Promise.all([coordinator.getState(), vi.runAllTimersAsync()]);
     expect(fallback.schemaVersion).toBe(STORAGE_SCHEMA_VERSION);
     expect(probeSetCount()).toBe(3);
     expect(storageSet).not.toHaveBeenCalled();
     expect(mockStorage.schemaVersion).toBe(12);
 
     enableProbeEvents();
-    await coordinator.getState();
+    await Promise.all([coordinator.getState(), vi.runAllTimersAsync()]);
     await vi.waitFor(() => expect(storageSet).toHaveBeenCalledTimes(1));
     expect(mockStorage.schemaVersion).toBe(STORAGE_SCHEMA_VERSION);
   });
 
   it('refuses an external writer until a current-schema custody layout is durably repaired', async () => {
+    vi.useFakeTimers();
     mockStorage = createStorage({
       settings: {
         ...createDefaultSettings(),
@@ -372,17 +389,21 @@ describe('StorageCoordinator', () => {
     const { coordinator, enableProbeEvents, storageSet } =
       await installStorageCoordinatorHarness({ disableProbeEvents: true });
 
-    await expect(coordinator.ensurePersistedState()).rejects.toThrow(
-      'Storage repair could not be durably completed',
-    );
+    await Promise.all([
+      expect(coordinator.ensurePersistedState()).rejects.toThrow(
+        'Storage repair could not be durably completed',
+      ),
+      vi.runAllTimersAsync(),
+    ]);
     expect(storageSet).not.toHaveBeenCalled();
 
     enableProbeEvents();
-    await expect(coordinator.ensurePersistedState()).resolves.toMatchObject({
-      settings: {
-        agencyHubDeviceToken: 'legacy-token',
-      },
-    });
+    await Promise.all([
+      expect(coordinator.ensurePersistedState()).resolves.toMatchObject({
+        settings: { agencyHubDeviceToken: 'legacy-token' },
+      }),
+      vi.runAllTimersAsync(),
+    ]);
     expect(mockStorage[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]).toBe('legacy-token');
     expect(mockStorage.settings).not.toHaveProperty('agencyHubApiKey');
     expect(mockStorage.settings).not.toHaveProperty('agencyHubDeviceToken');
@@ -407,14 +428,64 @@ describe('StorageCoordinator', () => {
     expect(mockStorage.schemaVersion).toBe(STORAGE_SCHEMA_VERSION);
   });
 
+  it.each([
+    { schemaVersion: 16, delays: { probeEventDelayMs: 50 } },
+    { schemaVersion: 16, delays: { repairEventDelayMs: 50 } },
+    { schemaVersion: 17, delays: { repairEventDelayMs: 50 } },
+    { schemaVersion: 16, delays: { removalEventDelayMs: 50 } },
+  ])('completes an upgrade when storage events arrive after timer turns: %j', async ({ schemaVersion, delays }) => {
+    vi.useFakeTimers();
+    mockStorage = createStorage({
+      schemaVersion,
+      agencyHubApiKey: '',
+      [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'agency_hub_device_live',
+      accountMappings: { creator: 'p1' },
+    });
+    const { coordinator } = await installStorageCoordinatorHarness(delays);
+    const ready = expect(coordinator.ensurePersistedState()).resolves.toMatchObject({
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+      settings: { agencyHubDeviceToken: 'agency_hub_device_live' },
+      accountMappings: { creator: 'p1' },
+    });
+
+    await Promise.all([ready, vi.runAllTimersAsync()]);
+
+    expect(mockStorage[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]).toBe('agency_hub_device_live');
+    expect(mockStorage.accountMappings).toEqual({ creator: 'p1' });
+    expect(mockStorage.schemaVersion).toBe(STORAGE_SCHEMA_VERSION);
+    expect(mockStorage).not.toHaveProperty(LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each([
+    { delays: { repairEventDelayMs: 2_000 }, error: 'Storage startup repair acknowledgement was not observed' },
+    { delays: { removalEventDelayMs: 2_000 }, error: 'Storage startup removal acknowledgement was not observed' },
+  ])('keeps Settings blocked when the acknowledgement exceeds its time budget: %j', async ({ delays, error }) => {
+    vi.useFakeTimers();
+    mockStorage = createStorage({
+      schemaVersion: 16,
+      agencyHubApiKey: '',
+      [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'agency_hub_device_live',
+    });
+    const { coordinator } = await installStorageCoordinatorHarness(delays);
+
+    await Promise.all([
+      expect(coordinator.ensurePersistedState()).rejects.toThrow(error),
+      vi.runAllTimersAsync(),
+    ]);
+    expect(mockStorage[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]).toBe('agency_hub_device_live');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('fresh-reads current storage after an initially unobserved barrier', async () => {
+    vi.useFakeTimers();
     mockStorage = createStorage({
       settings: { ...createDefaultSettings(), uiTheme: 'light' },
     });
     const { coordinator, enableProbeEvents, storageSet } =
       await installStorageCoordinatorHarness({ disableProbeEvents: true });
 
-    const fallback = await coordinator.getState();
+    const [fallback] = await Promise.all([coordinator.getState(), vi.runAllTimersAsync()]);
     expect(fallback.settings.uiTheme).toBe('light');
     expect(storageSet).not.toHaveBeenCalled();
 
@@ -422,13 +493,13 @@ describe('StorageCoordinator', () => {
       ...createDefaultSettings(),
       uiTheme: 'dark',
     });
-    const stillReadOnly = await coordinator.getState();
+    const [stillReadOnly] = await Promise.all([coordinator.getState(), vi.runAllTimersAsync()]);
 
     expect(stillReadOnly.settings.uiTheme).toBe('dark');
     expect(storageSet).not.toHaveBeenCalled();
 
     enableProbeEvents();
-    await coordinator.getState();
+    await Promise.all([coordinator.getState(), vi.runAllTimersAsync()]);
     expect(storageSet).not.toHaveBeenCalled();
   });
 
@@ -719,20 +790,27 @@ describe('StorageCoordinator', () => {
   });
 
   it('fails closed when a deferred fresh read discovers a future schema', async () => {
+    vi.useFakeTimers();
     mockStorage = createStorage();
     const { coordinator, storageSet } = await installStorageCoordinatorHarness({
       disableProbeEvents: true,
     });
 
-    await expect(coordinator.getState()).resolves.toMatchObject({
-      schemaVersion: STORAGE_SCHEMA_VERSION,
-    });
+    await Promise.all([
+      expect(coordinator.getState()).resolves.toMatchObject({
+        schemaVersion: STORAGE_SCHEMA_VERSION,
+      }),
+      vi.runAllTimersAsync(),
+    ]);
     storageSet.mockClear();
     mockStorage.schemaVersion = STORAGE_SCHEMA_VERSION + 1;
 
-    await expect(coordinator.getState()).rejects.toThrow(
-      `Storage schema ${STORAGE_SCHEMA_VERSION + 1} is newer`,
-    );
+    await Promise.all([
+      expect(coordinator.getState()).rejects.toThrow(
+        `Storage schema ${STORAGE_SCHEMA_VERSION + 1} is newer`,
+      ),
+      vi.runAllTimersAsync(),
+    ]);
     await expect(coordinator.registerKnownAccount('future-schema-account')).rejects.toThrow(
       `Storage schema ${STORAGE_SCHEMA_VERSION + 1} is newer`,
     );

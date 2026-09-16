@@ -89,7 +89,8 @@ export function selfHealingUnauthorizedReason(
  * завершена» or the fail-closed card). Without this memo the second caller
  * arrives after the first has already emptied the slot, finds no match, and
  * reports «did not heal» about a device it just healed — so the chatter would
- * get the wrong card exactly when the mechanism worked. */
+ * get the wrong card exactly when the mechanism worked. The memo only applies
+ * while the live slot is still empty; it cannot describe a newer sign-in. */
 let lastHealedBearerDigest: string | null = null;
 
 /**
@@ -110,17 +111,18 @@ export async function healRevokedHubSession(rejectedBearer: string): Promise<boo
   const rejectedDigest = sha256Hex(rejected);
   return withAgencyHubCustodyLock(async () => {
     try {
-      if (lastHealedBearerDigest === rejectedDigest) {
-        // Already signed this exact bearer out (see the memo above). Idempotent,
-        // and the honest answer is still «yes, this device was signed out».
-        return true;
-      }
       const raw = await browser.storage.local.get(AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY);
       const stored = raw[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY];
       const storedToken = typeof stored === 'string' ? stored.trim() : '';
-      if (!storedToken || sha256Hex(storedToken) !== rejectedDigest) {
-        // Someone signed in again between the request and its answer (or this
-        // device was already signed out by something else). Not ours to erase.
+      if (!storedToken) {
+        // The SDK hook may have completed this wipe before its error mapper
+        // asks for the outcome. Reuse that answer only after checking current
+        // custody: a newer sign-in must never inherit «session ended» from it.
+        return lastHealedBearerDigest === rejectedDigest;
+      }
+      if (sha256Hex(storedToken) !== rejectedDigest) {
+        // Someone signed in again between the request and its answer. Neither
+        // erase that credential nor report the replacement as signed out.
         return false;
       }
       await wipeHubCustody();

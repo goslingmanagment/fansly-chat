@@ -45,6 +45,17 @@ export const COPY = {
    * by tests/options-shell.test.ts so the claim cannot rot. */
   documentTitle: 'Настройки ChatGoose',
 
+  signInGate: {
+    title: 'Войдите в ChatGoose',
+    subtitle: 'Один аккаунт для расширения Fansly и приложения OnlyFans.',
+    rejected: 'Вход больше не подтверждается. Войдите снова, чтобы продолжить.',
+    login: 'Логин',
+    password: 'Пароль',
+    help: 'Логин и пароль вы создали по приглашению владельца. Если забыли пароль, попросите у владельца ссылку для его смены.',
+    requestFailed: 'Не удалось завершить вход. Попробуйте ещё раз.',
+    permissionFailed: 'Firefox не выдал доступ для входа. Нажмите «Войти» ещё раз и разрешите доступ.',
+  },
+
   /** Left rail: brand, section list, footer. */
   rail: {
     brand: 'ChatGoose',
@@ -358,12 +369,12 @@ export const COPY = {
     /** The four honest outcomes of a sign-out. «Стёрт локально» is never said
      * about a wipe that failed, and «завершён на хабе» never about a sign-out
      * the hub did not confirm. */
-    signOutRevoked: 'Вышли: на этом устройстве стёрто, на хабе вход завершён.',
-    signOutAlreadyInvalid: 'Вышли: на этом устройстве стёрто, на хабе входа уже не было.',
+    signOutRevoked: 'Вы вышли из ChatGoose на этом устройстве.',
+    signOutAlreadyInvalid: 'Вы вышли из ChatGoose на этом устройстве.',
     signOutUnreachable:
-      'На этом устройстве стёрто. Хаб не подтвердил — тогда вход закроется сам по сроку.',
+      'Вы вышли на этом устройстве. Сервер не подтвердил завершение входа — он останется действителен до истечения срока.',
     signOutWipeFailed:
-      'Не удалось стереть вход на этом устройстве — он мог остаться. Перезагрузи Настройки и повтори.',
+      'Не удалось выйти на этом устройстве. Перезагрузите настройки и попробуйте снова.',
     signOutHint:
       '«Выйти» завершает вход на этом устройстве; настройки и маппинги остаются.',
     /** Diagnostics card. The «Ядро» row states what the pane is about and used

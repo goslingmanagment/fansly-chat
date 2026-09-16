@@ -81,7 +81,7 @@ interface StorageListenerProbe {
 const STORAGE_LISTENER_PROBE_KEY = '__chatgooseStorageListenerProbeV1';
 const STORAGE_REPAIR_ACK_KEY = '__chatgooseStorageRepairAckV1';
 const STORAGE_LISTENER_PROBE_ATTEMPTS = 3;
-const STORAGE_REPAIR_ACK_WAIT_TASKS = 3;
+const STORAGE_CHANGE_ACK_TIMEOUT_MS = 1_000;
 const STORAGE_REPAIR_ACK_MAX_PENDING = 32;
 
 interface StorageRepairSetAck {
@@ -124,16 +124,21 @@ function storageValuesEqual(left: unknown, right: unknown): boolean {
   return false;
 }
 
-function waitForStorageChangeDispatch(): Promise<void> {
-  // storage.local.set/remove can resolve before storage.onChanged is delivered
-  // to this same service worker. Yield one task so the operation's queued
-  // event is consumed while its expectation is still active.
-  return new Promise((resolve) => setTimeout(resolve, 0));
-}
-
-async function waitStorageDispatchTasks(count: number): Promise<void> {
-  for (let index = 0; index < count; index += 1) {
-    await waitForStorageChangeDispatch();
+async function waitForStorageChange(observed: Promise<void>): Promise<boolean> {
+  // A completed storage write does not order its onChanged delivery ahead of
+  // our timers. One (or three) setTimeout(0) turns can expire while Firefox is
+  // still delivering the event, especially during an extension update. Wait
+  // for the actual acknowledgement, with a time budget for missing events.
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      observed.then(() => true),
+      new Promise<boolean>((resolve) => {
+        timeout = setTimeout(() => resolve(false), STORAGE_CHANGE_ACK_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -637,10 +642,7 @@ export class StorageCoordinator {
         await browser.storage.local.set({
           [STORAGE_LISTENER_PROBE_KEY]: `${valuePrefix}:${attempt}`,
         });
-        await Promise.race([
-          observed,
-          waitForStorageChangeDispatch(),
-        ]);
+        await waitForStorageChange(observed);
       } catch {
         // A storage failure is handled like an unobserved listener: never let
         // startup hang and never proceed to a mutating repair on uncertainty.
@@ -787,7 +789,7 @@ export class StorageCoordinator {
         [STORAGE_REPAIR_ACK_KEY]: ack,
       });
       writeCompleted = true;
-      if (!await this.waitForRepairAck(observed)) {
+      if (!await waitForStorageChange(observed)) {
         throw new Error('Storage startup repair acknowledgement was not observed');
       }
     } catch (error) {
@@ -824,7 +826,7 @@ export class StorageCoordinator {
     try {
       await browser.storage.local.set({ [STORAGE_REPAIR_ACK_KEY]: ack });
       markerWritten = true;
-      if (!await this.waitForRepairAck(armed)) {
+      if (!await waitForStorageChange(armed)) {
         const pending = this.pendingRepairAcks.get(ack);
         if (pending?.kind === 'remove') {
           pending.abandoned = true;
@@ -832,7 +834,7 @@ export class StorageCoordinator {
         throw new Error('Storage startup removal acknowledgement was not armed');
       }
       await browser.storage.local.remove([...keys, STORAGE_REPAIR_ACK_KEY]);
-      if (!await this.waitForRepairAck(complete)) {
+      if (!await waitForStorageChange(complete)) {
         throw new Error('Storage startup removal acknowledgement was not observed');
       }
     } catch (error) {
@@ -908,13 +910,6 @@ export class StorageCoordinator {
       this.pendingRepairAcks.delete(oldest);
     }
     this.pendingRepairAcks.set(ack, record);
-  }
-
-  private async waitForRepairAck(observed: Promise<void>): Promise<boolean> {
-    return Promise.race([
-      observed.then(() => true),
-      waitStorageDispatchTasks(STORAGE_REPAIR_ACK_WAIT_TASKS).then(() => false),
-    ]);
   }
 
   private async enqueueWrite<T>(task: () => Promise<T>): Promise<T> {

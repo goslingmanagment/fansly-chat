@@ -270,7 +270,8 @@ describe('Options page — «Аккаунт ChatGoose»', () => {
       agencyHubDeviceToken: '',
     }));
 
-    const section = getSectionByTitle('Аккаунт ChatGoose');
+    const section = document.querySelector<HTMLElement>('[data-sign-in-gate]')!;
+    expect(section.hidden).toBe(false);
     const urlInput = section.querySelector<HTMLInputElement>('input[type="url"]')!;
 
     urlInput.value = ' http://localhost:3000/ ';

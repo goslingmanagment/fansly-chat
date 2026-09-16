@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 import type { PopupStatus } from '../src/shared/types.js';
-import { CHANGELOG_URL, WHATS_NEW_2_URL } from '../src/shared/constants.js';
+import { AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY, CHANGELOG_URL, WHATS_NEW_2_URL } from '../src/shared/constants.js';
+
+type StorageListener = (changes: Record<string, browser.storage.StorageChange>, areaName: string) => void;
+let storageListeners: StorageListener[] = [];
 
 function installDom() {
   const dom = new JSDOM(
@@ -22,6 +25,7 @@ function makeStatus(overrides: Partial<PopupStatus> = {}): PopupStatus {
     groupId: 'group-1',
     connected: true,
     hasApiKey: true,
+    signedIn: true,
     accountName: null,
     fanName: null,
     aiQuota: null,
@@ -33,7 +37,12 @@ function makeStatus(overrides: Partial<PopupStatus> = {}): PopupStatus {
 async function loadPopup(sendMessage: (message?: unknown) => Promise<unknown>): Promise<void> {
   vi.resetModules();
   installDom();
+  storageListeners = [];
   (globalThis as Record<string, unknown>).browser = {
+    storage: {
+      local: { get: vi.fn(async () => ({})) },
+      onChanged: { addListener: vi.fn((listener: StorageListener) => storageListeners.push(listener)) },
+    },
     runtime: {
       getManifest: vi.fn(() => ({ version: '1.0.0' })),
       sendMessage: vi.fn(sendMessage),
@@ -45,6 +54,12 @@ async function loadPopup(sendMessage: (message?: unknown) => Promise<unknown>): 
 
 function rootText(): string {
   return document.getElementById('chatgoose-popup-root')?.textContent ?? '';
+}
+
+function notifySignInChanged(): void {
+  for (const listener of storageListeners) {
+    listener({ [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: {} }, 'local');
+  }
 }
 
 describe('Popup', () => {
@@ -69,6 +84,7 @@ describe('Popup', () => {
       expect(rootText()).toContain('Не удалось связаться с ChatGoose');
       expect(rootText()).toContain('Открыть настройки');
     });
+    expect(rootText()).not.toContain('Войти в ChatGoose');
   });
 
   it.each([false, true])('offers the release guide and archive even with unreachable runtime (%s)', async (unavailable) => {
@@ -101,17 +117,85 @@ describe('Popup', () => {
     });
   });
 
-  it('flags a missing Agency Hub configuration and stays quiet otherwise', async () => {
+  it('keeps a saved sign-in when the Hub configuration is invalid', async () => {
     await loadPopup(async () => makeStatus({ hasApiKey: false }));
     await vi.waitFor(() => {
-      expect(rootText()).toContain('Войдите в ChatGoose');
+      expect(rootText()).toContain('Проверьте подключение ChatGoose');
     });
+    expect(rootText()).not.toContain('Войти в ChatGoose');
 
     await loadPopup(async () => makeStatus({ hasApiKey: true }));
     await vi.waitFor(() => {
       expect(rootText()).toContain('Fansly подключён');
     });
-    expect(rootText()).not.toContain('Войдите в ChatGoose');
+    expect(rootText()).not.toContain('Проверьте подключение ChatGoose');
+  });
+
+  it('shows only the sign-in path before Fansly context and cached quota', async () => {
+    await loadPopup(async () => makeStatus({
+      signedIn: false,
+      hasApiKey: false,
+      aiQuota: { pageLabel: 'lora-1', remainingRequestsToday: 494, exhausted: false, observedAt: 1 },
+    }));
+    await vi.waitFor(() => expect(rootText()).toContain('Войти в ChatGoose'));
+    expect(rootText()).toContain('Вход в Fansly выполняется отдельно');
+    expect(rootText()).not.toContain('Closer');
+    expect(rootText()).not.toContain('Fansly подключён');
+    expect(rootText()).not.toContain('Квота AI');
+    expect(document.querySelector('.chatgoose-popup-panel')).toBeNull();
+    document.querySelector<HTMLButtonElement>('.chatgoose-button')?.click();
+    expect(browser.runtime.sendMessage).toHaveBeenLastCalledWith({
+      type: 'openOptions', pane: 'hub', code: 'CG-HUB-02',
+    });
+  });
+
+  it.each(['refused', 'rejected'])('keeps a native sign-in path when routing is %s', async (failure) => {
+    await loadPopup(async (message) => {
+      if ((message as { type: string }).type === 'openOptions') {
+        if (failure === 'rejected') throw new Error('worker restarting');
+        return { opened: false, reused: false };
+      }
+      return makeStatus({ signedIn: false });
+    });
+    await vi.waitFor(() => expect(rootText()).toContain('Войти в ChatGoose'));
+    document.querySelector<HTMLButtonElement>('.chatgoose-button')?.click();
+    await vi.waitFor(() => expect(browser.runtime.openOptionsPage).toHaveBeenCalledTimes(1));
+  });
+
+  it('updates both ways when sign-in changes while the popup is open', async () => {
+    let signedIn = true;
+    await loadPopup(async () => makeStatus({ signedIn }));
+    await vi.waitFor(() => expect(rootText()).toContain('Closer'));
+    signedIn = false;
+    notifySignInChanged();
+    await vi.waitFor(() => expect(rootText()).toContain('Войти в ChatGoose'));
+    expect(rootText()).not.toContain('Closer');
+    signedIn = true;
+    notifySignInChanged();
+    await vi.waitFor(() => expect(rootText()).toContain('Closer'));
+    expect(rootText()).not.toContain('Войти в ChatGoose');
+  });
+
+  it.each(['resolved', 'rejected'])('ignores an old status read that %s after sign-out', async (outcome) => {
+    let resolveOld!: (value: PopupStatus) => void;
+    let rejectOld!: (error: Error) => void;
+    const oldRead = new Promise<PopupStatus>((resolve, reject) => {
+      resolveOld = resolve;
+      rejectOld = reject;
+    });
+    let calls = 0;
+    await loadPopup(async () => ++calls === 1 ? oldRead : makeStatus({ signedIn: false }));
+    notifySignInChanged();
+    await vi.waitFor(() => expect(rootText()).toContain('Войти в ChatGoose'));
+    if (outcome === 'resolved') resolveOld(makeStatus());
+    else rejectOld(new Error('worker restarted'));
+    await vi.waitFor(() => {
+      expect(vi.mocked(browser.runtime.sendMessage).mock.settledResults[0]?.type)
+        .toBe(outcome === 'resolved' ? 'fulfilled' : 'rejected');
+    });
+    expect(rootText()).toContain('Войти в ChatGoose');
+    expect(rootText()).not.toContain('Closer');
+    expect(rootText()).not.toContain('Не удалось связаться');
   });
 
   it('opens Settings through the runtime on the normal path, natively on the fallback', async () => {

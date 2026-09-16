@@ -3,10 +3,10 @@ import { getActivePersonaCatalog } from '../shared/persona-catalog.js';
 import { loadStorageState, saveAccountMapping } from '../shared/storage.js';
 
 /** Which error the banner is standing in for when its settings button is
- * pressed. The banner covers two different registry classes — «no active
+ * pressed. Sign-in takes precedence; the mapping states cover «no active
  * personas exist» and «this account has none assigned» — and they are fixed on
  * DIFFERENT panes, so the reason has to travel with the click. */
-export type MappingBannerSettingsReason = 'no-personalities' | 'no-mapping';
+export type MappingBannerSettingsReason = 'signed-out' | 'no-personalities' | 'no-mapping';
 
 interface MappingBannerCallbacks {
   onOpenSettings: (reason: MappingBannerSettingsReason) => void;
@@ -20,6 +20,7 @@ export class MappingBanner {
   private renderGeneration = 0;
   private desiredAccountId: string | null = null;
   private desiredMapped = false;
+  private desiredSignedIn: boolean | undefined;
 
   constructor(private readonly callbacks: MappingBannerCallbacks) {
     this.root = document.createElement('div');
@@ -40,10 +41,31 @@ export class MappingBanner {
     this.root.append(copy, this.actions);
   }
 
-  async render(accountId: string | null, mapped: boolean): Promise<void> {
+  async render(accountId: string | null, mapped: boolean, signedIn?: boolean): Promise<void> {
     const generation = ++this.renderGeneration;
+    const wasSignedOut = this.desiredSignedIn === false;
     this.desiredAccountId = accountId;
     this.desiredMapped = mapped;
+    this.desiredSignedIn = signedIn;
+    // A signed-out chatter needs the entry point even when a cached mapping
+    // exists or Fansly has not identified the account yet. Do not hydrate the
+    // persona catalog (or offer a write) until this prerequisite is satisfied.
+    if (signedIn === false) {
+      this.title.textContent = 'Войдите в ChatGoose';
+      this.body.textContent = 'Вход в Fansly не заменяет вход в расширение. Введите логин и пароль своего аккаунта ChatGoose.';
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'chatgoose-button';
+      button.textContent = 'Войти';
+      button.addEventListener('click', () => this.callbacks.onOpenSettings('signed-out'));
+      this.actions.replaceChildren(button);
+      this.root.classList.remove('chatgoose-hidden');
+      return;
+    }
+    if (wasSignedOut) {
+      this.root.classList.add('chatgoose-hidden');
+      this.actions.replaceChildren();
+    }
     if (!accountId || mapped) {
       this.root.classList.add('chatgoose-hidden');
       this.actions.replaceChildren();
@@ -58,6 +80,7 @@ export class MappingBanner {
     ) {
       return;
     }
+    this.title.textContent = 'Which model is this account?';
     this.root.classList.remove('chatgoose-hidden');
     this.actions.replaceChildren();
 

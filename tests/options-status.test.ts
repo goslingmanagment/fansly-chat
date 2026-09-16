@@ -4,7 +4,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { COPY } from '../src/options/copy.js';
-import { STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
+import { AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY, STORAGE_SCHEMA_VERSION } from '../src/shared/constants.js';
 import { personaCatalogSource } from '../src/shared/persona-catalog.js';
 import { emptyOpsDaily, mountOptionsPage, unmountOptionsPage } from './helpers/options-page.js';
 import type { MountedOptionsPage } from './helpers/options-page.js';
@@ -298,10 +298,12 @@ describe('options «Статус» pane', () => {
   it('is honest about unknowns instead of inventing verdicts', async () => {
     const page = await mountOptionsPage({ sessions: [] });
 
-    // No hub address: DOWN would be a lie — the hub was never addressed.
+    // A signed-out install asks for login before making live Hub claims.
+    expect(page.document.querySelector<HTMLElement>('[data-sign-in-gate]')?.hidden).toBe(false);
+    expect(page.document.querySelector<HTMLElement>('.chatgoose-cabinet')?.hidden).toBe(true);
+    expect(page.sentRequestTypes()).not.toContain('getAgencyHubHealth');
+    expect(page.sentRequestTypes()).not.toContain('getAgencyHubIdentity');
     expect(row(page, 'hub').dataset.tone).toBe('neutral');
-    expect(row(page, 'hub').textContent).toContain(COPY.status.hubEmpty);
-    expect(row(page, 'access').textContent).toContain(COPY.status.accessEmpty);
     expect(row(page, 'ai').textContent).toContain(COPY.status.aiEmpty);
     expect(row(page, 'activity').textContent).toContain(COPY.status.activityEmpty);
     // A null board observation is «not yet observed», never FLAG OFF.
@@ -868,17 +870,19 @@ describe('options «Статус» pane', () => {
       // is what routes this chatter. (Wave D: while the checklist IS visible the
       // hero stands down, see below.)
       const page = await mountOptionsPage({
+        settings: { agencyHubDeviceToken: 'device-token-status-tests' },
         sessions: [],
-        runtime: { onboarding: { version: 1, dismissedAt: Date.parse('2026-07-01T10:00:00.000Z') } },
+        permissionGranted: true,
+        runtime: { identity: IDENTITY_AUTH, health: HEALTH_UP, onboarding: { version: 1, dismissedAt: Date.parse('2026-07-01T10:00:00.000Z') } },
       });
       expect(hero(page).hidden).toBe(false);
       expect(hero(page).dataset.heroState).toBe('route');
-      // hub + fansly + persona are open (access is unchecked, not failed).
-      expect(hero(page).textContent).toContain('Нужно 3 действия.');
+      // Signed in; Fansly and persona still need setup.
+      expect(hero(page).textContent).toContain('Нужно 2 действия.');
       // With no checklist to defer to, «Что мешает» is where those steps live —
       // the suppression below must not become a permanent one.
       expect(todo(page).hidden).toBe(false);
-      expect(todo(page).querySelectorAll('[data-readiness-step]')).toHaveLength(3);
+      expect(todo(page).querySelectorAll('[data-readiness-step]')).toHaveLength(2);
     });
 
     it('stands down while the first-run checklist owns the same three steps', async () => {
@@ -886,8 +890,13 @@ describe('options «Статус» pane', () => {
       // with a CTA each, and the hero restated the identical list one card below.
       const page = await mountOptionsPage({
         sessions: [],
-        runtime: { onboarding: { version: 1, dismissedAt: null } },
+        permissionGranted: true,
+        runtime: { identity: IDENTITY_AUTH, health: HEALTH_UP, onboarding: { version: 1, dismissedAt: null } },
       });
+      page.emitStorageChange({
+        [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: { oldValue: '', newValue: 'device-token-status-tests' },
+      });
+      await page.flushAsync();
 
       // The card is the ONE visible list of the three steps — and it is not a
       // descendant of the hero, so hiding the hero cannot take it down with it.
@@ -903,7 +912,7 @@ describe('options «Статус» pane', () => {
       expect(todo(page).hidden).toBe(true);
       // The list inside keeps its verdict current while hidden, so it is already
       // right the moment the checklist retires — hidden, never stale.
-      expect(todo(page).querySelectorAll('[data-readiness-step]')).toHaveLength(3);
+      expect(todo(page).querySelectorAll('[data-readiness-step]')).toHaveLength(2);
       expect(hero(page).dataset.heroState).toBe('route');
       // …and the rail micro still carries the aggregate: the pane says «setup»
       // whichever card is doing the talking.
@@ -969,10 +978,7 @@ describe('options «Статус» pane', () => {
       expect(todo(page).querySelector('[data-readiness-action="hub"]')).toBeNull();
     });
 
-    it('keeps «подключить» when NOTHING is stored — an empty install is genuinely open', async () => {
-      // The pane turns a rejected/malformed runtime reply into `unreachable`
-      // too, so without the stored-credential precondition a transport hiccup on
-      // a blank install would read as «неизвестно» instead of «не подключено».
+    it('asks for login before checking the Hub when NOTHING is stored', async () => {
       const page = await mountOptionsPage({
         sessions: [LIVE_SESSION],
         runtime: {
@@ -981,10 +987,13 @@ describe('options «Статус» pane', () => {
         },
       });
 
-      const hub = todo(page).querySelector<HTMLElement>('[data-readiness-step="hub"]');
-      expect(hub?.dataset.readinessState).toBe('open');
-      expect(hub?.textContent).toContain(COPY.status.stepHub);
-      expect(todo(page).querySelector('[data-readiness-action="hub"]')).not.toBeNull();
+      const gate = page.document.querySelector<HTMLElement>('[data-sign-in-gate]')!;
+      expect(gate.hidden).toBe(false);
+      expect(gate.textContent).toContain(COPY.signInGate.title);
+      expect(gate.querySelector<HTMLElement>('.chatgoose-signin-notice')?.hidden).toBe(true);
+      expect(page.sentRequestTypes()).not.toContain('getAgencyHubIdentity');
+      expect(page.sentRequestTypes()).not.toContain('getSessionsSnapshot');
+      expect(page.document.querySelector<HTMLElement>('.chatgoose-cabinet')?.hidden).toBe(true);
     });
 
     it('keeps a REJECTED credential actionable — unauthorized is the chatter’s to fix', async () => {

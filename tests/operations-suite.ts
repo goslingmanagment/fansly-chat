@@ -1152,6 +1152,22 @@ describe(`OperationCoordinator (${part})`, () => {
     );
   });
 
+  it.each(['', 'device-token'])('carries local sign-in independently of transport readiness (%s)', async (token) => {
+    mockStorage.settings = {
+      ...(mockStorage.settings as Record<string, unknown>),
+      agencyHubBaseUrl: 'not-a-url',
+    };
+    mockStorage.agencyHubDeviceToken = token;
+    const { coordinator, port } = await createCoordinatorHarness({
+      kernelGateway: { isConfigured: vi.fn(() => false), streamFeature: vi.fn() },
+    });
+    await coordinator.refreshTabState(1);
+    expect(postedMessages(port).at(-1)).toEqual(expect.objectContaining({
+      type: 'tab:state',
+      state: expect.objectContaining({ signedIn: token.length > 0, hasApiKey: false }),
+    }));
+  });
+
   it('re-pushes tab state with the identity a budgeted probe resolved late', async () => {
     // Composition mirror of src/background/index.ts: the coordinator asks the
     // BUDGETED resolver, so a cold probe no longer holds first paint — and the

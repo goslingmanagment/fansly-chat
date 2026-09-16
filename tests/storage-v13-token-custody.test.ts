@@ -7,7 +7,7 @@
 // keys: the blob never carries them, custody keys are written only when a
 // patch names them, and a one-release fallback still READS v12 blobs.
 
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import {
   LEGACY_AGENCY_HUB_API_KEY_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY,
@@ -559,10 +559,13 @@ describe('serialization helpers', () => {
 });
 
 describe('StorageCoordinator memory under v13 custody', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
   it('a settings-blob-only change never erases the token from memory', async () => {
     mockStorage = v12Store();
     const coordinator = new StorageCoordinator();
-    const initial = await coordinator.init();
+    const [initial] = await Promise.all([coordinator.init(), vi.runAllTimersAsync()]);
     expect(initial.settings.agencyHubDeviceToken).toBe('old-token');
 
     // Another context writes a v13 (secret-free) blob — e.g. a theme change.
@@ -575,7 +578,7 @@ describe('StorageCoordinator memory under v13 custody', () => {
       'local',
     );
 
-    const state = await coordinator.getState();
+    const [state] = await Promise.all([coordinator.getState(), vi.runAllTimersAsync()]);
     expect(state.settings.uiTheme).toBe('dark');
     expect(state.settings.agencyHubDeviceToken).toBe('old-token');
   });
@@ -583,7 +586,7 @@ describe('StorageCoordinator memory under v13 custody', () => {
   it('a custody-key change updates the in-memory token', async () => {
     mockStorage = v12Store();
     const coordinator = new StorageCoordinator();
-    await coordinator.init();
+    await Promise.all([coordinator.init(), vi.runAllTimersAsync()]);
 
     coordinator.applyStorageChanges(
       {
@@ -594,7 +597,7 @@ describe('StorageCoordinator memory under v13 custody', () => {
       'local',
     );
 
-    const state = await coordinator.getState();
+    const [state] = await Promise.all([coordinator.getState(), vi.runAllTimersAsync()]);
     expect(state.settings.agencyHubDeviceToken).toBe('rotated-token');
   });
 });

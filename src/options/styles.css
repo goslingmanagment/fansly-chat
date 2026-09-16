@@ -116,6 +116,52 @@ input[type='checkbox'] {
   min-height: 100vh;
 }
 
+.chatgoose-cabinet[hidden],
+.chatgoose-signin-gate[hidden],
+.chatgoose-signin-notice[hidden] { display: none; }
+
+.chatgoose-signin-gate {
+  min-height: 100vh;
+  box-sizing: border-box;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 22px;
+  padding: 40px 20px;
+}
+.chatgoose-signin-card {
+  width: min(100%, 440px);
+  box-sizing: border-box;
+  padding: 36px;
+  border: 1px solid var(--chatgoose-line);
+  border-radius: 16px;
+  background: var(--chatgoose-bg1);
+  box-shadow: var(--chatgoose-shadow);
+}
+.chatgoose-signin-brand {
+  color: var(--chatgoose-clay-ink);
+  font-weight: 700;
+  margin-bottom: 28px;
+}
+.chatgoose-signin-card h1 { margin: 0 0 10px; font-size: 30px; line-height: 1.15; }
+.chatgoose-signin-subtitle,
+.chatgoose-signin-help { color: var(--chatgoose-ink-mid); line-height: 1.5; }
+.chatgoose-signin-subtitle { margin: 0 0 28px; }
+.chatgoose-signin-notice { color: var(--chatgoose-amber); line-height: 1.5; }
+.chatgoose-signin-fields { display: grid; gap: 12px; }
+.chatgoose-signin-fields > .chatgoose-meta:empty { display: none; }
+.chatgoose-signin-gate .chatgoose-signin-grid { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.chatgoose-signin-gate .chatgoose-input { min-width: 0; width: 100%; box-sizing: border-box; min-height: 44px; }
+.chatgoose-signin-gate button[type='submit'] { width: 100%; min-height: 44px; margin-top: 8px; }
+.chatgoose-signin-help { margin: 24px 0 12px; font-size: 13px; }
+.chatgoose-signin-links { display: flex; flex-wrap: wrap; gap: 8px; }
+.chatgoose-signin-advanced { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--chatgoose-line); }
+.chatgoose-signin-version { color: var(--chatgoose-ink-low); font-family: var(--chatgoose-font-mono); font-size: 12px; }
+@media (max-width: 480px) {
+  .chatgoose-signin-gate { padding: 20px 14px; }
+  .chatgoose-signin-card { padding: 26px 22px; }
+}
+
 /* Pinned, not scrolled away: the rail owns exactly one viewport and scrolls
    inside itself, so navigation survives the one long pane (Agency Hub).
    `height: 100vh` (not `align-items: stretch`) is what keeps the footer at the

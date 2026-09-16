@@ -7,6 +7,7 @@ import { issueAgencyHubDeviceToken } from '../src/background/device-token.js';
 import {
   buildDeviceLabel,
   healRevokedHubSession,
+  resetHealedBearerMemo,
   selfHealingUnauthorizedReason,
   wipeHubCustody,
 } from '../src/background/hub-custody.js';
@@ -201,6 +202,7 @@ describe('§4.5 self-healing', () => {
   let store: Record<string, unknown>;
 
   beforeEach(() => {
+    resetHealedBearerMemo();
     store = {};
     (globalThis as Record<string, unknown>).browser = {
       storage: {
@@ -261,6 +263,44 @@ describe('§4.5 self-healing', () => {
     await expect(healRevokedHubSession('agency_hub_device_stale')).resolves.toBe(false);
 
     expect(store[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]).toBe('agency_hub_device_fresh');
+  });
+
+  it('reports the same completed wipe to both the SDK hook and its error mapper', async () => {
+    store[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY] = 'agency_hub_device_old';
+    const write = vi.spyOn(browser.storage.local, 'set');
+
+    await expect(healRevokedHubSession('agency_hub_device_old')).resolves.toBe(true);
+    await expect(healRevokedHubSession('agency_hub_device_old')).resolves.toBe(true);
+
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(store[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]).toBe('');
+  });
+
+  it('does not report a session ended after a newer sign-in replaces a healed one', async () => {
+    store[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY] = 'agency_hub_device_old';
+    await expect(healRevokedHubSession('agency_hub_device_old')).resolves.toBe(true);
+    const freshMeta = { version: 1, keyPrefix: 'fresh', issuedAt: 2, expiresAt: 'later' };
+    store[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY] = 'agency_hub_device_fresh';
+    store[AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY] = freshMeta;
+    const write = vi.spyOn(browser.storage.local, 'set');
+    const remove = vi.spyOn(browser.storage.local, 'remove');
+
+    // A late mapper or second response can still refer to the already-healed
+    // bearer. The memo must not describe the replacement as signed out.
+    await expect(healRevokedHubSession('agency_hub_device_old')).resolves.toBe(false);
+
+    expect(store[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]).toBe('agency_hub_device_fresh');
+    expect(store[AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY]).toEqual(freshMeta);
+    expect(write).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it('does not use a previous wipe as proof when current custody cannot be read', async () => {
+    store[AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY] = 'agency_hub_device_old';
+    await expect(healRevokedHubSession('agency_hub_device_old')).resolves.toBe(true);
+    vi.spyOn(browser.storage.local, 'get').mockRejectedValueOnce(new Error('Storage unavailable'));
+
+    await expect(healRevokedHubSession('agency_hub_device_old')).resolves.toBe(false);
   });
 
   it('does nothing without a bearer to match', async () => {

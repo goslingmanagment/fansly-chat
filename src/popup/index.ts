@@ -1,7 +1,7 @@
 import { sendRuntimeRequest } from '../shared/runtime-request.js';
 import { installUiTheme, readUiThemeSetting } from '../shared/theme.js';
-import type { PopupStatus } from '../shared/types.js';
-import { CHANGELOG_URL, WHATS_NEW_2_URL } from '../shared/constants.js';
+import type { PopupStatus, RuntimeRequestMap } from '../shared/types.js';
+import { AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY, CHANGELOG_URL, WHATS_NEW_2_URL } from '../shared/constants.js';
 
 const rootElement = document.getElementById('chatgoose-popup-root');
 const extensionVersion = browser.runtime.getManifest().version;
@@ -13,6 +13,7 @@ if (!(rootElement instanceof HTMLElement)) {
 const root = rootElement;
 
 const COPY_FEEDBACK_MS = 1400;
+let renderGeneration = 0;
 
 function createButton(label: string): HTMLButtonElement {
   const button = document.createElement('button');
@@ -172,14 +173,56 @@ function renderUnavailable(): void {
   root.append(createVersionTag(), title, message, button, createReleaseLinks());
 }
 
+/** Route through the one Settings tab; a refusal or unavailable worker keeps
+ * the independent native fallback, so the primary action always has a path. */
+function createSettingsButton(
+  label: string,
+  route: RuntimeRequestMap['openOptions'],
+): HTMLButtonElement {
+  const button = createButton(label);
+  button.addEventListener('click', () => {
+    void sendRuntimeRequest('openOptions', route)
+      .then((response) => {
+        if (!response?.opened) void browser.runtime.openOptionsPage();
+      })
+      .catch(() => { void browser.runtime.openOptionsPage(); });
+  });
+  return button;
+}
+
+function renderSignedOut(): void {
+  const title = document.createElement('div');
+  title.className = 'chatgoose-popup-name';
+  title.textContent = 'ChatGoose';
+  const message = document.createElement('div');
+  message.className = 'chatgoose-popup-sub';
+  message.textContent = 'Войдите логином и паролем, чтобы пользоваться расширением. Вход в Fansly выполняется отдельно.';
+  const button = createSettingsButton('Войти в ChatGoose', {
+    pane: 'hub',
+    code: 'CG-HUB-02',
+  });
+  root.replaceChildren(createVersionTag(), title, message, button);
+}
+
 async function render(): Promise<void> {
+  const generation = ++renderGeneration;
   let status: PopupStatus;
   try {
     status = await sendRuntimeRequest('getPopupStatus');
   } catch {
+    if (generation !== renderGeneration) return;
     // Background worker asleep/reloading — render a usable fallback instead of
     // leaving the popup blank.
     renderUnavailable();
+    return;
+  }
+  if (generation !== renderGeneration) return;
+
+  // The transport flag also includes URL validity. Only credential custody can
+  // identify a local sign-out; an outage must never ask a signed-in user to log
+  // in again. A worker from the previous build has no signedIn field yet.
+  if (status.signedIn === false) {
+    renderSignedOut();
     return;
   }
 
@@ -204,7 +247,7 @@ async function render(): Promise<void> {
   // The hub lane earns a pill only when it needs attention — a quiet popup
   // means everything is wired up.
   if (!status.hasApiKey) {
-    pills.append(createStatusPill('warn', 'Войдите в ChatGoose'));
+    pills.append(createStatusPill('warn', 'Проверьте подключение ChatGoose'));
   }
   title.append(eyebrow, name, pills);
 
@@ -246,21 +289,7 @@ async function render(): Promise<void> {
   // be a second pagehide settings writer). A request that rejected — or answered
   // that it opened nothing — opened nothing, so the native fallback cannot
   // double-open anything.
-  const button = createButton('Открыть настройки');
-  button.addEventListener('click', () => {
-    void sendRuntimeRequest('openOptions', { pane: 'status' })
-      // A resolved `{opened:false}` is a REFUSAL, not a success: the background
-      // answered that it opened nothing (tabs.create denied), so the fallback is
-      // the same one a rejection gets — and it cannot double-open either.
-      .then((response) => {
-        if (!response?.opened) {
-          void browser.runtime.openOptionsPage();
-        }
-      })
-      .catch(() => {
-        void browser.runtime.openOptionsPage();
-      });
-  });
+  const button = createSettingsButton('Открыть настройки', { pane: 'status' });
 
   root.append(createVersionTag(), title, panel, button, createReleaseLinks());
 }
@@ -270,4 +299,9 @@ async function render(): Promise<void> {
 void readUiThemeSetting()
   .then((setting) => installUiTheme(setting))
   .catch(() => {});
+browser.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === 'local' && AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY in changes) {
+    void render();
+  }
+});
 void render();

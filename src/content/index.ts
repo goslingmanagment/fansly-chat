@@ -523,12 +523,13 @@ export class ChatGooseContentApp {
   });
   private readonly mappingBanner = new MappingBanner({
     // The banner stands in for a registry error, so it deep-links exactly like
-    // that error's toast would — and it covers TWO classes: «no active personas
-    // exist at all» belongs to «Персоны», «this account has none assigned» to
-    // «Аккаунты».
+    // that error's toast would. Sign-in belongs to «Аккаунт ChatGoose» and
+    // precedes persona setup on «Персоны» or «Аккаунты».
     onOpenSettings: (reason) => {
       this.openSettings(
-        getErrorMessage(reason === 'no-personalities' ? 'no_personalities' : 'no_mapping').code,
+        getErrorMessage(reason === 'signed-out'
+          ? 'hub_missing_api_key'
+          : reason === 'no-personalities' ? 'no_personalities' : 'no_mapping').code,
       );
     },
   });
@@ -3382,7 +3383,11 @@ export class ChatGooseContentApp {
           this.coachSettingsSnapshotGeneration += 1;
           void this.refreshCoachSettingsSnapshot(this.coachSettingsSnapshotGeneration);
         }
-        void this.mappingBanner.render(message.state.accountId, Boolean(message.state.mappedPersonalityId));
+        void this.mappingBanner.render(
+          message.state.accountId,
+          Boolean(message.state.mappedPersonalityId),
+          message.state.signedIn,
+        );
         if (personaChanged || accountChanged) {
           // An account-only change (background resolving the canonical accountId,
           // operations.ts refreshTabState('mapping:changed')) tears the coach

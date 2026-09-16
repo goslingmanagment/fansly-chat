@@ -119,6 +119,11 @@ Important references:
 
 ## Release
 
+Release 2.4.1 fixes premature storage readiness timeouts, leads signed-out
+users directly to sign-in across Settings/popup/chat, and prevents a delayed
+old-session error from replacing the newly signed-in view. Existing device
+credentials and settings are preserved.
+
 Release 2.4.0 replaces the sign-in ceremony: one login and one password, issued
 to the chatter as an invite link by the owner, work in both the extension and the
 OnlyFans desktop app. The legacy chatter key is removed end to end, and a 401 the

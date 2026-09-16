@@ -113,6 +113,11 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E121 | 2026-09-14 | Creator-wide follower GET pacing and cooldown, human pause/resume, cached proof and lazy conversation preview with clearer progress |
 | E122 | 2026-09-14 | Release E121 as 2.2.2 after independent adversarial review; retain the owner's corrected small-release numbering and skip Telegram |
 | E123 | 2026-09-15 | One login and password for every client; legacy chatter key retired end to end (storage v17); named-401 self-healing; «Как начать» page; 2.4.0 |
+| E124 | 2026-09-15 | Storage readiness waits for event acknowledgements with a one-second deadline instead of counting timer turns; missing acknowledgements still block Settings |
+
+| E125 | 2026-09-15 | Signed-out Settings, popup and chat banner lead with sign-in; stale old-credential failures cannot invalidate the new sign-in view |
+| E126 | 2026-09-16 | Re-vendor SDK 0.3.0 from the exact deployed Core identity release before publishing 2.4.1 |
+| E127 | 2026-09-16 | Release 2.4.1 packages storage readiness and sign-in-first fixes, preserves settings and credentials, and uses the production-matched SDK |
 
 ## Entries
 
@@ -4082,3 +4087,109 @@ a tag is never reused.
 *Not done here:* `whats-new-3.html`. The per-release convention is
 `CHANGELOG.md` + `changelog.html`, both updated; `whats-new-2.html` was a one-off
 deep dive for 2.0 and stays a fixed historical page.
+
+**E124 (2026-09-15).** After updating to 2.4.0, the owner observed
+`ChatGoose Settings Unavailable` repeatedly before Settings eventually opened.
+The page checks storage readiness before discovering Fansly tabs, so opening
+Fansly is not a prerequisite for this barrier. The original failing console
+trace was unavailable after recovery; the precise failed phase in that profile
+is unconfirmed.
+
+The reproducible defect is a premature acknowledgement timeout. The listener
+probe allowed one `setTimeout(0)` turn, and repair set/remove acknowledgements
+allowed three. Timer turns do not bound delivery latency of Firefox's
+asynchronous storage events. A 50 ms delayed event reproduces a rejected
+readiness handshake despite successful storage operations. E123's v17 upgrade
+adds legacy-key removal, including its own arm/completion acknowledgements, to
+the same startup path; the too-short waits predate that release.
+
+All four waits now use an event-driven, **1,000 ms** acknowledgement deadline.
+Observed events resolve immediately and cancel the timer. Three probe attempts,
+the fresh-read-before-repair rule, late self-event suppression, credential
+custody, and the Settings writer barrier remain in force. A missing event still
+fails closed; this is neither a fixed startup sleep nor permission to bypass
+the storage barrier. No settings shape change or schema bump.
+
+Regression coverage delays the probe, full-state write, removal arm and removal
+completion independently; it also verifies timeout rejection and preservation
+of the existing sign-in/mappings. Missing-event tests use virtual time. The
+runtime API harness explicitly reads its fixture on each call instead of
+implicitly obtaining that behavior from perpetually unobserved probes.
+This change is prepared locally; publication is a separate release step.
+
+
+**E125 (2026-09-15).** Settings opens with one sign-in screen when this
+device has no credential or the current identity check explicitly rejects the
+current Hub URL + credential. The cabinet is hidden and inert, including when
+a saved deep link targets another pane. A network failure, missing host
+permission, invalid Hub URL or an authenticated account with zero pages does
+not mean the person signed out. Health, identity and Fansly discovery are not
+started for an initially signed-out device. The first real discovery after
+sign-in owns its loading/error state; a skipped read is not an empty snapshot.
+
+The gate reuses the cabinet's live form, feedback, help and advanced address
+controls, with placeholders restoring their original locations after sign-in.
+There is one credential writer and no duplicate password form. Submit/Enter
+asks for Firefox host permission in the user gesture, prevents duplicate
+issuance, reports permission/transport errors in place, and only opens the
+cabinet after custody is read back. Sign-out, cross-tab changes and explicit
+current-identity rejection return to the same screen. The requested pane and
+local account/persona setup are retained; the password is cleared on success
+and when entering the gate. Sign-out results remain visible on the gate.
+
+The popup and chat banner likewise lead with sign-in before account/persona
+setup. A separate `signedIn` projection expresses local credential presence;
+transport configuration, Fansly-tab presence and assigned pages cannot answer
+that question. Content tolerates the previous worker's missing projection
+during an update. Popup replies and pending banner reads are generation-fenced
+so an older result cannot replace a newer sign-out view.
+
+An auth audit also reproduced a delayed-response defect in the self-healing
+memo: after wiping an old credential and signing in again, a second old-401
+consumer could incorrectly report that the new session had ended. The custody
+FIFO now reads the current slot before reusing that memo, and only reuses it
+while the slot remains empty. No credential or storage schema change. The
+reported Nikita screenshot proves a missing local sign-in, not why it was
+removed; v17 retires legacy key-only installations but preserves device
+credentials, and the affected profile's pre-upgrade state is unavailable.
+
+Regression coverage includes initial signed-out deep links, durable sign-in,
+duplicate Enter, transport/permission refusal, source-bound rejection,
+zero-page accounts, cross-tab changes, initial discovery failure, all sign-out
+outcomes, popup/banner precedence and delayed old-credential errors. Full
+`pnpm check` passed (127 files / 2,354 tests). Browser verification uses actual
+compiled UI with synthetic browser APIs, light/dark themes and a 320 px window;
+it does not issue or revoke real credentials. Publication remains a separate
+release step.
+
+
+**E126 (2026-09-16).** The owner authorized publishing E124/E125 as 2.4.1
+after deploying the Core identity rework. The existing release gate requires
+the shipped SDK contract to match live Core exactly. Re-vendor SDK 0.3.0
+using the generator from clean Core commit
+`579b0e34932020607d0ebdc44f9683f24360ffa9`, the actual deployed revision.
+Contract hash: `8e9dda0b2352b0b7a106e515a3282493b0977db4c730466681e985e20e7c33b2`.
+
+Core's changed administrative routes use immutable user IDs. This extension
+does not call those operations; sign-in, self-device and feature routes stay
+unchanged. The refresh preserves generated provenance and the contract gate;
+no vendored files are edited by hand and no release check is bypassed.
+No new extension permissions, settings schema or credential migration.
+
+
+**E127 (2026-09-16).** Release 2.4.1 packages E124/E125 and the generated
+Core pin from E126. Version fields, landing stamp and both changelogs move
+together. No settings-schema migration or new extension permission is added;
+existing device credentials and local setup remain intact. Publication uses
+the standard main-only, clean-tree, exact-origin, Core-contract and AMO
+unlisted-signing gates. An update is only claimed live after the public feed
+and both XPI download paths are checked.
+
+Prepublication verification: `pnpm check` passes all 127 suites / 2,354 tests,
+typecheck, lint, cutover gates and production build. Self-hosted `web-ext lint`
+has zero errors and three dynamic-import warnings. The first lint attempt
+used Mozilla-hosted mode and rejected the required self-hosted update URL;
+rerunning in the actual distribution mode resolves that mismatch without
+changing the manifest or weakening publication checks. The changelog renders
+in the browser and the announcement format validator passes. Functional UI
+coverage and browser evidence for the fixes are described in E124/E125.

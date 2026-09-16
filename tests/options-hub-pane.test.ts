@@ -40,8 +40,8 @@ function detail(page: MountedOptionsPage, key: string): HTMLElement {
 }
 
 function hubButton(page: MountedOptionsPage, label: string): HTMLButtonElement {
-  // Scoped to the hub pane: «Войти» also exists as an onboarding step action.
-  const button = Array.from(page.document.querySelectorAll<HTMLButtonElement>('[data-pane="hub"] button'))
+  // Sign-in lives in the gate while signed out; exclude onboarding actions.
+  const button = Array.from(page.document.querySelectorAll<HTMLButtonElement>('[data-pane="hub"] button, [data-sign-in-gate] button'))
     .find((candidate) => candidate.textContent === label);
   if (!button) {
     throw new Error(`Missing hub button: ${label}`);
@@ -356,7 +356,11 @@ describe('options «Аккаунт ChatGoose» pane', () => {
       const signInMeta = page.document.querySelector<HTMLElement>(
         '[data-role="hub-signin-meta"]',
       );
-      expect(signInMeta?.textContent).toBe(COPY.hub.signInHint);
+      expect(signInMeta?.textContent).toBe('');
+      const gate = page.document.querySelector<HTMLElement>('[data-sign-in-gate]')!;
+      expect(gate.hidden).toBe(false);
+      expect(gate.contains(signInMeta)).toBe(true);
+      expect(gate.textContent).toContain(COPY.signInGate.help);
       expect(signInMeta?.textContent).not.toContain('device token;');
     });
 

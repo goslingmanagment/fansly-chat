@@ -832,6 +832,9 @@ export interface TabUiState {
   connected: boolean;
   /** Legacy field name; true means the Agency Hub AI transport is configured. */
   hasApiKey: boolean;
+  /** Local credential presence, independent of transport validity. Optional
+   * while content overlaps with a background from the previous release. */
+  signedIn?: boolean;
   /** Fail-closed hint from the assigned Agency Hub page. */
   voiceNotesCapable: boolean;
   /** Optional for a brief old-background/new-content overlap during updates;
@@ -860,6 +863,9 @@ export interface AiQuotaStatus {
 }
 
 export interface PopupStatus extends TabUiState {
+  /** A local sign-in is stored. Independent of the Hub URL, network and
+   * Fansly tab; server rejection is reported separately until custody clears. */
+  signedIn: boolean;
   accountLabel: string;
   /** Human name of the tab's Fansly account — "Display Name (@username)"
    * ladder — once account/me has resolved the session; null until then. */

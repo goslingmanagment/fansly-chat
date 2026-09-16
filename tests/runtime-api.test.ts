@@ -136,10 +136,8 @@ async function installRuntimeApiHarness(fanslyClient: {
   tabContexts?: TabContextStoreClass;
   storageCoordinator?: {
     ensurePersistedState?: () => Promise<unknown>;
-    // A stub can pin `getState` to a deliberately STALE snapshot: the real
-    // coordinator in this harness re-reads storage on every call (its listener
-    // probe is never observed), so only a stub can reproduce the cache lag a
-    // handler sees in Firefox.
+    // A stub can pin `getState` to a deliberately STALE snapshot; by default
+    // this harness reads its storage fixture afresh on every call.
     getState?: () => Promise<unknown>;
   };
 }) {
@@ -229,6 +227,15 @@ async function installRuntimeApiHarness(fanslyClient: {
 
   const sessionStore = new SessionStore();
   const storageCoordinator = options?.storageCoordinator ?? new StorageCoordinator();
+  if (storageCoordinator instanceof StorageCoordinator) {
+    // Runtime tests edit mockStorage directly and historically used the
+    // coordinator's unobserved-listener path to re-read that fixture. Model
+    // that read explicitly instead of waiting for missing browser events on
+    // every RPC. The coordinator suite owns the real startup/repair barrier;
+    // ensureStorageReady tests below inject and assert that barrier separately.
+    const { readStorageState } = await import('../src/shared/storage.js');
+    vi.spyOn(storageCoordinator, 'getState').mockImplementation(() => readStorageState());
+  }
   const agencyHubClient = options?.agencyHubClient ?? {
     testConnection: vi.fn(async () => ({ ok: true })),
     checkHealth: vi.fn(async () => ({ ok: false, reason: 'no_base_url' })),
@@ -859,7 +866,7 @@ describe('runtime-api getPopupStatus', () => {
     ]);
 
     const configured = await onMessageListener?.({ type: 'getPopupStatus' });
-    expect(configured).toEqual(expect.objectContaining({ hasApiKey: true }));
+    expect(configured).toEqual(expect.objectContaining({ hasApiKey: true, signedIn: true }));
   });
 
   it('reports hasApiKey false when the hub transport is unconfigured', async () => {
@@ -873,7 +880,29 @@ describe('runtime-api getPopupStatus', () => {
     ]);
 
     const cleared = await onMessageListener?.({ type: 'getPopupStatus' });
-    expect(cleared).toEqual(expect.objectContaining({ hasApiKey: false }));
+    expect(cleared).toEqual(expect.objectContaining({ hasApiKey: false, signedIn: false }));
+  });
+
+  it.each(['', 'device-token'])('reports sign-in from storage without any active tab (%s)', async (token) => {
+    mockStorage = createStorage({ [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: token });
+    await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });
+    const result = await onMessageListener?.({ type: 'getPopupStatus' });
+    expect(result).toEqual(expect.objectContaining({
+      tabId: -1, connected: false, signedIn: token.length > 0, hasApiKey: token.length > 0,
+    }));
+  });
+
+  it('does not treat an invalid Hub URL or disconnected Fansly tab as sign-out', async () => {
+    mockStorage = createStorage({
+      settings: { ...createDefaultSettings(), agencyHubBaseUrl: 'not-a-url' },
+      [AGENCY_HUB_DEVICE_TOKEN_STORAGE_KEY]: 'device-token',
+    });
+    const { tabsQuery } = await installRuntimeApiHarness({ getAuthenticatedAccount: vi.fn() });
+    tabsQuery.mockResolvedValue([{ id: 1, url: 'https://example.test/' }]);
+    const result = await onMessageListener?.({ type: 'getPopupStatus' });
+    expect(result).toEqual(expect.objectContaining({
+      signedIn: true, hasApiKey: false, connected: false,
+    }));
   });
 
   it('carries resolved human names and drops the fan placeholder', async () => {
