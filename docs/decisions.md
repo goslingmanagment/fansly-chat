@@ -115,6 +115,9 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E123 | 2026-09-15 | One login and password for every client; legacy chatter key retired end to end (storage v17); named-401 self-healing; «Как начать» page; 2.4.0 |
 | E124 | 2026-09-15 | Storage readiness waits for event acknowledgements with a one-second deadline instead of counting timer turns; missing acknowledgements still block Settings |
 
+| E125 | 2026-09-15 | Signed-out Settings, popup and chat banner lead with sign-in; stale old-credential failures cannot invalidate the new sign-in view |
+| E126 | 2026-09-16 | Re-vendor SDK 0.3.0 from the exact deployed Core identity release before publishing 2.4.1 |
+
 ## Entries
 
 **E1 (2026-07-06).** Toolchain to the family standard: `"type": "module"`,
@@ -4157,3 +4160,17 @@ outcomes, popup/banner precedence and delayed old-credential errors. Full
 compiled UI with synthetic browser APIs, light/dark themes and a 320 px window;
 it does not issue or revoke real credentials. Publication remains a separate
 release step.
+
+
+**E126 (2026-09-16).** The owner authorized publishing E124/E125 as 2.4.1
+after deploying the Core identity rework. The existing release gate requires
+the shipped SDK contract to match live Core exactly. Re-vendor SDK 0.3.0
+using the generator from clean Core commit
+`579b0e34932020607d0ebdc44f9683f24360ffa9`, the actual deployed revision.
+Contract hash: `8e9dda0b2352b0b7a106e515a3282493b0977db4c730466681e985e20e7c33b2`.
+
+Core's changed administrative routes use immutable user IDs. This extension
+does not call those operations; sign-in, self-device and feature routes stay
+unchanged. The refresh preserves generated provenance and the contract gate;
+no vendored files are edited by hand and no release check is bypassed.
+No new extension permissions, settings schema or credential migration.
