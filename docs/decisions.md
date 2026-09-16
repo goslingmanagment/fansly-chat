@@ -117,6 +117,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 
 | E125 | 2026-09-15 | Signed-out Settings, popup and chat banner lead with sign-in; stale old-credential failures cannot invalidate the new sign-in view |
 | E126 | 2026-09-16 | Re-vendor SDK 0.3.0 from the exact deployed Core identity release before publishing 2.4.1 |
+| E127 | 2026-09-16 | Release 2.4.1 packages storage readiness and sign-in-first fixes, preserves settings and credentials, and uses the production-matched SDK |
 
 ## Entries
 
@@ -4174,3 +4175,21 @@ does not call those operations; sign-in, self-device and feature routes stay
 unchanged. The refresh preserves generated provenance and the contract gate;
 no vendored files are edited by hand and no release check is bypassed.
 No new extension permissions, settings schema or credential migration.
+
+
+**E127 (2026-09-16).** Release 2.4.1 packages E124/E125 and the generated
+Core pin from E126. Version fields, landing stamp and both changelogs move
+together. No settings-schema migration or new extension permission is added;
+existing device credentials and local setup remain intact. Publication uses
+the standard main-only, clean-tree, exact-origin, Core-contract and AMO
+unlisted-signing gates. An update is only claimed live after the public feed
+and both XPI download paths are checked.
+
+Prepublication verification: `pnpm check` passes all 127 suites / 2,354 tests,
+typecheck, lint, cutover gates and production build. Self-hosted `web-ext lint`
+has zero errors and three dynamic-import warnings. The first lint attempt
+used Mozilla-hosted mode and rejected the required self-hosted update URL;
+rerunning in the actual distribution mode resolves that mismatch without
+changing the manifest or weakening publication checks. The changelog renders
+in the browser and the announcement format validator passes. Functional UI
+coverage and browser evidence for the fixes are described in E124/E125.
