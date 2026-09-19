@@ -18,7 +18,6 @@ export declare const authUserSchema: z.ZodObject<{
         owner: "owner";
         team_lead: "team_lead";
         chatter: "chatter";
-        content_manager: "content_manager";
     }>;
     mustChangePassword: z.ZodBoolean;
     assignedPages: z.ZodArray<z.ZodObject<{
@@ -35,9 +34,6 @@ export declare const authUserSchema: z.ZodObject<{
 export declare const changePasswordBodySchema: z.ZodObject<{
     currentPassword: z.ZodString;
     newPassword: z.ZodString;
-}, z.core.$strip>;
-export declare const deviceTokenLabelBodySchema: z.ZodObject<{
-    label: z.ZodString;
 }, z.core.$strip>;
 export declare const issuedDeviceTokenResponseSchema: z.ZodObject<{
     token: z.ZodString;
@@ -80,8 +76,6 @@ export declare const deviceTokenAdoptionRowSchema: z.ZodObject<{
     hasFreshDeviceToken: z.ZodBoolean;
     deviceTokenLastUsedAt: z.ZodNullable<z.ZodString>;
     deviceTokenExpiresAt: z.ZodNullable<z.ZodString>;
-    activeApiKeys: z.ZodNumber;
-    apiKeyLastUsedAt: z.ZodNullable<z.ZodString>;
 }, z.core.$strip>;
 export declare const deviceTokenAdoptionReportSchema: z.ZodObject<{
     generatedAt: z.ZodString;
@@ -91,13 +85,10 @@ export declare const deviceTokenAdoptionReportSchema: z.ZodObject<{
         hasFreshDeviceToken: z.ZodBoolean;
         deviceTokenLastUsedAt: z.ZodNullable<z.ZodString>;
         deviceTokenExpiresAt: z.ZodNullable<z.ZodString>;
-        activeApiKeys: z.ZodNumber;
-        apiKeyLastUsedAt: z.ZodNullable<z.ZodString>;
     }, z.core.$strip>>;
     summary: z.ZodObject<{
         activeChatters: z.ZodNumber;
         onFreshTokens: z.ZodNumber;
-        withActiveApiKeys: z.ZodNumber;
     }, z.core.$strip>;
 }, z.core.$strip>;
 export declare const accessGrantItemSchema: z.ZodObject<{
@@ -114,12 +105,6 @@ export declare const accessGrantItemSchema: z.ZodObject<{
     revokedBy: z.ZodNullable<z.ZodNumber>;
     revokedAt: z.ZodNullable<z.ZodString>;
 }, z.core.$strip>;
-export declare const adminUserApiKeyStatusSchema: z.ZodObject<{
-    activeKeyPrefix: z.ZodNullable<z.ZodString>;
-    activeKeyCount: z.ZodNumber;
-    activeKeyCreatedAt: z.ZodNullable<z.ZodString>;
-    activeKeyLastUsedAt: z.ZodNullable<z.ZodString>;
-}, z.core.$strip>;
 export declare const registrationStateEnum: z.ZodEnum<{
     active: "active";
     invited: "invited";
@@ -131,7 +116,6 @@ export declare const adminUserSchema: z.ZodObject<{
         owner: "owner";
         team_lead: "team_lead";
         chatter: "chatter";
-        content_manager: "content_manager";
     }>;
     mustChangePassword: z.ZodBoolean;
     assignedPages: z.ZodArray<z.ZodObject<{
@@ -143,12 +127,6 @@ export declare const adminUserSchema: z.ZodObject<{
         }>;
         modelSlug: z.ZodString;
         modelName: z.ZodString;
-    }, z.core.$strip>>;
-    apiKeyStatus: z.ZodNullable<z.ZodObject<{
-        activeKeyPrefix: z.ZodNullable<z.ZodString>;
-        activeKeyCount: z.ZodNumber;
-        activeKeyCreatedAt: z.ZodNullable<z.ZodString>;
-        activeKeyLastUsedAt: z.ZodNullable<z.ZodString>;
     }, z.core.$strip>>;
     disabledAt: z.ZodNullable<z.ZodString>;
     deletedAt: z.ZodNullable<z.ZodString>;
@@ -219,7 +197,6 @@ export declare const adminCreateInviteResponseSchema: z.ZodObject<{
             owner: "owner";
             team_lead: "team_lead";
             chatter: "chatter";
-            content_manager: "content_manager";
         }>;
         mustChangePassword: z.ZodBoolean;
         assignedPages: z.ZodArray<z.ZodObject<{
@@ -231,12 +208,6 @@ export declare const adminCreateInviteResponseSchema: z.ZodObject<{
             }>;
             modelSlug: z.ZodString;
             modelName: z.ZodString;
-        }, z.core.$strip>>;
-        apiKeyStatus: z.ZodNullable<z.ZodObject<{
-            activeKeyPrefix: z.ZodNullable<z.ZodString>;
-            activeKeyCount: z.ZodNumber;
-            activeKeyCreatedAt: z.ZodNullable<z.ZodString>;
-            activeKeyLastUsedAt: z.ZodNullable<z.ZodString>;
         }, z.core.$strip>>;
         disabledAt: z.ZodNullable<z.ZodString>;
         deletedAt: z.ZodNullable<z.ZodString>;
@@ -337,13 +308,11 @@ export declare const authRevokeAllDevicesResponseSchema: z.ZodObject<{
 export declare const adminTerminateAllAccessResponseSchema: z.ZodObject<{
     deviceTokens: z.ZodNumber;
     sessions: z.ZodNumber;
-    apiKeys: z.ZodNumber;
     links: z.ZodNumber;
 }, z.core.$strip>;
 export declare const authStateSchema: z.ZodObject<{
     authMethod: z.ZodEnum<{
         session: "session";
-        api_key: "api_key";
         device_token: "device_token";
     }>;
     user: z.ZodObject<{
@@ -353,7 +322,6 @@ export declare const authStateSchema: z.ZodObject<{
             owner: "owner";
             team_lead: "team_lead";
             chatter: "chatter";
-            content_manager: "content_manager";
         }>;
         mustChangePassword: z.ZodBoolean;
         assignedPages: z.ZodArray<z.ZodObject<{
@@ -5043,48 +5011,8 @@ export declare const authMyUsageResponseSchema: z.ZodObject<{
         costMicroUsd: z.ZodNumber;
     }, z.core.$strip>>;
 }, z.core.$strip>;
-export declare const adminCreateUserBodySchema: z.ZodObject<{
-    username: z.ZodString;
-    role: z.ZodEnum<{
-        owner: "owner";
-        team_lead: "team_lead";
-        chatter: "chatter";
-    }>;
-    password: z.ZodOptional<z.ZodString>;
-}, z.core.$strip>;
-export declare const adminSetPasswordBodySchema: z.ZodObject<{
-    password: z.ZodString;
-    mustChangePassword: z.ZodOptional<z.ZodBoolean>;
-}, z.core.$strip>;
 export declare const adminAssignPageBodySchema: z.ZodObject<{
     pageLabel: z.ZodString;
-}, z.core.$strip>;
-export declare const adminIssueApiKeyBodySchema: z.ZodObject<{
-    pageLabel: z.ZodOptional<z.ZodString>;
-}, z.core.$strip>;
-export declare const apiKeyItemSchema: z.ZodObject<{
-    id: z.ZodNumber;
-    keyPrefix: z.ZodString;
-    userId: z.ZodNumber;
-    isActive: z.ZodBoolean;
-    revokedAt: z.ZodNullable<z.ZodString>;
-    revokedReason: z.ZodNullable<z.ZodString>;
-    createdAt: z.ZodString;
-    lastUsedAt: z.ZodNullable<z.ZodString>;
-}, z.core.$strip>;
-export declare const issuedApiKeyResponseSchema: z.ZodObject<{
-    key: z.ZodString;
-    keyPrefix: z.ZodString;
-    assignedPages: z.ZodArray<z.ZodObject<{
-        id: z.ZodNumber;
-        label: z.ZodString;
-        platform: z.ZodEnum<{
-            fansly: "fansly";
-            onlyfans: "onlyfans";
-        }>;
-        modelSlug: z.ZodString;
-        modelName: z.ZodString;
-    }, z.core.$strip>>;
 }, z.core.$strip>;
 export declare const syncRunItemSchema: z.ZodObject<{
     runId: z.ZodNumber;
@@ -11218,7 +11146,6 @@ export declare const routeAuthPolicySchema: z.ZodObject<{
         owner: "owner";
         team_lead: "team_lead";
         chatter: "chatter";
-        content_manager: "content_manager";
     }>>>;
     scope: z.ZodOptional<z.ZodEnum<{
         page: "page";
@@ -12323,7 +12250,6 @@ declare const baseRouteSchemas: {
             readonly 200: z.ZodObject<{
                 authMethod: z.ZodEnum<{
                     session: "session";
-                    api_key: "api_key";
                     device_token: "device_token";
                 }>;
                 user: z.ZodObject<{
@@ -12333,7 +12259,6 @@ declare const baseRouteSchemas: {
                         owner: "owner";
                         team_lead: "team_lead";
                         chatter: "chatter";
-                        content_manager: "content_manager";
                     }>;
                     mustChangePassword: z.ZodBoolean;
                     assignedPages: z.ZodArray<z.ZodObject<{
@@ -12390,7 +12315,6 @@ declare const baseRouteSchemas: {
             readonly 200: z.ZodObject<{
                 authMethod: z.ZodEnum<{
                     session: "session";
-                    api_key: "api_key";
                     device_token: "device_token";
                 }>;
                 user: z.ZodObject<{
@@ -12400,7 +12324,6 @@ declare const baseRouteSchemas: {
                         owner: "owner";
                         team_lead: "team_lead";
                         chatter: "chatter";
-                        content_manager: "content_manager";
                     }>;
                     mustChangePassword: z.ZodBoolean;
                     assignedPages: z.ZodArray<z.ZodObject<{
@@ -22663,7 +22586,6 @@ declare const baseRouteSchemas: {
                     owner: "owner";
                     team_lead: "team_lead";
                     chatter: "chatter";
-                    content_manager: "content_manager";
                 }>;
                 mustChangePassword: z.ZodBoolean;
                 assignedPages: z.ZodArray<z.ZodObject<{
@@ -22675,12 +22597,6 @@ declare const baseRouteSchemas: {
                     }>;
                     modelSlug: z.ZodString;
                     modelName: z.ZodString;
-                }, z.core.$strip>>;
-                apiKeyStatus: z.ZodNullable<z.ZodObject<{
-                    activeKeyPrefix: z.ZodNullable<z.ZodString>;
-                    activeKeyCount: z.ZodNumber;
-                    activeKeyCreatedAt: z.ZodNullable<z.ZodString>;
-                    activeKeyLastUsedAt: z.ZodNullable<z.ZodString>;
                 }, z.core.$strip>>;
                 disabledAt: z.ZodNullable<z.ZodString>;
                 deletedAt: z.ZodNullable<z.ZodString>;
@@ -23424,112 +23340,6 @@ declare const baseRouteSchemas: {
             }, z.core.$strip>;
         };
     };
-    readonly adminCreateUser: {
-        readonly auth: {
-            readonly kind: "owner-session";
-        };
-        readonly tags: readonly ["admin"];
-        readonly summary: "Create a new user";
-        readonly body: z.ZodObject<{
-            username: z.ZodString;
-            role: z.ZodEnum<{
-                owner: "owner";
-                team_lead: "team_lead";
-                chatter: "chatter";
-            }>;
-            password: z.ZodOptional<z.ZodString>;
-        }, z.core.$strip>;
-        readonly response: {
-            readonly 200: z.ZodObject<{
-                id: z.ZodNumber;
-                username: z.ZodString;
-                role: z.ZodEnum<{
-                    owner: "owner";
-                    team_lead: "team_lead";
-                    chatter: "chatter";
-                    content_manager: "content_manager";
-                }>;
-                mustChangePassword: z.ZodBoolean;
-                assignedPages: z.ZodArray<z.ZodObject<{
-                    id: z.ZodNumber;
-                    label: z.ZodString;
-                    platform: z.ZodEnum<{
-                        fansly: "fansly";
-                        onlyfans: "onlyfans";
-                    }>;
-                    modelSlug: z.ZodString;
-                    modelName: z.ZodString;
-                }, z.core.$strip>>;
-            }, z.core.$strip>;
-            readonly 400: z.ZodObject<{
-                error: z.ZodString;
-                message: z.ZodString;
-                statusCode: z.ZodNumber;
-                reason: z.ZodOptional<z.ZodString>;
-            }, z.core.$strip>;
-            readonly 401: z.ZodObject<{
-                error: z.ZodString;
-                message: z.ZodString;
-                statusCode: z.ZodNumber;
-                reason: z.ZodOptional<z.ZodString>;
-            }, z.core.$strip>;
-            readonly 403: z.ZodObject<{
-                error: z.ZodString;
-                message: z.ZodString;
-                statusCode: z.ZodNumber;
-                reason: z.ZodOptional<z.ZodString>;
-            }, z.core.$strip>;
-            readonly 404: z.ZodObject<{
-                error: z.ZodString;
-                message: z.ZodString;
-                statusCode: z.ZodNumber;
-                reason: z.ZodOptional<z.ZodString>;
-            }, z.core.$strip>;
-        };
-    };
-    readonly adminSetPassword: {
-        readonly auth: {
-            readonly kind: "owner-session";
-        };
-        readonly tags: readonly ["admin"];
-        readonly summary: "Set a user password";
-        readonly params: z.ZodObject<{
-            userId: z.ZodCoercedNumber<unknown>;
-        }, z.core.$strip>;
-        readonly body: z.ZodObject<{
-            password: z.ZodString;
-            mustChangePassword: z.ZodOptional<z.ZodBoolean>;
-        }, z.core.$strip>;
-        readonly response: {
-            readonly 200: z.ZodObject<{
-                ok: z.ZodLiteral<true>;
-            }, z.core.$strip>;
-            readonly 400: z.ZodObject<{
-                error: z.ZodString;
-                message: z.ZodString;
-                statusCode: z.ZodNumber;
-                reason: z.ZodOptional<z.ZodString>;
-            }, z.core.$strip>;
-            readonly 401: z.ZodObject<{
-                error: z.ZodString;
-                message: z.ZodString;
-                statusCode: z.ZodNumber;
-                reason: z.ZodOptional<z.ZodString>;
-            }, z.core.$strip>;
-            readonly 403: z.ZodObject<{
-                error: z.ZodString;
-                message: z.ZodString;
-                statusCode: z.ZodNumber;
-                reason: z.ZodOptional<z.ZodString>;
-            }, z.core.$strip>;
-            readonly 404: z.ZodObject<{
-                error: z.ZodString;
-                message: z.ZodString;
-                statusCode: z.ZodNumber;
-                reason: z.ZodOptional<z.ZodString>;
-            }, z.core.$strip>;
-        };
-    };
     readonly adminAssignPage: {
         readonly auth: {
             readonly kind: "owner-session";
@@ -23550,7 +23360,6 @@ declare const baseRouteSchemas: {
                     owner: "owner";
                     team_lead: "team_lead";
                     chatter: "chatter";
-                    content_manager: "content_manager";
                 }>;
                 mustChangePassword: z.ZodBoolean;
                 assignedPages: z.ZodArray<z.ZodObject<{
@@ -23630,138 +23439,6 @@ declare const baseRouteSchemas: {
             }, z.core.$strip>;
         };
     };
-    readonly adminListApiKeys: {
-        readonly auth: {
-            readonly kind: "owner-session";
-        };
-        readonly tags: readonly ["admin"];
-        readonly summary: "List API keys for a user";
-        readonly params: z.ZodObject<{
-            userId: z.ZodCoercedNumber<unknown>;
-        }, z.core.$strip>;
-        readonly response: {
-            readonly 200: z.ZodArray<z.ZodObject<{
-                id: z.ZodNumber;
-                keyPrefix: z.ZodString;
-                userId: z.ZodNumber;
-                isActive: z.ZodBoolean;
-                revokedAt: z.ZodNullable<z.ZodString>;
-                revokedReason: z.ZodNullable<z.ZodString>;
-                createdAt: z.ZodString;
-                lastUsedAt: z.ZodNullable<z.ZodString>;
-            }, z.core.$strip>>;
-            readonly 401: z.ZodObject<{
-                error: z.ZodString;
-                message: z.ZodString;
-                statusCode: z.ZodNumber;
-                reason: z.ZodOptional<z.ZodString>;
-            }, z.core.$strip>;
-            readonly 403: z.ZodObject<{
-                error: z.ZodString;
-                message: z.ZodString;
-                statusCode: z.ZodNumber;
-                reason: z.ZodOptional<z.ZodString>;
-            }, z.core.$strip>;
-            readonly 404: z.ZodObject<{
-                error: z.ZodString;
-                message: z.ZodString;
-                statusCode: z.ZodNumber;
-                reason: z.ZodOptional<z.ZodString>;
-            }, z.core.$strip>;
-        };
-    };
-    readonly adminIssueApiKey: {
-        readonly auth: {
-            readonly kind: "owner-session";
-        };
-        readonly tags: readonly ["admin"];
-        readonly summary: "Issue an API key for a user";
-        readonly params: z.ZodObject<{
-            userId: z.ZodCoercedNumber<unknown>;
-        }, z.core.$strip>;
-        readonly body: z.ZodObject<{
-            pageLabel: z.ZodOptional<z.ZodString>;
-        }, z.core.$strip>;
-        readonly response: {
-            readonly 200: z.ZodObject<{
-                key: z.ZodString;
-                keyPrefix: z.ZodString;
-                assignedPages: z.ZodArray<z.ZodObject<{
-                    id: z.ZodNumber;
-                    label: z.ZodString;
-                    platform: z.ZodEnum<{
-                        fansly: "fansly";
-                        onlyfans: "onlyfans";
-                    }>;
-                    modelSlug: z.ZodString;
-                    modelName: z.ZodString;
-                }, z.core.$strip>>;
-            }, z.core.$strip>;
-            readonly 400: z.ZodObject<{
-                error: z.ZodString;
-                message: z.ZodString;
-                statusCode: z.ZodNumber;
-                reason: z.ZodOptional<z.ZodString>;
-            }, z.core.$strip>;
-            readonly 401: z.ZodObject<{
-                error: z.ZodString;
-                message: z.ZodString;
-                statusCode: z.ZodNumber;
-                reason: z.ZodOptional<z.ZodString>;
-            }, z.core.$strip>;
-            readonly 403: z.ZodObject<{
-                error: z.ZodString;
-                message: z.ZodString;
-                statusCode: z.ZodNumber;
-                reason: z.ZodOptional<z.ZodString>;
-            }, z.core.$strip>;
-            readonly 404: z.ZodObject<{
-                error: z.ZodString;
-                message: z.ZodString;
-                statusCode: z.ZodNumber;
-                reason: z.ZodOptional<z.ZodString>;
-            }, z.core.$strip>;
-            readonly 409: z.ZodObject<{
-                error: z.ZodString;
-                message: z.ZodString;
-                statusCode: z.ZodNumber;
-                reason: z.ZodOptional<z.ZodString>;
-            }, z.core.$strip>;
-        };
-    };
-    readonly adminRevokeApiKeys: {
-        readonly auth: {
-            readonly kind: "owner-session";
-        };
-        readonly tags: readonly ["admin"];
-        readonly summary: "Revoke all API keys for a user";
-        readonly params: z.ZodObject<{
-            userId: z.ZodCoercedNumber<unknown>;
-        }, z.core.$strip>;
-        readonly response: {
-            readonly 200: z.ZodObject<{
-                revokedCount: z.ZodNumber;
-            }, z.core.$strip>;
-            readonly 401: z.ZodObject<{
-                error: z.ZodString;
-                message: z.ZodString;
-                statusCode: z.ZodNumber;
-                reason: z.ZodOptional<z.ZodString>;
-            }, z.core.$strip>;
-            readonly 403: z.ZodObject<{
-                error: z.ZodString;
-                message: z.ZodString;
-                statusCode: z.ZodNumber;
-                reason: z.ZodOptional<z.ZodString>;
-            }, z.core.$strip>;
-            readonly 404: z.ZodObject<{
-                error: z.ZodString;
-                message: z.ZodString;
-                statusCode: z.ZodNumber;
-                reason: z.ZodOptional<z.ZodString>;
-            }, z.core.$strip>;
-        };
-    };
     readonly adminDeactivateUser: {
         readonly auth: {
             readonly kind: "owner-session";
@@ -23775,7 +23452,6 @@ declare const baseRouteSchemas: {
         readonly response: {
             readonly 200: z.ZodObject<{
                 ok: z.ZodLiteral<true>;
-                revokedApiKeys: z.ZodNumber;
                 revokedDeviceTokens: z.ZodNumber;
                 revokedSessions: z.ZodNumber;
             }, z.core.$strip>;
@@ -23858,7 +23534,6 @@ declare const baseRouteSchemas: {
         readonly response: {
             readonly 200: z.ZodObject<{
                 ok: z.ZodLiteral<true>;
-                revokedApiKeys: z.ZodNumber;
                 revokedDeviceTokens: z.ZodNumber;
                 revokedSessions: z.ZodNumber;
             }, z.core.$strip>;
@@ -23902,81 +23577,6 @@ declare const baseRouteSchemas: {
         readonly response: {
             readonly 200: z.ZodObject<{
                 ok: z.ZodLiteral<true>;
-            }, z.core.$strip>;
-            readonly 400: z.ZodObject<{
-                error: z.ZodString;
-                message: z.ZodString;
-                statusCode: z.ZodNumber;
-                reason: z.ZodOptional<z.ZodString>;
-            }, z.core.$strip>;
-            readonly 401: z.ZodObject<{
-                error: z.ZodString;
-                message: z.ZodString;
-                statusCode: z.ZodNumber;
-                reason: z.ZodOptional<z.ZodString>;
-            }, z.core.$strip>;
-            readonly 403: z.ZodObject<{
-                error: z.ZodString;
-                message: z.ZodString;
-                statusCode: z.ZodNumber;
-                reason: z.ZodOptional<z.ZodString>;
-            }, z.core.$strip>;
-        };
-    };
-    readonly authIssueDeviceToken: {
-        readonly auth: {
-            readonly kind: "any-session";
-        };
-        readonly tags: readonly ["auth"];
-        readonly summary: "Issue a device token for the caller (returned once)";
-        readonly body: z.ZodObject<{
-            label: z.ZodString;
-        }, z.core.$strip>;
-        readonly response: {
-            readonly 200: z.ZodObject<{
-                token: z.ZodString;
-                id: z.ZodNumber;
-                label: z.ZodString;
-                keyPrefix: z.ZodString;
-                expiresAt: z.ZodString;
-            }, z.core.$strip>;
-            readonly 400: z.ZodObject<{
-                error: z.ZodString;
-                message: z.ZodString;
-                statusCode: z.ZodNumber;
-                reason: z.ZodOptional<z.ZodString>;
-            }, z.core.$strip>;
-            readonly 401: z.ZodObject<{
-                error: z.ZodString;
-                message: z.ZodString;
-                statusCode: z.ZodNumber;
-                reason: z.ZodOptional<z.ZodString>;
-            }, z.core.$strip>;
-            readonly 403: z.ZodObject<{
-                error: z.ZodString;
-                message: z.ZodString;
-                statusCode: z.ZodNumber;
-                reason: z.ZodOptional<z.ZodString>;
-            }, z.core.$strip>;
-        };
-    };
-    readonly authReserveDeviceToken: {
-        readonly auth: {
-            readonly kind: "any-session";
-        };
-        readonly tags: readonly ["auth"];
-        readonly summary: "Reserve a crash-safe device token for the caller (returned once)";
-        readonly description: string;
-        readonly body: z.ZodObject<{
-            label: z.ZodString;
-        }, z.core.$strip>;
-        readonly response: {
-            readonly 200: z.ZodObject<{
-                token: z.ZodString;
-                reservationId: z.ZodNumber;
-                label: z.ZodString;
-                keyPrefix: z.ZodString;
-                reservationExpiresAt: z.ZodString;
             }, z.core.$strip>;
             readonly 400: z.ZodObject<{
                 error: z.ZodString;
@@ -24094,58 +23694,6 @@ declare const baseRouteSchemas: {
             }, z.core.$strip>;
         };
     };
-    readonly adminIssueDeviceToken: {
-        readonly auth: {
-            readonly kind: "owner-session";
-        };
-        readonly tags: readonly ["admin"];
-        readonly summary: "Issue a device token for a user (returned once)";
-        readonly params: z.ZodObject<{
-            userId: z.ZodCoercedNumber<unknown>;
-        }, z.core.$strip>;
-        readonly body: z.ZodObject<{
-            label: z.ZodString;
-        }, z.core.$strip>;
-        readonly response: {
-            readonly 200: z.ZodObject<{
-                token: z.ZodString;
-                id: z.ZodNumber;
-                label: z.ZodString;
-                keyPrefix: z.ZodString;
-                expiresAt: z.ZodString;
-            }, z.core.$strip>;
-            readonly 400: z.ZodObject<{
-                error: z.ZodString;
-                message: z.ZodString;
-                statusCode: z.ZodNumber;
-                reason: z.ZodOptional<z.ZodString>;
-            }, z.core.$strip>;
-            readonly 401: z.ZodObject<{
-                error: z.ZodString;
-                message: z.ZodString;
-                statusCode: z.ZodNumber;
-                reason: z.ZodOptional<z.ZodString>;
-            }, z.core.$strip>;
-            readonly 403: z.ZodObject<{
-                error: z.ZodString;
-                message: z.ZodString;
-                statusCode: z.ZodNumber;
-                reason: z.ZodOptional<z.ZodString>;
-            }, z.core.$strip>;
-            readonly 404: z.ZodObject<{
-                error: z.ZodString;
-                message: z.ZodString;
-                statusCode: z.ZodNumber;
-                reason: z.ZodOptional<z.ZodString>;
-            }, z.core.$strip>;
-            readonly 409: z.ZodObject<{
-                error: z.ZodString;
-                message: z.ZodString;
-                statusCode: z.ZodNumber;
-                reason: z.ZodOptional<z.ZodString>;
-            }, z.core.$strip>;
-        };
-    };
     readonly adminSetDeviceTokenHarvestCapability: {
         readonly auth: {
             readonly kind: "owner-session";
@@ -24249,13 +23797,10 @@ declare const baseRouteSchemas: {
                     hasFreshDeviceToken: z.ZodBoolean;
                     deviceTokenLastUsedAt: z.ZodNullable<z.ZodString>;
                     deviceTokenExpiresAt: z.ZodNullable<z.ZodString>;
-                    activeApiKeys: z.ZodNumber;
-                    apiKeyLastUsedAt: z.ZodNullable<z.ZodString>;
                 }, z.core.$strip>>;
                 summary: z.ZodObject<{
                     activeChatters: z.ZodNumber;
                     onFreshTokens: z.ZodNumber;
-                    withActiveApiKeys: z.ZodNumber;
                 }, z.core.$strip>;
             }, z.core.$strip>;
             readonly 401: z.ZodObject<{
@@ -24425,7 +23970,6 @@ declare const baseRouteSchemas: {
                         owner: "owner";
                         team_lead: "team_lead";
                         chatter: "chatter";
-                        content_manager: "content_manager";
                     }>;
                     mustChangePassword: z.ZodBoolean;
                     assignedPages: z.ZodArray<z.ZodObject<{
@@ -24437,12 +23981,6 @@ declare const baseRouteSchemas: {
                         }>;
                         modelSlug: z.ZodString;
                         modelName: z.ZodString;
-                    }, z.core.$strip>>;
-                    apiKeyStatus: z.ZodNullable<z.ZodObject<{
-                        activeKeyPrefix: z.ZodNullable<z.ZodString>;
-                        activeKeyCount: z.ZodNumber;
-                        activeKeyCreatedAt: z.ZodNullable<z.ZodString>;
-                        activeKeyLastUsedAt: z.ZodNullable<z.ZodString>;
                     }, z.core.$strip>>;
                     disabledAt: z.ZodNullable<z.ZodString>;
                     deletedAt: z.ZodNullable<z.ZodString>;
@@ -24683,7 +24221,7 @@ declare const baseRouteSchemas: {
             readonly kind: "owner-session";
         };
         readonly tags: readonly ["admin"];
-        readonly summary: "Terminate every sign-in of a user: device tokens, reservations, sessions, API keys and active links";
+        readonly summary: "Terminate every sign-in of a user: device tokens, reservations, sessions and active links";
         readonly description: string;
         readonly params: z.ZodObject<{
             userId: z.ZodCoercedNumber<unknown>;
@@ -24692,7 +24230,6 @@ declare const baseRouteSchemas: {
             readonly 200: z.ZodObject<{
                 deviceTokens: z.ZodNumber;
                 sessions: z.ZodNumber;
-                apiKeys: z.ZodNumber;
                 links: z.ZodNumber;
             }, z.core.$strip>;
             readonly 400: z.ZodObject<{
@@ -24851,12 +24388,6 @@ declare const baseRouteSchemas: {
                 reason: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>;
             readonly 401: z.ZodObject<{
-                error: z.ZodString;
-                message: z.ZodString;
-                statusCode: z.ZodNumber;
-                reason: z.ZodOptional<z.ZodString>;
-            }, z.core.$strip>;
-            readonly 403: z.ZodObject<{
                 error: z.ZodString;
                 message: z.ZodString;
                 statusCode: z.ZodNumber;
@@ -45093,7 +44624,6 @@ export type SpenderListQuery = z.infer<typeof spenderListQuerySchema>;
 export type SpenderListResponse = z.infer<typeof spenderListResponseSchema>;
 export type SpenderSeriesQuery = z.infer<typeof spenderSeriesQuerySchema>;
 export type SpenderSeriesResponse = z.infer<typeof spenderSeriesResponseSchema>;
-export type AdminCreateUserBody = z.infer<typeof adminCreateUserBodySchema>;
 export type AdminCreateInviteBody = z.infer<typeof adminCreateInviteBodySchema>;
 export type AdminCreateInviteResponse = z.infer<typeof adminCreateInviteResponseSchema>;
 export type AdminCreateAccountLinkBody = z.infer<typeof adminCreateAccountLinkBodySchema>;
@@ -45108,11 +44638,7 @@ export type AuthIssueDeviceTokenWithPasswordResponse = z.infer<typeof authIssueD
 export type OwnDeviceItem = z.infer<typeof ownDeviceItemSchema>;
 export type AuthMyUsageResponse = z.infer<typeof authMyUsageResponseSchema>;
 export type AdminTerminateAllAccessResponse = z.infer<typeof adminTerminateAllAccessResponseSchema>;
-export type AdminSetPasswordBody = z.infer<typeof adminSetPasswordBodySchema>;
 export type AdminAssignPageBody = z.infer<typeof adminAssignPageBodySchema>;
-export type AdminIssueApiKeyBody = z.infer<typeof adminIssueApiKeyBodySchema>;
-export type ApiKeyItem = z.infer<typeof apiKeyItemSchema>;
-export type IssuedApiKeyResponse = z.infer<typeof issuedApiKeyResponseSchema>;
 export type SyncRunItem = z.infer<typeof syncRunItemSchema>;
 export type SyncRunDetailResponse = z.infer<typeof syncRunDetailResponseSchema>;
 export type SyncStatusQuery = z.infer<typeof syncStatusQuerySchema>;
