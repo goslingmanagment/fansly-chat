@@ -118,7 +118,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E125 | 2026-09-15 | Signed-out Settings, popup and chat banner lead with sign-in; stale old-credential failures cannot invalidate the new sign-in view |
 | E126 | 2026-09-16 | Re-vendor SDK 0.3.0 from the exact deployed Core identity release before publishing 2.4.1 |
 | E127 | 2026-09-16 | Release 2.4.1 packages storage readiness and sign-in-first fixes, preserves settings and credentials, and uses the production-matched SDK |
-| E128 | 2026-09-19 | Follower scan: saved-name reads leave the critical path, rate-limit penalty decays per five minutes plus twenty unthrottled reads, `/account` reads 5 s apart; patch 2.4.2 |
+| E128 | 2026-09-19 | Follower scan: saved-name reads leave the critical path, rate-limit penalty decays per five quiet minutes followed by twenty answered reads, `/account` reads 5 s apart; patch 2.4.2 |
 
 ## Entries
 
@@ -4212,7 +4212,7 @@ shows a throttle specific to the `/account` route family or to ids per window.
 It does not measure that threshold, and it does not prove the other routes safe
 at the E121 pace, which neither scan reached.
 
-Changes. (1) Rows take names, avatars and bios from discovery immediately. Only
+Changes. (1) Rows take names, avatars and bios from discovery page by page. Only
 a missing username still blocks a check (native search needs it) and keeps the
 E117/E121 recover-on-Continue and pause-on-exhausted-429 behavior. (2) Notes are
 read after the verdicts in chunks of 100 ids (the chunk size the FBuddy client
@@ -4223,10 +4223,11 @@ fan's account for a fresh signed avatar; the same read now also runs when the
 fan's notes are unknown and supplies `fanCustomName`, so a throttled batch
 cannot drop the saved name from a draft. (3) The lane keeps E121's base pace
 (1 s, 1.5 s between message reads), the 30/60/120/240/300 s cooldowns and
-spacing doubling up to 8 s, but the penalty decays: one level once five minutes
-have passed since the end of the last cooldown AND Fansly has answered twenty
-reads at the slower pace without throttling. Idle time alone forgives nothing,
-so a later scan first probes at the penalised spacing. Spacing and cooldown
+spacing doubling up to 8 s, but the penalty decays: one level once five quiet
+minutes have passed since the end of the last cooldown and Fansly has then
+answered twenty reads 2xx at the slower pace. Reads inside the quiet period and
+idle time forgive nothing, so a scan that follows a 429 always probes at the
+penalised spacing first. Spacing and cooldown
 level are one counter capped at 5; the 15-minute idle discard stays. (4)
 `/account` reads are at least 5 s apart on the lane; other routes keep their
 spacing. The 429 was both the third `/account?ids=` read and the fifth
@@ -4247,14 +4248,21 @@ the idle discard and E117's pre-check notes hydration. No settings or schema
 change, no new Fansly endpoint, fewer Fansly requests per scan. Version 2.4.2,
 a patch per the owner's numbering. Publication is a separate owner step.
 
-E128 adversarial review follow-up: an independent reviewer found no ship
-blocker and one defect that mattered. The first draft forgave a penalty level
-per five idle minutes, which made a scan after a 429 start faster than E121
-did; decay now also needs twenty unthrottled reads, counted only when Fansly
-answers 2xx. Also fixed: the notes phase computes `canContinue` first and
-swallows its own failures, so it cannot set a scan error after the verdicts;
-it offers no Pause and skips instead of waiting when the shared lane is cooling
-down; a fan Fansly omits from a successful answer is not asked again; the
-generation-click read uses no retries when only the saved name is missing and
-never keeps a stale signed avatar in the scan cache; focus restore does not
-scroll the card. Kept on purpose: follower pages share the 5 s `/account` gap.
+E128 adversarial review follow-up: two independent reviews (Opus, then Fable
+at the owner's request) found no ship blocker. Both main findings were about
+decay being more lenient than E121. The first draft forgave a level per five
+idle minutes; the second still let twenty reads taken inside the quiet period
+carry over an idle gap, so the owner's own case (429 mid-scan, scan goes on,
+next scan 8.5 minutes later) would have restarted at 1 s. Now only reads
+answered 2xx after the five-minute mark count, `status()` no longer mutates the
+lane, and every decay step is traced from `acquire`. Also fixed: names are
+applied per follower page, since the 5 s page gap made a multi-page list show
+bare ids five times longer; the notes phase computes `canContinue` first,
+swallows its own failures, skips with its own reason when the lane is cooling
+down, and keeps Pause as the way out if a cooldown starts while its read is
+queued; an empty answer to a non-empty batch does not mark anyone read, while a
+fan a real answer leaves out is not asked again; the generation-click read
+uses no retries when only the saved name is missing and clears the cached
+avatar on every branch; focus restore does not scroll the card. Each of these
+is pinned by a test that was checked to fail without the fix. Kept on purpose:
+follower pages share the 5 s `/account` gap.

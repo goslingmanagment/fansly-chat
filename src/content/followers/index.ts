@@ -216,7 +216,7 @@ export class FollowersWindow {
     const unchecked = snapshot.rows.filter((r) => ['checking', 'unknown'].includes(r.status)).length;
     const phases = { welcome: 'Читаем welcome-сообщения…', followers: 'Загружаем фоловеров…', profiles: 'Загружаем профили…', checking: `Проверено ${snapshot.rows.length - unchecked} из ${snapshot.rows.length}`, notes: 'Загружаем сохранённые имена…' };
     this.node('.progress').textContent = snapshot.scanning ? phases[snapshot.phase ?? 'checking'] : snapshot.canContinue ? `На паузе · осталось ${unchecked}` : snapshot.rows.length ? `Проверено ${snapshot.rows.length - unchecked} из ${snapshot.rows.length}` : 'Новых фоловеров нет';
-    this.node('.pause').hidden = !snapshot.scanning || !['profiles', 'checking'].includes(snapshot.phase ?? '');
+    this.node('.pause').hidden = !snapshot.scanning || !['profiles', 'checking', 'notes'].includes(snapshot.phase ?? '');
     this.node('.range').textContent = snapshot.cutoff && snapshot.startedAt ? `${dateLabel(snapshot.cutoff)} — ${dateLabel(snapshot.startedAt)} · местное время` : '';
     const cooldown = this.node('.cooldown');
     const seconds = Math.max(0, Math.ceil(((snapshot.pacing?.cooldownUntil ?? 0) - Date.now()) / 1000));

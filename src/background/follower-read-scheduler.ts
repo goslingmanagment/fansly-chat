@@ -5,8 +5,9 @@ const BASE_INTERVAL_MS = 1000;
 const MAX_INTERVAL_MS = 8000;
 const MAX_LIMITS = 5;
 /** One penalty level is forgiven after this long since the cooldown ended
- * AND this many reads that Fansly did not throttle at the slower pace. Idle
- * time alone proves nothing, so a later scan first probes at the old spacing. */
+ * AND then this many reads Fansly answered at the slower pace. Reads inside
+ * the quiet period do not count and idle time proves nothing, so a scan that
+ * follows a 429 always probes at the penalised spacing first. */
 const HEAL_MS = 300_000;
 const HEAL_READS = 20;
 /** Route families need a wider gap than the lane default. `account` is a
@@ -45,9 +46,7 @@ export class FollowerReadScheduler {
 
   status(creatorId: string): { cooldownUntil: number; intervalMs: number } | undefined {
     const lane = this.lanes.get(creatorId);
-    if (!lane) return undefined;
-    heal(lane);
-    return { cooldownUntil: lane.cooldownUntil, intervalMs: spacing(lane.limits) };
+    return lane ? { cooldownUntil: lane.cooldownUntil, intervalMs: spacing(lane.limits) } : undefined;
   }
 
   async acquire(creatorId: string, route: RouteKey, signal: AbortSignal, trace?: TraceScope): Promise<{
@@ -98,7 +97,7 @@ export class FollowerReadScheduler {
       scope?.end({ intervalMs });
       return {
         release,
-        served: () => { current.clean++; },
+        served: () => { if (Date.now() - current.healFrom >= HEAL_MS) current.clean++; },
         limited: (retryAfterMs) => {
           current.clean = 0;
           const backoffMs = Math.max(retryAfterMs ?? 0, Math.min(300_000, 30_000 * 2 ** Math.min(current.limits, 4)));

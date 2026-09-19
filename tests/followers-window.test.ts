@@ -48,7 +48,7 @@ describe('followers window human actions', () => {
     h.window.open();
     await vi.waitFor(() => expect(h.root.querySelector('textarea')).not.toBeNull());
     expect(h.root.querySelector('.progress')?.textContent).toBe('Загружаем сохранённые имена…');
-    expect(h.root.querySelector<HTMLButtonElement>('.pause')?.hidden).toBe(true);
+    expect(h.root.querySelector<HTMLButtonElement>('.pause')?.hidden).toBe(false);
     const original = h.root.querySelector('textarea')!;
     original.value = 'hello there'; original.dispatchEvent(new Event('input')); original.focus(); original.setSelectionRange(4, 7);
     h.snapshot.rows[0]!.customName = 'Alex';

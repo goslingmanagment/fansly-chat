@@ -121,8 +121,8 @@ Important references:
 
 Release 2.4.2 takes saved-name reads off the new-follower scan's critical path
 (names show from discovery, notes load after the verdicts, best-effort), lets a
-Fansly rate-limit penalty decay one level per five minutes plus twenty
-unthrottled reads, and spaces `/account` reads 5 s apart (E128).
+Fansly rate-limit penalty decay one level per five quiet minutes followed by
+twenty answered reads, and spaces `/account` reads 5 s apart (E128).
 
 Release 2.4.1 fixes premature storage readiness timeouts, leads signed-out
 users directly to sign-in across Settings/popup/chat, and prevents a delayed

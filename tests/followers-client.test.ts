@@ -51,25 +51,43 @@ describe('Fansly browser-session outreach transport', () => {
     await vi.advanceTimersByTimeAsync(900_001); const reset = await scheduler.acquire('1', 'group', signal);
     expect(scheduler.status('1')).toEqual({ cooldownUntil: 0, intervalMs: 1000 }); reset.release();
   });
-  it('forgives a penalty level only after five minutes and twenty unthrottled reads; idle time alone proves nothing', async () => {
+  it('forgives a penalty level only after five quiet minutes and then twenty answered reads', async () => {
     vi.useFakeTimers(); const scheduler = new FollowerReadScheduler(); const signal = new AbortController().signal; const start = Date.now();
-    const read = async (served = true) => { const permit = await scheduler.acquire('1', 'group', signal); if (served) permit.served(); permit.release(); };
-    const first = await scheduler.acquire('1', 'account', signal); expect(first.limited()).toBe(30_000); first.release();
-    await vi.advanceTimersByTimeAsync(100_000);
-    const soon = await scheduler.acquire('1', 'group', signal); expect(soon.limited()).toBe(60_000); soon.release();
-    expect(scheduler.status('1')).toEqual({ cooldownUntil: start + 160_000, intervalMs: 4000 });
-    await vi.advanceTimersByTimeAsync(60_000 + 600_000);
-    expect(scheduler.status('1')?.intervalMs).toBe(4000);
     const at: number[] = [];
-    const probe = (async () => { for (let i = 0; i < 44; i++) { await read(i !== 5); at.push(Date.now()); } })();
-    await vi.advanceTimersByTimeAsync(200_000); await probe;
-    const gaps = at.slice(1).map((value, index) => value - at[index]!);
-    // Read 5 got no answer from Fansly, so the first level needs 21 reads.
-    expect(gaps.slice(0, 20).every((gap) => gap === 4000)).toBe(true);
-    expect(gaps.slice(21, 40).every((gap) => gap === 2000)).toBe(true);
-    expect(gaps.at(-1)).toBe(1000);
+    const reads = async (count: number, unanswered = -1) => { for (let i = 0; i < count; i++) { const permit = await scheduler.acquire('1', 'group', signal); at.push(Date.now()); if (i !== unanswered) permit.served(); permit.release(); } };
+    const gaps = () => at.slice(1).map((value, index) => value - at[index]!);
+    const first = await scheduler.acquire('1', 'account', signal); expect(first.limited()).toBe(30_000); first.release();
+    // The scan goes on after its cooldown: 25 answered reads inside the quiet
+    // five minutes forgive nothing, and neither does the idle time after them.
+    const busy = reads(25); await vi.advanceTimersByTimeAsync(30_000 + 50_000); await busy;
+    expect(gaps().every((gap) => gap === 2000)).toBe(true);
+    await vi.advanceTimersByTimeAsync(430_000);
+    expect(Date.now() - start).toBe(510_000);
+    expect(scheduler.status('1')).toEqual({ cooldownUntil: start + 30_000, intervalMs: 2000 });
+    // The next scan probes at the penalised pace. Read 5 got no answer from
+    // Fansly, so the level needs 21 reads, and only then does 1 s return.
+    at.length = 0;
+    const probe = reads(24, 5); await vi.advanceTimersByTimeAsync(60_000); await probe;
+    expect(gaps().slice(0, 21).every((gap) => gap === 2000)).toBe(true);
+    expect(gaps().slice(21)).toEqual([1000, 1000]);
     expect(scheduler.status('1')?.intervalMs).toBe(1000);
     const later = await scheduler.acquire('1', 'group', signal); expect(later.limited()).toBe(30_000); later.release();
+  });
+  it('counts only reads Fansly answered 2xx towards forgiving a penalty', async () => {
+    vi.useFakeTimers();
+    const h = harness(); const session = h.client.followerSession(h.session);
+    let status = 429;
+    vi.stubGlobal('fetch', vi.fn<typeof globalThis.fetch>(async () => status === 200 ? envelope({ users: [] }) : new Response('', { status })));
+    const settle = async (work: Promise<unknown>, ms: number) => { const done = work.then(() => 'ok', () => 'failed'); await vi.advanceTimersByTimeAsync(ms); return done; };
+    expect(await settle(h.client.getAccountNames(['2'], session, h.signal, 'none'), 0)).toBe('failed');
+    await vi.advanceTimersByTimeAsync(30_000 + 300_000);
+    status = 503;
+    for (let i = 0; i < 20; i++) expect(await settle(h.client.getAccountNames(['2'], session, h.signal, 'none'), 5000)).toBe('failed');
+    status = 200;
+    for (let i = 0; i < 20; i++) expect(await settle(h.client.getGroup('3', session, h.signal), 2000)).toBe('ok');
+    expect(h.client.followerReadStatus(session)?.intervalMs).toBe(2000);
+    expect(await settle(h.client.getGroup('3', session, h.signal), 2000)).toBe('ok');
+    expect(h.client.followerReadStatus(session)?.intervalMs).toBe(1000);
   });
   it('keeps account reads five seconds apart without widening the other routes', async () => {
     vi.useFakeTimers();

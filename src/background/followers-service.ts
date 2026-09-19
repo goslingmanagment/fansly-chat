@@ -253,7 +253,9 @@ export class FollowersService {
         scan.trace?.event('followers.relation', { fanId: relation.followerId, relationId: relation.id, followedAt, decision: followedAt < cutoff ? 'outside-period' : followedAt > scan.startedAt ? 'after-scan-start' : fans.has(relation.followerId) ? 'duplicate' : 'check' });
         if (followedAt < cutoff || followedAt > scan.startedAt || fans.has(relation.followerId)) continue;
         fans.add(relation.followerId);
-        scan.snapshot.rows.push({ id: relation.followerId, followedAt, username: '', displayName: relation.followerId, customName: null, avatarUrl: null, bio: '', status: 'checking', historyRevision: crypto.randomUUID(), messages: [] });
+        const row: FollowerRow = { id: relation.followerId, followedAt, username: '', displayName: relation.followerId, customName: null, avatarUrl: null, bio: '', status: 'checking', historyRevision: crypto.randomUUID(), messages: [] };
+        this.applyProfile(scan, row);
+        scan.snapshot.rows.push(row);
       }
       if (page.followers.length < 100 || oldest < cutoff) {
         scan.trace?.event('followers.stop', { reason: page.followers.length < 100 ? 'short-page' : 'period-boundary' });
@@ -268,7 +270,6 @@ export class FollowersService {
     scan.trace?.event('followers.discovery-result', { complete, count: scan.snapshot.rows.length });
     this.assertCurrent(scan);
     scan.snapshot.rows.sort((a, b) => b.followedAt - a.followedAt);
-    for (const row of scan.snapshot.rows) this.applyProfile(scan, row);
     // Most new followers with a welcome are already in the recent inbox.
     // One native list resolves them together; search remains a fallback, and
     // absence from this bounded index is NEVER evidence of an empty history.
@@ -307,7 +308,7 @@ export class FollowersService {
 
   pause(tabId: number, scanId: string): FollowersSnapshot {
     const scan = this.get(tabId, scanId);
-    if (scan.snapshot.scanning && ['profiles', 'checking'].includes(scan.snapshot.phase ?? '')) {
+    if (scan.snapshot.scanning && ['profiles', 'checking', 'notes'].includes(scan.snapshot.phase ?? '')) {
       scan.trace?.event('scan.pause', { reason: 'human-action' });
       scan.passController.abort();
     }
@@ -404,14 +405,20 @@ export class FollowersService {
     scan.trace?.event('notes.plan', { missing: pending.length, batchSize: 100 });
     for (let offset = 0; offset < pending.length; offset += 100) {
       const batch = pending.slice(offset, offset + 100);
+      // A label is not worth waiting out a cooldown. Another read can still
+      // draw one while this batch is queued; Pause gets the chatter out.
+      if ((this.options.fansly.followerReadStatus(scan.session)?.cooldownUntil ?? 0) > Date.now()) {
+        scan.trace?.event('notes.skipped', { reason: 'lane-cooling-down', remaining: pending.length - offset });
+        return;
+      }
       try {
-        // The phase has no Pause: it must stay a few seconds long, never a
-        // wait for somebody else's cooldown on the shared lane.
-        if ((this.options.fansly.followerReadStatus(scan.session)?.cooldownUntil ?? 0) > Date.now()) throw new ChatGooseError('rate_limited');
         const accounts = await traced(scan.trace, 'notes.batch', (scope) => this.options.fansly.getAccountNames(batch.map((row) => row.id), scan.session, signal, 'none', scope), { offset, count: batch.length });
         this.assertCurrent(scan);
+        // An empty answer to a non-empty batch is an unread shape or a soft
+        // limit, not proof that nobody has a saved name.
+        if (!accounts.length) throw new ChatGooseError('fansly_server_error');
         this.mergeAccounts(scan, accounts);
-        // An account Fansly left out of a successful answer is not asked again.
+        // A fan Fansly left out of a real answer is not asked again.
         for (const row of batch) { scan.hydrated.add(row.id); this.applyProfile(scan, row); }
         scan.trace?.event('notes.batch-result', { requested: batch.length, returned: accounts.length, named: batch.filter((row) => row.customName).length });
       } catch (error) {
@@ -655,11 +662,12 @@ export class FollowersService {
           const profiles = await traced(scope, 'avatar.refresh', (request) => this.options.fansly.getAccountNames([fanId], scan.session, signal, row.avatarUrl ? 'default' : 'none', request));
           this.assertCurrent(scan);
           const profile = profiles.find((value) => value.id === fanId);
-          scan.hydrated.add(fanId);
           // Only the fresh answer may supply the signed avatar, now and later.
-          if (profile) { scan.profiles.set(fanId, { ...scan.profiles.get(fanId), ...profile, avatar: profile.avatar ?? null }); this.applyProfile(scan, row); }
-          else row.avatarUrl = null;
+          scan.profiles.set(fanId, { ...scan.profiles.get(fanId), id: fanId, ...profile, avatar: profile?.avatar ?? null });
+          if (profile) scan.hydrated.add(fanId);
+          this.applyProfile(scan, row);
         } catch {
+          scan.profiles.set(fanId, { ...scan.profiles.get(fanId), id: fanId, avatar: null });
           scope?.event('avatar.fallback', { reason: 'refresh-failed' });
           this.assertCurrent(scan);
           row.avatarUrl = null;
