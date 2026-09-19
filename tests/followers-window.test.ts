@@ -42,6 +42,23 @@ describe('followers window human actions', () => {
     expect(original.selectionStart).toBe(4);
     h.window.close();
   });
+  it('keeps the draft, focus and caret when a saved name arrives for the fan being written to', async () => {
+    const h = harness(); h.window.close();
+    h.snapshot.scanning = true; h.snapshot.phase = 'notes'; h.snapshot.rows[0]!.customName = null;
+    h.window.open();
+    await vi.waitFor(() => expect(h.root.querySelector('textarea')).not.toBeNull());
+    expect(h.root.querySelector('.progress')?.textContent).toBe('Загружаем сохранённые имена…');
+    expect(h.root.querySelector<HTMLButtonElement>('.pause')?.hidden).toBe(false);
+    const original = h.root.querySelector('textarea')!;
+    original.value = 'hello there'; original.dispatchEvent(new Event('input')); original.focus(); original.setSelectionRange(4, 7);
+    h.snapshot.rows[0]!.customName = 'Alex';
+    await vi.waitFor(() => expect(h.root.querySelector('.profile-copy strong')?.textContent).toBe('Fan 2 (Alex)'), { timeout: 1500 });
+    const rebuilt = h.root.querySelector('textarea')!;
+    expect(rebuilt.value).toBe('hello there');
+    expect(h.root.activeElement).toBe(rebuilt);
+    expect([rebuilt.selectionStart, rebuilt.selectionEnd]).toEqual([4, 7]);
+    h.window.close();
+  });
   it('opens the end of the first real chat after a proof-only placeholder', async () => {
     vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(function (this: HTMLElement) { return this.querySelectorAll('[data-message]').length * 70; });
     const h = harness(); h.window.close();
