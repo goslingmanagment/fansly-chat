@@ -118,6 +118,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E125 | 2026-09-15 | Signed-out Settings, popup and chat banner lead with sign-in; stale old-credential failures cannot invalidate the new sign-in view |
 | E126 | 2026-09-16 | Re-vendor SDK 0.3.0 from the exact deployed Core identity release before publishing 2.4.1 |
 | E127 | 2026-09-16 | Release 2.4.1 packages storage readiness and sign-in-first fixes, preserves settings and credentials, and uses the production-matched SDK |
+| E128 | 2026-09-19 | Follower scan: saved-name reads leave the critical path, rate-limit penalty decays per clean five minutes, `/account` reads 5 s apart; patch 2.4.2 |
 
 ## Entries
 
@@ -4193,3 +4194,50 @@ rerunning in the actual distribution mode resolves that mismatch without
 changing the manifest or weakening publication checks. The changelog renders
 in the browser and the announcement format validator passes. Functional UI
 coverage and browser evidence for the fixes are described in E124/E125.
+
+
+**E128 (2026-09-19).** The owner reports the new-follower window pausing on a
+Fansly rate limit seconds into a 146-follower, 48-hour scan and supplies the
+debug trace (run 192f8b94, 2.4.1). Measured: the lane entered the scan at
+`intervalMs=2000` because the previous scan, 8.5 minutes earlier, had drawn one
+429. Six GETs went out 2 s apart; `followersnew` x2, `messaging/groups` and two
+`/account?ids=` reads answered 200; the third `/account?ids=` read, 4 s after
+the first, answered 429 with no Retry-After. The carried penalty made that 429
+cost 60 s and 4 s spacing for the ~365 reads still ahead. `profiles.plan` was
+hydrated=8 / missing=138: follower pages already carry usernames, avatars and
+bios, and the three blocking batches existed only to fetch creator-only notes
+(the saved fan name, E117 follow-up) while rows showed bare ids and no check
+could start. The earlier scan, at 1 s spacing, stalled in the same phase. This
+shows a throttle specific to the `/account` route family or to ids per window.
+It does not measure that threshold, and it does not prove the other routes safe
+at the E121 pace, which neither scan reached.
+
+Changes. (1) Rows take names, avatars and bios from discovery immediately. Only
+a missing username still blocks a check (native search needs it) and keeps the
+E117/E121 recover-on-Continue and pause-on-exhausted-429 behavior. (2) Notes are
+read after the verdicts in chunks of 100 ids (the chunk size the FBuddy client
+uses on the same endpoint), without retries, stopping at the first failure. That
+read never changes a verdict, sets a scan error or pauses a pass; a 429 there
+still opens the shared lane cooldown. The generation click already reads the
+fan's account for a fresh signed avatar; the same read now also runs when the
+fan's notes are unknown and supplies `fanCustomName`, so a throttled batch
+cannot drop the saved name from a draft. (3) The lane keeps E121's base pace
+(1 s, 1.5 s between message reads), the 30/60/120/240/300 s cooldowns and
+spacing doubling up to 8 s, but the penalty decays: one level per five clean
+minutes counted from the end of the last cooldown. Spacing and cooldown level
+are one counter capped at 5; the 15-minute idle discard stays. (4) `/account`
+reads are at least 5 s apart on the lane; other routes keep their spacing. This
+is a precaution sized to one observation, not a measured limit. (5) The window
+keeps composer focus and caret when the selected fan's card rebuilds, since a
+saved name can now arrive while the chatter types. The trace records the route,
+penalty decay, route-spacing waits and the notes phase.
+
+The owner also asks whether the overall pace is too fast. This evidence does not
+answer that: every throttled read was on `/account`, and the check-phase routes
+were never reached under pacing. The base pace is therefore left unchanged
+rather than tuned on a hunch; the lane slows itself when Fansly objects, and the
+next live trace can answer the question. Validation is synthetic (mock
+transport, fake timers, jsdom). This supersedes E121's penalty that lasted until
+the idle discard and E117's pre-check notes hydration. No settings or schema
+change, no new Fansly endpoint, fewer Fansly requests per scan. Version 2.4.2,
+a patch per the owner's numbering. Publication is a separate owner step.

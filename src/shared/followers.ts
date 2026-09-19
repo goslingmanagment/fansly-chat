@@ -34,7 +34,7 @@ export interface FollowersSnapshot {
   hours: number;
   scanning: boolean;
   canContinue?: boolean;
-  phase?: 'welcome' | 'followers' | 'profiles' | 'checking';
+  phase?: 'welcome' | 'followers' | 'profiles' | 'checking' | 'notes';
   cutoff?: number;
   startedAt?: number;
   pacing?: { cooldownUntil: number; intervalMs: number };

@@ -25,6 +25,8 @@ interface Scan {
   passController: AbortController;
   conversationCursors: Map<string, string | null>;
   profiles: Map<string, FanslyAccountResponse>;
+  /** Fans whose creator-only fields came from an `/account?ids=` read. */
+  hydrated: Set<string>;
   histories: Map<string, FanslyMessage[]>;
   groups: Map<string, string | null>;
   completeHistories: Set<string>;
@@ -130,7 +132,7 @@ export class FollowersService {
       const scan: Scan = {
         trace,
         tabId, session: this.options.fansly.followerSession(session, () => this.assertCurrent(scan)), controller: new AbortController(), passController: new AbortController(), conversationCursors: new Map(),
-        profiles: new Map(), histories: new Map(), groups: new Map(), completeHistories: new Set(), welcome: new Set(),
+        profiles: new Map(), hydrated: new Set(), histories: new Map(), groups: new Map(), completeHistories: new Set(), welcome: new Set(),
         startedAt, welcomeCheckedAt: 0,
         snapshot: { scanId, creatorId: creator.id, creatorName: creator.username || creator.displayName || creator.id, hours, scanning: true, phase: 'welcome', startedAt, rows: [], ...(trace ? { debug: { traceId: scanId } } : {}) },
       };
@@ -266,6 +268,7 @@ export class FollowersService {
     scan.trace?.event('followers.discovery-result', { complete, count: scan.snapshot.rows.length });
     this.assertCurrent(scan);
     scan.snapshot.rows.sort((a, b) => b.followedAt - a.followedAt);
+    for (const row of scan.snapshot.rows) this.applyProfile(scan, row);
     // Most new followers with a welcome are already in the recent inbox.
     // One native list resolves them together; search remains a fallback, and
     // absence from this bounded index is NEVER evidence of an empty history.
@@ -304,7 +307,7 @@ export class FollowersService {
 
   pause(tabId: number, scanId: string): FollowersSnapshot {
     const scan = this.get(tabId, scanId);
-    if (scan.snapshot.scanning && ['profiles', 'checking'].includes(scan.snapshot.phase ?? '')) {
+    if (scan.snapshot.scanning && ['profiles', 'checking', 'notes'].includes(scan.snapshot.phase ?? '')) {
       scan.trace?.event('scan.pause', { reason: 'human-action' });
       scan.passController.abort();
     }
@@ -320,21 +323,22 @@ export class FollowersService {
     const signal = AbortSignal.any([scan.controller.signal, scan.passController.signal]);
     const skipped = new Set<string>();
     for (const row of rows) { row.status = 'checking'; row.detail = undefined; }
-    // Batch profile hydration is optional for the other fans: one failed
-    // batch must not strand the whole queue in a permanent checking state.
-    const missing = rows.filter((row) => !scan.profiles.get(row.id)?.username || scan.profiles.get(row.id)?.notes === undefined);
-    scan.trace?.event('profiles.plan', { hydrated: rows.length - missing.length, missing: missing.length, batchSize: 50 });
-    for (let offset = 0; offset < missing.length; offset += 50) {
+    // Only a missing username blocks a check: native search needs it. One
+    // failed batch must not strand the whole queue in a permanent checking
+    // state. Creator-only notes are read after the checks (hydrateNotes).
+    const missing = rows.filter((row) => !scan.profiles.get(row.id)?.username);
+    scan.trace?.event('profiles.plan', { hydrated: rows.length - missing.length, missing: missing.length, batchSize: 100 });
+    for (let offset = 0; offset < missing.length; offset += 100) {
       this.assertCurrent(scan);
       if (signal.aborted) {
         for (const row of missing.slice(offset)) skipped.add(row.id);
         break;
       }
-      const batch = missing.slice(offset, offset + 50);
+      const batch = missing.slice(offset, offset + 100);
       try {
         const accounts = await traced(scan.trace, 'profiles.batch', (scope) => this.options.fansly.getAccountNames(batch.map((row) => row.id), scan.session, signal, 'default', scope), { offset, count: batch.length });
         this.assertCurrent(scan);
-        for (const account of accounts) scan.profiles.set(account.id, { ...scan.profiles.get(account.id), ...account });
+        this.mergeAccounts(scan, accounts);
         scan.trace?.event('profiles.batch-result', { requested: batch.length, returned: accounts.length });
       } catch (error) {
         this.assertCurrent(scan);
@@ -342,14 +346,7 @@ export class FollowersService {
         if (error instanceof ChatGooseError && error.key === 'rate_limited') scan.passController.abort();
       }
     }
-    for (const row of rows) {
-      const profile = scan.profiles.get(row.id);
-      row.username = profile?.username ?? '';
-      row.displayName = profile?.displayName || row.username || row.id;
-      row.bio = profile?.about ?? '';
-      row.customName = profile ? customNameFromAccount(profile) : null;
-      row.avatarUrl = profile ? fanslyAvatarUrl(profile) : null;
-    }
+    for (const row of rows) this.applyProfile(scan, row);
     scan.snapshot.phase = 'checking';
     const queue = rows.filter((row) => !skipped.has(row.id));
     await Promise.all(Array.from({ length: Math.min(3, queue.length) }, async () => {
@@ -371,7 +368,54 @@ export class FollowersService {
       row.status = 'unknown'; row.detail = 'Проверка приостановлена. Нажмите «Продолжить».';
       scan.trace?.event('row.verdict', { fanId: row.id, status: row.status, reason: 'paused' });
     }
+    await this.hydrateNotes(scan, signal);
     scan.snapshot.canContinue = rows.some((row) => row.status === 'unknown');
+  }
+
+  private mergeAccounts(scan: Scan, accounts: FanslyAccountResponse[]): void {
+    for (const account of accounts) {
+      scan.profiles.set(account.id, { ...scan.profiles.get(account.id), ...account });
+      scan.hydrated.add(account.id);
+    }
+  }
+
+  private notesMissing(scan: Scan, fanId: string): boolean {
+    return !scan.hydrated.has(fanId) && scan.profiles.get(fanId)?.notes === undefined;
+  }
+
+  private applyProfile(scan: Scan, row: FollowerRow): void {
+    const profile = scan.profiles.get(row.id);
+    row.username = profile?.username ?? '';
+    row.displayName = profile?.displayName || row.username || row.id;
+    row.bio = profile?.about ?? '';
+    row.customName = profile ? customNameFromAccount(profile) : null;
+    row.avatarUrl = profile ? fanslyAvatarUrl(profile) : null;
+  }
+
+  /** Follower pages omit creator-only notes (the saved fan name). `/account`
+   * is the one route Fansly throttled under paced reads (E128), so the label
+   * is read after the verdicts, once, without retries: it can never stall,
+   * fail or pause a pass. Generation re-reads its own fan at the click. */
+  private async hydrateNotes(scan: Scan, signal: AbortSignal): Promise<void> {
+    // A fan without a username belongs to the blocking read and its Continue.
+    const pending = scan.snapshot.rows.filter((row) => row.username && this.notesMissing(scan, row.id));
+    if (!pending.length || signal.aborted) return;
+    scan.snapshot.phase = 'notes';
+    scan.trace?.event('notes.plan', { missing: pending.length, batchSize: 100 });
+    for (let offset = 0; offset < pending.length; offset += 100) {
+      const batch = pending.slice(offset, offset + 100);
+      try {
+        const accounts = await traced(scan.trace, 'notes.batch', (scope) => this.options.fansly.getAccountNames(batch.map((row) => row.id), scan.session, signal, 'none', scope), { offset, count: batch.length });
+        this.assertCurrent(scan);
+        this.mergeAccounts(scan, accounts);
+        for (const row of batch) this.applyProfile(scan, row);
+        scan.trace?.event('notes.batch-result', { requested: batch.length, returned: accounts.length, named: batch.filter((row) => row.customName).length });
+      } catch (error) {
+        this.assertCurrent(scan);
+        scan.trace?.event('notes.skipped', { reason: error instanceof ChatGooseError ? error.key : 'read-failed', remaining: pending.length - offset });
+        return;
+      }
+    }
   }
 
   private async check(scan: Scan, row: FollowerRow, signal: AbortSignal, parent: TraceScope | undefined = scan.trace, reason = 'scan'): Promise<void> {
@@ -601,11 +645,14 @@ export class FollowersService {
       // Refresh signed avatar metadata at the explicit generation click. A
       // missing/unavailable image may fall back to the verified text profile;
       // never automatically retry the AI request after a provider error.
-      if (row.avatarUrl) {
+      // The same read supplies the saved fan name when the deferred notes
+      // batch has not covered this fan yet.
+      if (row.avatarUrl || this.notesMissing(scan, fanId)) {
         try {
           const profiles = await traced(scope, 'avatar.refresh', (request) => this.options.fansly.getAccountNames([fanId], scan.session, signal, 'default', request));
           this.assertCurrent(scan);
           const profile = profiles.find((value) => value.id === fanId);
+          if (profile) { this.mergeAccounts(scan, [profile]); this.applyProfile(scan, row); }
           row.avatarUrl = profile ? fanslyAvatarUrl(profile) : null;
         } catch {
           scope?.event('avatar.fallback', { reason: 'refresh-failed' });

@@ -42,14 +42,42 @@ describe('Fansly browser-session outreach transport', () => {
   });
   it('does not prune a long cooldown but resets spacing after the lane is truly idle', async () => {
     vi.useFakeTimers(); const scheduler = new FollowerReadScheduler(); const signal = new AbortController().signal; const start = Date.now();
-    const permit = await scheduler.acquire('1', true, signal); permit.limited(2_000_000); permit.release();
+    const permit = await scheduler.acquire('1', 'message', signal); permit.limited(2_000_000); permit.release();
     await vi.advanceTimersByTimeAsync(900_001);
-    const waiting = scheduler.acquire('1', true, signal);
+    const waiting = scheduler.acquire('1', 'message', signal);
     await vi.advanceTimersByTimeAsync(1_099_998);
     expect(scheduler.status('1')).toEqual({ cooldownUntil: start + 2_000_000, intervalMs: 2000 });
     await vi.advanceTimersByTimeAsync(1); const after = await waiting; after.release();
-    await vi.advanceTimersByTimeAsync(900_001); const reset = await scheduler.acquire('1', false, signal);
+    await vi.advanceTimersByTimeAsync(900_001); const reset = await scheduler.acquire('1', 'group', signal);
     expect(scheduler.status('1')).toEqual({ cooldownUntil: 0, intervalMs: 1000 }); reset.release();
+  });
+  it('forgives one penalty level per clean five minutes, so an old 429 does not tax a later scan', async () => {
+    vi.useFakeTimers(); const scheduler = new FollowerReadScheduler(); const signal = new AbortController().signal; const start = Date.now();
+    const first = await scheduler.acquire('1', 'account', signal); expect(first.limited()).toBe(30_000); first.release();
+    await vi.advanceTimersByTimeAsync(100_000);
+    const soon = await scheduler.acquire('1', 'group', signal); expect(soon.limited()).toBe(60_000); soon.release();
+    expect(scheduler.status('1')).toEqual({ cooldownUntil: start + 160_000, intervalMs: 4000 });
+    await vi.advanceTimersByTimeAsync(60_000 + 299_999);
+    expect(scheduler.status('1')?.intervalMs).toBe(4000);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(scheduler.status('1')?.intervalMs).toBe(2000);
+    await vi.advanceTimersByTimeAsync(300_000);
+    expect(scheduler.status('1')?.intervalMs).toBe(1000);
+    const later = await scheduler.acquire('1', 'group', signal); expect(later.limited()).toBe(30_000); later.release();
+  });
+  it('keeps account reads five seconds apart without widening the other routes', async () => {
+    vi.useFakeTimers();
+    const h = harness(); const session = h.client.followerSession(h.session);
+    const at: Array<[string, number]> = []; const start = Date.now();
+    vi.stubGlobal('fetch', vi.fn<typeof globalThis.fetch>(async (url) => { at.push([new URL(String(url)).pathname, Date.now() - start]); return envelope([]); }));
+    const work = Promise.all([
+      h.client.getAccountNames(['2'], session, h.signal),
+      h.client.getGroup('3', session, h.signal),
+      h.client.getAccountNames(['4'], session, h.signal),
+      h.client.getGroup('5', session, h.signal),
+    ]);
+    await vi.advanceTimersByTimeAsync(6000); await work;
+    expect(at).toEqual([['/api/v1/account', 0], ['/api/v1/group/3/', 1000], ['/api/v1/account', 5000], ['/api/v1/group/5/', 6000]]);
   });
   it('records actual HTTP attempts, 429 backoff and status under the caller fan scope', async () => {
     const h = harness();

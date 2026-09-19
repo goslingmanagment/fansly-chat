@@ -5,6 +5,7 @@ import type { SessionStore } from '../src/background/session-store.js';
 import type { AgencyHubClient } from '../src/background/agency-hub-client.js';
 import type { KernelFeatureGateway } from '../src/background/kernel-feature-gateway.js';
 import type { FanslyAccountResponse, FanslyMessage, PersistedState, SessionTemplate } from '../src/shared/types.js';
+import { ChatGooseError } from '../src/shared/errors.js';
 import { createDefaultSettings } from '../src/shared/migrations.js';
 
 function harness(debugMode = false, realTransport = false) {
@@ -19,7 +20,7 @@ function harness(debugMode = false, realTransport = false) {
     getAuthenticatedAccount: vi.fn(async () => ({ id: '1', username: 'creator' })),
     getFollowerPage: vi.fn(async (): Promise<Awaited<ReturnType<FanslyClient['getFollowerPage']>>> => ({ followers: [{ id: String(BigInt(Date.now() - 3600_000 - 1561494360000) << 22n), followerId: '2' }], aggregationData: { accounts: [{ id: '2', username: 'fan', notes: [{ contentType: 12002, note: 'Alex' }] }] } })),
     getWelcomeDefinitions: vi.fn(async () => [{ messageTemplate: { content: 'auto welcome' } }]),
-    getAccountNames: vi.fn(async (): Promise<FanslyAccountResponse[]> => []),
+    getAccountNames: vi.fn(async (_ids: string[], _session?: unknown, _signal?: unknown, _retry?: string): Promise<FanslyAccountResponse[]> => []),
     listFanAccounts: vi.fn(async () => ({ fans: [{ groupId: '3', fanAccountId: '2' }], truncated: true })),
     findFollowerGroup: vi.fn(async (_id: string): Promise<string | null> => '3'),
     getGroup: vi.fn(async (_id: string) => ({ users: [{ userId: '1' }, { userId: '2' }] })),
@@ -199,6 +200,46 @@ describe('followers scan and one-attempt send', () => {
     await vi.waitFor(() => expect(h.service.state(7, first.scanId).scanning).toBe(false));
     expect(h.service.state(7, first.scanId)).toMatchObject({ canContinue: false, rows: [{ status: 'ready' }] });
     expect(h.fansly.getFollowerPage).toHaveBeenCalledOnce();
+  });
+  it('replays the live 146-fan trace: a throttled /account?ids= costs no verdict, no pause and no lasting slowdown', async () => {
+    vi.useFakeTimers();
+    const h = harness(true, true);
+    const firstId = BigInt(Date.now() - 3600_000 - 1561494360000) << 22n;
+    const fans = Array.from({ length: 146 }, (_, i) => ({ id: String(firstId - BigInt(i)), followerId: String(i + 2) }));
+    const times: Array<{ path: string; ids: boolean; at: number; status: number }> = [];
+    vi.stubGlobal('fetch', vi.fn<typeof globalThis.fetch>(async (input) => {
+      const url = new URL(String(input));
+      const ids = url.pathname === '/api/v1/account';
+      let response: unknown;
+      if (url.pathname.endsWith('/message/automated')) response = [];
+      else if (url.pathname.endsWith('/followersnew')) {
+        const page = url.searchParams.get('before') === '0' ? fans.slice(0, 100) : fans.slice(100);
+        response = { followers: page, aggregationData: { accounts: page.map((fan) => ({ id: fan.followerId, username: `fan${fan.followerId}` })) } };
+      } else if (url.pathname.endsWith('/messaging/groups')) response = { data: [] };
+      else if (!ids) throw new Error(`Unexpected route ${url.pathname}`);
+      times.push({ path: url.pathname, ids, at: Date.now(), status: ids ? 429 : 200 });
+      return new Response(JSON.stringify({ success: true, response }), { status: ids ? 429 : 200 });
+    }));
+    const first = await h.service.start(7, 48);
+    await vi.advanceTimersByTimeAsync(10_000);
+    const naming = h.service.state(7, first.scanId);
+    expect(naming.rows).toHaveLength(146);
+    expect(naming.rows.every((row) => row.displayName === `fan${row.id}`)).toBe(true);
+    expect(times.some((entry) => entry.ids)).toBe(false);
+    await vi.advanceTimersByTimeAsync(400_000);
+    const final = h.service.state(7, first.scanId);
+    expect(final.scanning).toBe(false); expect(final.canContinue).toBe(false); expect(final.error).toBeUndefined();
+    expect(final.rows.every((row) => row.status === 'ready' && row.detail === undefined)).toBe(true);
+    expect(times.filter((entry) => entry.ids)).toHaveLength(1);
+    expect(times.at(-1)?.ids).toBe(true);
+    const pages = times.filter((entry) => entry.path.endsWith('/followersnew'));
+    expect(pages[1]!.at - pages[0]!.at).toBeGreaterThanOrEqual(5000);
+    expect(final.pacing).toEqual({ cooldownUntil: times.at(-1)!.at + 30_000, intervalMs: 2000 });
+    await vi.advanceTimersByTimeAsync(30_000 + 300_000);
+    expect(h.service.state(7, first.scanId).pacing?.intervalMs).toBe(1000);
+    const report = h.service.traces.get(first.scanId)!.read();
+    expect(report.events).toContainEqual(expect.objectContaining({ name: 'notes.skipped', data: { reason: 'rate_limited', remaining: 146 } }));
+    h.service.close(7);
   });
   it('runs 194 fans through the real paced transport, preserves all verdicts after 429 and logs every actual request', async () => {
     vi.useFakeTimers();
@@ -479,21 +520,78 @@ describe('followers scan and one-attempt send', () => {
     expect(h.gateway.streamFeature).not.toHaveBeenCalled();
     expect(h.fansly.sendFollowerMessage).not.toHaveBeenCalled();
   });
-  it('recovers profile hydration on continue without restarting follower discovery', async () => {
+  it('recovers a missing username on continue without restarting follower discovery', async () => {
+    const h = harness();
+    h.fansly.getFollowerPage.mockImplementation(async () => ({
+      followers: [{ id: String(BigInt(Date.now() - 3600_000 - 1561494360000) << 22n), followerId: '2' }],
+      aggregationData: { accounts: [] },
+    }));
+    h.fansly.getAccountNames.mockRejectedValueOnce(new DOMException('The operation was aborted', 'TimeoutError'));
+    h.fansly.getAccountNames.mockResolvedValue([{ id: '2', username: 'fan', notes: [] }]);
+    const first = await h.start();
+    expect(first.rows[0]).toMatchObject({ status: 'unknown', username: '' });
+    expect(first.rows[0]?.detail).toContain('Не успели');
+    expect(first.canContinue).toBe(true);
+    h.service.resume(7, first.scanId);
+    await vi.waitFor(() => expect(h.service.state(7, first.scanId).scanning).toBe(false));
+    expect(h.service.state(7, first.scanId).rows[0]).toMatchObject({ status: 'ready', username: 'fan' });
+    expect(h.fansly.getFollowerPage).toHaveBeenCalledOnce();
+    expect(h.fansly.getAccountNames).toHaveBeenCalledTimes(2);
+  });
+  it('shows discovery names at once and reads saved names only after the verdicts', async () => {
+    const h = harness(); const order: string[] = [];
+    const followers = Array.from({ length: 146 }, (_, index) => ({ id: String(BigInt(Date.now() - 3600_000 - index - 1561494360000) << 22n), followerId: String(index + 2) }));
+    h.fansly.getFollowerPage.mockImplementation(async () => ({ followers: followers.slice(0, 99), aggregationData: { accounts: followers.map((value) => ({ id: value.followerId, username: `fan${value.followerId}` })) } }));
+    let release!: () => void;
+    h.fansly.listFanAccounts.mockImplementation(() => new Promise((resolve) => { release = () => resolve({ fans: [], truncated: false }); }));
+    h.fansly.findFollowerGroup.mockImplementation(async () => { order.push('check'); return null; });
+    h.fansly.getAccountNames.mockImplementation(async (ids, _session, _signal, retry) => { order.push(`notes:${ids.length}:${retry}`); return ids.map((id) => ({ id, username: `fan${id}`, notes: id === '2' ? [{ contentType: 12002, note: 'Alex' }] : [] })); });
+    const snapshot = await h.service.start(7, 48);
+    await vi.waitFor(() => expect(h.fansly.listFanAccounts).toHaveBeenCalled());
+    const early = h.service.state(7, snapshot.scanId);
+    expect(early.rows).toHaveLength(99);
+    expect(early.rows.every((row) => row.displayName === `fan${row.id}` && row.status === 'checking')).toBe(true);
+    expect(h.fansly.getAccountNames).not.toHaveBeenCalled();
+    release();
+    await vi.waitFor(() => expect(h.service.state(7, snapshot.scanId).scanning).toBe(false));
+    const done = h.service.state(7, snapshot.scanId);
+    expect(order.at(-1)).toBe('notes:99:none');
+    expect(order.filter((value) => value.startsWith('notes'))).toHaveLength(1);
+    expect(order.indexOf('notes:99:none')).toBe(order.lastIndexOf('check') + 1);
+    expect(done.rows.find((row) => row.id === '2')?.customName).toBe('Alex');
+    expect(done.rows.every((row) => row.status === 'ready')).toBe(true);
+  });
+  it('keeps every verdict and does not pause when the saved-name read is throttled', async () => {
     const h = harness();
     h.fansly.getFollowerPage.mockImplementation(async () => ({
       followers: [{ id: String(BigInt(Date.now() - 3600_000 - 1561494360000) << 22n), followerId: '2' }],
       aggregationData: { accounts: [{ id: '2', username: 'fan', notes: undefined }] },
     }));
-    h.fansly.getAccountNames.mockRejectedValueOnce(new DOMException('The operation was aborted', 'TimeoutError'));
+    h.fansly.getAccountNames.mockRejectedValueOnce(new ChatGooseError('rate_limited'));
     const first = await h.start();
-    expect(first.rows[0]).toMatchObject({ status: 'unknown', username: 'fan' });
-    expect(first.rows[0]?.detail).toContain('Не успели');
-    expect(first.canContinue).toBe(true);
-    h.service.resume(7, first.scanId);
-    await vi.waitFor(() => expect(h.service.state(7, first.scanId).scanning).toBe(false));
-    expect(h.service.state(7, first.scanId).rows[0]?.status).toBe('ready');
-    expect(h.fansly.getFollowerPage).toHaveBeenCalledOnce();
+    expect(first.rows[0]).toMatchObject({ status: 'ready', username: 'fan', customName: null });
+    expect(first.rows[0]?.detail).toBeUndefined();
+    expect(first.canContinue).toBe(false);
+    expect(first.error).toBeUndefined();
+    expect(h.fansly.getAccountNames).toHaveBeenCalledOnce();
+    expect(h.fansly.getAccountNames.mock.calls[0]?.[3]).toBe('none');
+  });
+  it('reads the saved name at the generation click when the deferred batch missed the fan', async () => {
+    const h = harness();
+    h.state.accountMappings = { '1': 'persona' };
+    h.state.personaCatalog = [{ key: 'persona', displayName: 'Persona', version: 1, definitionId: 'v1:persona-definition', status: 'active' }];
+    h.fansly.getFollowerPage.mockImplementation(async () => ({
+      followers: [{ id: String(BigInt(Date.now() - 3600_000 - 1561494360000) << 22n), followerId: '2' }],
+      aggregationData: { accounts: [{ id: '2', username: 'fan', notes: undefined }] },
+    }));
+    h.fansly.getAccountNames.mockRejectedValueOnce(new ChatGooseError('rate_limited'));
+    const snapshot = await h.start();
+    h.fansly.getAccountNames.mockResolvedValueOnce([{ id: '2', username: 'fan', notes: [{ contentType: 12002, note: 'Alex' }] }]);
+    expect(await h.service.generate(7, snapshot.scanId, '2')).toBe('draft');
+    expect(h.gateway.streamFeature.mock.calls[0]![1].clientContext?.fanCustomName).toBe('Alex');
+    expect(h.service.state(7, snapshot.scanId).rows[0]?.customName).toBe('Alex');
+    await h.service.generate(7, snapshot.scanId, '2');
+    expect(h.fansly.getAccountNames).toHaveBeenCalledTimes(2);
   });
   it('retries a transient welcome refresh failure on continuation', async () => {
     const h = harness();

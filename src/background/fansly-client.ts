@@ -371,7 +371,7 @@ export class FanslyClient {
     // don't stack across retries (the finally clears it before the next loop).
     for (let attempt = 0; ; attempt++) {
       const permit = this.followerSessions.has(session)
-        ? await this.followerReads.acquire(session.resolvedAccountId ?? session.accountId, routeKey === 'message', signal, trace)
+        ? await this.followerReads.acquire(session.resolvedAccountId ?? session.accountId, routeKey, signal, trace)
         : undefined;
       const controller = new AbortController();
       const timeout = globalThis.setTimeout(() => controller.abort(), FANSLY_REQUEST_TIMEOUT_MS);
