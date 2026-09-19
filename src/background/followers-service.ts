@@ -307,7 +307,7 @@ export class FollowersService {
 
   pause(tabId: number, scanId: string): FollowersSnapshot {
     const scan = this.get(tabId, scanId);
-    if (scan.snapshot.scanning && ['profiles', 'checking', 'notes'].includes(scan.snapshot.phase ?? '')) {
+    if (scan.snapshot.scanning && ['profiles', 'checking'].includes(scan.snapshot.phase ?? '')) {
       scan.trace?.event('scan.pause', { reason: 'human-action' });
       scan.passController.abort();
     }
@@ -368,8 +368,8 @@ export class FollowersService {
       row.status = 'unknown'; row.detail = 'Проверка приостановлена. Нажмите «Продолжить».';
       scan.trace?.event('row.verdict', { fanId: row.id, status: row.status, reason: 'paused' });
     }
-    await this.hydrateNotes(scan, signal);
     scan.snapshot.canContinue = rows.some((row) => row.status === 'unknown');
+    await this.hydrateNotes(scan, signal);
   }
 
   private mergeAccounts(scan: Scan, accounts: FanslyAccountResponse[]): void {
@@ -405,13 +405,16 @@ export class FollowersService {
     for (let offset = 0; offset < pending.length; offset += 100) {
       const batch = pending.slice(offset, offset + 100);
       try {
+        // The phase has no Pause: it must stay a few seconds long, never a
+        // wait for somebody else's cooldown on the shared lane.
+        if ((this.options.fansly.followerReadStatus(scan.session)?.cooldownUntil ?? 0) > Date.now()) throw new ChatGooseError('rate_limited');
         const accounts = await traced(scan.trace, 'notes.batch', (scope) => this.options.fansly.getAccountNames(batch.map((row) => row.id), scan.session, signal, 'none', scope), { offset, count: batch.length });
         this.assertCurrent(scan);
         this.mergeAccounts(scan, accounts);
-        for (const row of batch) this.applyProfile(scan, row);
+        // An account Fansly left out of a successful answer is not asked again.
+        for (const row of batch) { scan.hydrated.add(row.id); this.applyProfile(scan, row); }
         scan.trace?.event('notes.batch-result', { requested: batch.length, returned: accounts.length, named: batch.filter((row) => row.customName).length });
       } catch (error) {
-        this.assertCurrent(scan);
         scan.trace?.event('notes.skipped', { reason: error instanceof ChatGooseError ? error.key : 'read-failed', remaining: pending.length - offset });
         return;
       }
@@ -649,11 +652,13 @@ export class FollowersService {
       // batch has not covered this fan yet.
       if (row.avatarUrl || this.notesMissing(scan, fanId)) {
         try {
-          const profiles = await traced(scope, 'avatar.refresh', (request) => this.options.fansly.getAccountNames([fanId], scan.session, signal, 'default', request));
+          const profiles = await traced(scope, 'avatar.refresh', (request) => this.options.fansly.getAccountNames([fanId], scan.session, signal, row.avatarUrl ? 'default' : 'none', request));
           this.assertCurrent(scan);
           const profile = profiles.find((value) => value.id === fanId);
-          if (profile) { this.mergeAccounts(scan, [profile]); this.applyProfile(scan, row); }
-          row.avatarUrl = profile ? fanslyAvatarUrl(profile) : null;
+          scan.hydrated.add(fanId);
+          // Only the fresh answer may supply the signed avatar, now and later.
+          if (profile) { scan.profiles.set(fanId, { ...scan.profiles.get(fanId), ...profile, avatar: profile.avatar ?? null }); this.applyProfile(scan, row); }
+          else row.avatarUrl = null;
         } catch {
           scope?.event('avatar.fallback', { reason: 'refresh-failed' });
           this.assertCurrent(scan);

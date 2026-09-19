@@ -235,10 +235,21 @@ describe('followers scan and one-attempt send', () => {
     const pages = times.filter((entry) => entry.path.endsWith('/followersnew'));
     expect(pages[1]!.at - pages[0]!.at).toBeGreaterThanOrEqual(5000);
     expect(final.pacing).toEqual({ cooldownUntil: times.at(-1)!.at + 30_000, intervalMs: 2000 });
-    await vi.advanceTimersByTimeAsync(30_000 + 300_000);
-    expect(h.service.state(7, first.scanId).pacing?.intervalMs).toBe(1000);
     const report = h.service.traces.get(first.scanId)!.read();
     expect(report.events).toContainEqual(expect.objectContaining({ name: 'notes.skipped', data: { reason: 'rate_limited', remaining: 146 } }));
+    // The owner's next scan came 8.5 minutes later. Idle time forgives nothing:
+    // it probes at the penalised pace and returns to 1 s after 20 clean reads.
+    await vi.advanceTimersByTimeAsync(510_000);
+    expect(h.service.state(7, first.scanId).pacing?.intervalMs).toBe(2000);
+    const before = times.length;
+    const second = await h.service.start(7, 48);
+    await vi.advanceTimersByTimeAsync(400_000);
+    expect(h.service.state(7, second.scanId).rows.every((row) => row.status === 'ready')).toBe(true);
+    const searches = times.slice(before).filter((entry) => entry.path.endsWith('/messaging/groups')).map((entry) => entry.at);
+    const gaps = searches.slice(1).map((value, index) => value - searches[index]!);
+    expect(gaps[1]).toBe(2000);
+    expect(gaps.at(-1)).toBe(1000);
+    expect(h.service.traces.get(second.scanId)!.read().events.filter((event) => event.name === 'http.heal').map((event) => event.data)).toEqual([{ from: 1, to: 0, intervalMs: 1000 }]);
     h.service.close(7);
   });
   it('runs 194 fans through the real paced transport, preserves all verdicts after 429 and logs every actual request', async () => {
@@ -557,7 +568,6 @@ describe('followers scan and one-attempt send', () => {
     const done = h.service.state(7, snapshot.scanId);
     expect(order.at(-1)).toBe('notes:99:none');
     expect(order.filter((value) => value.startsWith('notes'))).toHaveLength(1);
-    expect(order.indexOf('notes:99:none')).toBe(order.lastIndexOf('check') + 1);
     expect(done.rows.find((row) => row.id === '2')?.customName).toBe('Alex');
     expect(done.rows.every((row) => row.status === 'ready')).toBe(true);
   });

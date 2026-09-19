@@ -51,17 +51,23 @@ describe('Fansly browser-session outreach transport', () => {
     await vi.advanceTimersByTimeAsync(900_001); const reset = await scheduler.acquire('1', 'group', signal);
     expect(scheduler.status('1')).toEqual({ cooldownUntil: 0, intervalMs: 1000 }); reset.release();
   });
-  it('forgives one penalty level per clean five minutes, so an old 429 does not tax a later scan', async () => {
+  it('forgives a penalty level only after five minutes and twenty unthrottled reads; idle time alone proves nothing', async () => {
     vi.useFakeTimers(); const scheduler = new FollowerReadScheduler(); const signal = new AbortController().signal; const start = Date.now();
+    const read = async (served = true) => { const permit = await scheduler.acquire('1', 'group', signal); if (served) permit.served(); permit.release(); };
     const first = await scheduler.acquire('1', 'account', signal); expect(first.limited()).toBe(30_000); first.release();
     await vi.advanceTimersByTimeAsync(100_000);
     const soon = await scheduler.acquire('1', 'group', signal); expect(soon.limited()).toBe(60_000); soon.release();
     expect(scheduler.status('1')).toEqual({ cooldownUntil: start + 160_000, intervalMs: 4000 });
-    await vi.advanceTimersByTimeAsync(60_000 + 299_999);
+    await vi.advanceTimersByTimeAsync(60_000 + 600_000);
     expect(scheduler.status('1')?.intervalMs).toBe(4000);
-    await vi.advanceTimersByTimeAsync(1);
-    expect(scheduler.status('1')?.intervalMs).toBe(2000);
-    await vi.advanceTimersByTimeAsync(300_000);
+    const at: number[] = [];
+    const probe = (async () => { for (let i = 0; i < 44; i++) { await read(i !== 5); at.push(Date.now()); } })();
+    await vi.advanceTimersByTimeAsync(200_000); await probe;
+    const gaps = at.slice(1).map((value, index) => value - at[index]!);
+    // Read 5 got no answer from Fansly, so the first level needs 21 reads.
+    expect(gaps.slice(0, 20).every((gap) => gap === 4000)).toBe(true);
+    expect(gaps.slice(21, 40).every((gap) => gap === 2000)).toBe(true);
+    expect(gaps.at(-1)).toBe(1000);
     expect(scheduler.status('1')?.intervalMs).toBe(1000);
     const later = await scheduler.acquire('1', 'group', signal); expect(later.limited()).toBe(30_000); later.release();
   });

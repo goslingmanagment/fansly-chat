@@ -407,6 +407,7 @@ export class FanslyClient {
           credentials: 'omit',
         });
         attemptTrace?.event('http.response', { status: response.status });
+        if (response.ok) permit?.served();
 
         if (response.status === 401 || response.status === 403) {
           this.sessionStore.markDisconnected(session.accountId);
