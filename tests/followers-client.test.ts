@@ -22,8 +22,8 @@ describe('Fansly browser-session outreach transport', () => {
     const rejected = expect(work).rejects.toMatchObject({ key: 'rate_limited' });
     await vi.advanceTimersByTimeAsync(210_000); await rejected;
     expect(at).toEqual([0, 30_000, 90_000, 210_000]);
-    // Four unhealed limits: the lane gap is 400 ms doubled three times.
-    expect(h.client.followerReadStatus(session)).toEqual({ cooldownUntil: start + 450_000, intervalMs: 3200 });
+    // Four unhealed limits on an ordinary key: the lane gap is 400 ms doubled four times.
+    expect(h.client.followerReadStatus(session)).toEqual({ cooldownUntil: start + 450_000, intervalMs: 6400 });
     const next = h.client.getMessagePage('4', null, h.client.followerSession(h.session), h.signal);
     await vi.advanceTimersByTimeAsync(239_999); expect(at).toHaveLength(4);
     await vi.advanceTimersByTimeAsync(1); await next; expect(at[4]).toBe(450_000);
@@ -60,6 +60,83 @@ describe('Fansly browser-session outreach transport', () => {
     expect(h.client.followerReadStatus(session)?.intervalMs).toBe(800);
     expect(await settle(h.client.getGroup('3', session, h.signal), 2000)).toBe('ok');
     expect(h.client.followerReadStatus(session)?.intervalMs).toBe(400);
+  });
+  it('earns nothing from a refusal inside HTTP 200 and traces its code, never its text', async () => {
+    vi.useFakeTimers();
+    const h = harness(); const session = h.client.followerSession(h.session);
+    const trace = new FollowersTrace({ id: crypto.randomUUID(), tabId: 7, hours: 48, version: 'test', build: 'test' });
+    let mode: 'limit' | 'refuse' | 'answer' = 'limit';
+    vi.stubGlobal('fetch', vi.fn<typeof globalThis.fetch>(async () => mode === 'limit' ? new Response('', { status: 429 })
+      : mode === 'refuse' ? new Response(JSON.stringify({ success: false, error: { code: 22, details: 'private-detail' } }), { status: 200 })
+      : envelope({ users: [] })));
+    const settle = async (work: Promise<unknown>, ms: number) => { const done = work.then(() => 'ok', (error: unknown) => error); await vi.advanceTimersByTimeAsync(ms); return done; };
+    await settle(h.client.getAccountNames(['2'], session, h.signal, 'none'), 0);
+    await settle(h.client.getAccountNames(['2'], session, h.signal, 'none'), 30_000);
+    expect(h.client.followerReadStatus(session)?.intervalMs).toBe(800);
+    await vi.advanceTimersByTimeAsync(60_000 + 300_000);
+    mode = 'refuse';
+    for (let i = 0; i < 25; i++) expect(await settle(h.client.getGroup('3', session, h.signal, trace), 2000)).toMatchObject({ key: 'unknown_error', details: { status: 200, refused: true } });
+    mode = 'answer';
+    // Twenty-five refusals forgave nothing: the level still needs its twenty answers.
+    for (let i = 0; i < 20; i++) expect(await settle(h.client.getGroup('3', session, h.signal), 2000)).toBe('ok');
+    expect(h.client.followerReadStatus(session)?.intervalMs).toBe(800);
+    expect(await settle(h.client.getGroup('3', session, h.signal), 2000)).toBe('ok');
+    expect(h.client.followerReadStatus(session)?.intervalMs).toBe(400);
+    const report = trace.read();
+    expect(report.events.filter((event) => event.name === 'http.refused').map((event) => event.data)).toContainEqual({ status: 200, code: '22' });
+    expect(JSON.stringify(report)).not.toContain('private-detail');
+  });
+  it('refuses to open a chat during a cooldown, never holds a message after custody, and counts a limited write', async () => {
+    vi.useFakeTimers();
+    const h = harness(); const session = h.client.followerSession(h.session);
+    const trace = new FollowersTrace({ id: crypto.randomUUID(), tabId: 7, hours: 48, version: 'test', build: 'test' });
+    const calls: Array<[string, string]> = [];
+    let groupStatus = 200;
+    vi.stubGlobal('fetch', vi.fn<typeof globalThis.fetch>(async (url, init) => {
+      const path = new URL(String(url)).pathname; calls.push([init?.method ?? 'GET', path]);
+      if (init?.method === 'POST' && path.endsWith('/group')) return groupStatus === 200 ? envelope({ id: '3', users: [{ userId: '2' }, { userId: '1' }] }) : new Response(JSON.stringify({ success: false, error: { code: 99, details: 'private-detail' } }), { status: groupStatus, headers: { 'content-type': 'application/json' } });
+      if (init?.method === 'POST') return envelope({ id: '99', groupId: '3', senderId: '1' });
+      return new Response('', { status: 429 });
+    }));
+    const start = Date.now();
+    await expect(h.client.getAccountNames(['2'], session, h.signal, 'none')).rejects.toMatchObject({ key: 'rate_limited' });
+    // Opening a chat is refused at once, with the wait, and nothing is sent to Fansly.
+    await expect(h.client.createFollowerGroup('2', '1', session, h.signal)).rejects.toMatchObject({ key: 'rate_limited', details: { retryAfterMs: 30_000 } });
+    expect(calls.filter(([method]) => method === 'POST')).toEqual([]);
+    expect(Date.now() - start).toBe(0);
+    // A message is past the hub dispatch by now: holding it would outlive the
+    // send deadline and leave a false «не подтверждено» for a message that never left.
+    await expect(h.client.sendFollowerMessage('3', 'hello', '1', session, h.signal)).resolves.toBe('99');
+    expect(Date.now() - start).toBe(0);
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect(h.client.createFollowerGroup('2', '1', session, h.signal)).resolves.toMatchObject({ id: '3' });
+    // A refused write says what it was (status, Fansly's code), never what it said,
+    // and a limited one opens the lane cooldown like a limited read.
+    groupStatus = 403;
+    await expect(h.client.createFollowerGroup('2', '1', session, h.signal, trace)).rejects.toMatchObject({ key: 'fansly_server_error', details: { status: 403, code: '99' } });
+    groupStatus = 429; const limitedAt = Date.now();
+    await expect(h.client.createFollowerGroup('2', '1', session, h.signal, trace)).rejects.toMatchObject({ key: 'fansly_server_error', details: { status: 429 } });
+    expect(h.client.followerReadStatus(session)).toEqual({ cooldownUntil: limitedAt + 60_000, intervalMs: 800 });
+    const report = trace.read();
+    expect(report.events.filter((event) => event.name === 'http.error-body').map((event) => event.data.code)).toEqual(['99', '99']);
+    expect(report.counters['http.start']).toBe(2);
+    expect(JSON.stringify(report)).not.toContain('private-detail');
+    // An ordinary chat client's session is not paced and is never refused
+    // here: the write goes out and it is Fansly's own 429 that comes back.
+    const posts = calls.filter(([method]) => method === 'POST').length;
+    await expect(h.client.createFollowerGroup('2', '1', h.session, h.signal)).rejects.toMatchObject({ key: 'fansly_server_error', details: { status: 429 } });
+    expect(calls.filter(([method]) => method === 'POST')).toHaveLength(posts + 1);
+    // …while the paced session, now cooling down again, is refused locally and says so in the trace.
+    await expect(h.client.createFollowerGroup('2', '1', session, h.signal, trace)).rejects.toMatchObject({ key: 'rate_limited' });
+    expect(calls.filter(([method]) => method === 'POST')).toHaveLength(posts + 1);
+    expect(trace.read().events.filter((event) => event.name === 'http.write-refused').map((event) => event.data.reason)).toEqual(['lane-cooling-down']);
+  });
+  it('marks a read that got no HTTP answer at all, whichever error key it keeps', async () => {
+    const h = harness(); const session = h.client.followerSession(h.session);
+    vi.stubGlobal('fetch', vi.fn<typeof globalThis.fetch>(async () => { throw new TypeError('NetworkError when attempting to fetch resource.'); }));
+    // The participant read is optional and keeps `unknown_error`; `status: 0` is what tells the row recheck it was the network.
+    await expect(h.client.getGroup('3', session, h.signal)).rejects.toMatchObject({ key: 'unknown_error', details: { status: 0 } });
+    await expect(h.client.getMessagePage('3', null, session, h.signal)).rejects.toMatchObject({ key: 'network_error' });
   });
   it('keeps account reads five seconds apart without widening the other routes', async () => {
     vi.useFakeTimers();
@@ -132,7 +209,7 @@ describe('Fansly browser-session outreach transport', () => {
     ]);
     await vi.advanceTimersByTimeAsync(0);
     expect(fetch).toHaveBeenCalledTimes(1);
-    expect(h.client.followerReadStatus(one)).toEqual({ cooldownUntil: started + 90_000, intervalMs: 400 });
+    expect(h.client.followerReadStatus(one)).toEqual({ cooldownUntil: started + 90_000, intervalMs: 800 });
     await vi.advanceTimersByTimeAsync(89_999);
     expect(fetch).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(4001); await work;
