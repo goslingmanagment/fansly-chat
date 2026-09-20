@@ -7,6 +7,7 @@ import {
   automationReason, fanslyAvatarUrl, followedAtFromId, isAutomatedMessage, isPersonalMessage,
   normalizeWelcome, welcomeTexts, type FollowerDisplayMessage, type FollowerMessageEvidence, type FollowerRow, type FollowersSnapshot,
 } from '../shared/followers.js';
+import { AUTOMATED_MESSAGE_LABEL, greetingProfileFields, isAutomatedGreetingMessage } from '../shared/greeting-context.js';
 import type { FanslyAccountResponse, FanslyMessage, PersistedState, SessionTemplate } from '../shared/types.js';
 import type { AgencyHubClient } from './agency-hub-client.js';
 import type { FanslyClient } from './fansly-client.js';
@@ -690,7 +691,7 @@ export class FollowersService {
         id: message.id, createdAt: message.createdAt, senderId: message.senderId,
         senderLabel: message.senderId === scan.snapshot.creatorId ? 'Model' : 'Fan', type: message.type,
         text: message.content || '', labels: [
-          ...(message.senderId === scan.snapshot.creatorId && isAutomatedMessage(message, scan.welcome) ? ['[Automatic / mass message]'] : []),
+          ...(isAutomatedGreetingMessage(message, scan.snapshot.creatorId, scan.welcome) ? [AUTOMATED_MESSAGE_LABEL] : []),
           ...(message.attachments?.length ? ['[Media: purchase state unknown]'] : []),
         ],
       })));
@@ -700,11 +701,7 @@ export class FollowersService {
         return this.options.gateway.streamFeature(state.settings, {
           feature: 'hi-greeting', greetingMode: 'new-follower', clientRequestId,
           pageLabel, conversationRef: fanId, fanRef: fanId, personaKey: persona.key, expectedPersonaDefinitionId: persona.definitionId,
-          clientContext: {
-            ...transcript, fanDisplayName: row.displayName.slice(0, 200), fanUsername: row.username.slice(0, 200),
-            fanCustomName: row.customName?.slice(0, 200), fanBio: row.bio.slice(0, 5000),
-            ...(row.avatarUrl ? { fanAvatarUrl: row.avatarUrl } : {}), fanSpendingData: '', fanSubscriptionData: '',
-          },
+          clientContext: { ...transcript, ...greetingProfileFields(row), fanSpendingData: '', fanSubscriptionData: '' },
         }, {
           onText: () => { if (!firstText) { firstText = true; request?.event('generation.first-text'); } },
           onMeta: (meta) => request?.event('generation.meta', { requestId: meta.requestId, model: meta.model, personaDefinitionId: meta.personaDefinitionId }),
