@@ -231,6 +231,93 @@ describe('welcome definitions service', () => {
   });
 });
 
+describe('welcome definitions for a surface that must never wait (the chat Hi)', () => {
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it('peeks at cached texts of any age without touching Fansly', async () => {
+    const h = harness();
+    expect(await h.service.peek('1')).toBeNull();
+    const checkedAt = Date.now() - 30 * DAY;
+    h.values[KEY] = { texts: ['  old\n welcome '], checkedAt };
+    expect(await h.service.peek('1')).toEqual({ texts: new Set(['old welcome']), checkedAt });
+    h.values[KEY] = { texts: ['ok', 7], checkedAt: Date.now() };
+    expect(await h.service.peek('1')).toBeNull();
+    h.values[KEY] = { texts: ['ok'] };
+    expect(await h.service.peek('1')).toBeNull();
+    expect(h.fansly.getWelcomeDefinitions).not.toHaveBeenCalled();
+    expect(h.fansly.followerSession).not.toHaveBeenCalled();
+    expect(h.storage.set).not.toHaveBeenCalled();
+  });
+
+  it('answers from a cache younger than 24 hours with no network call', async () => {
+    const h = harness();
+    h.values[KEY] = { texts: ['cached welcome'], checkedAt: Date.now() - DAY + 60_000 };
+    expect(await h.service.loadWithin({ creatorId: '1', session, timeoutMs: 20 })).toEqual({ texts: new Set(['cached welcome']), source: 'cache' });
+    expect(h.fansly.getWelcomeDefinitions).not.toHaveBeenCalled();
+    expect(h.fansly.followerSession).not.toHaveBeenCalled();
+  });
+
+  it('reads Fansly once when the cache is cold and the paced lane is free', async () => {
+    const h = harness();
+    expect(await h.service.loadWithin({ creatorId: '1', session, timeoutMs: 1000 })).toEqual({ texts: new Set(['auto welcome']), source: 'fresh' });
+    expect(h.fansly.getWelcomeDefinitions).toHaveBeenCalledOnce();
+    expect(h.fansly.getWelcomeDefinitions.mock.calls[0]![0]).toBe(h.paced[0]);
+    // Never a forced-fresh read: the next Hi is a cache hit.
+    expect((await h.service.loadWithin({ creatorId: '1', session, timeoutMs: 1000 })).source).toBe('cache');
+    expect(h.fansly.getWelcomeDefinitions).toHaveBeenCalledOnce();
+  });
+
+  it('uses the stale texts when the read does not finish in time, then nothing, and lets the read fill the cache', async () => {
+    const h = harness();
+    const gate = deferred<unknown>();
+    h.fansly.getWelcomeDefinitions.mockReturnValue(gate.promise);
+    h.values[KEY] = { texts: ['old welcome'], checkedAt: Date.now() - 3 * DAY };
+    expect(await h.service.loadWithin({ creatorId: '1', session, timeoutMs: 20 })).toEqual({ texts: new Set(['old welcome']), source: 'stale', reason: 'timeout' });
+
+    const cold = harness();
+    cold.fansly.getWelcomeDefinitions.mockReturnValue(gate.promise);
+    expect(await cold.service.loadWithin({ creatorId: '1', session, timeoutMs: 20 })).toEqual({ texts: new Set(), source: 'none', reason: 'timeout' });
+    // A second Hi during the same slow read joins it instead of queueing another.
+    expect((await cold.service.loadWithin({ creatorId: '1', session, timeoutMs: 20 })).source).toBe('none');
+    expect(cold.fansly.getWelcomeDefinitions).toHaveBeenCalledOnce();
+    expect(cold.fansly.getWelcomeDefinitions.mock.calls[0]![1].aborted).toBe(false);
+
+    gate.resolve(definitions('auto welcome'));
+    await vi.waitFor(() => expect(cold.values[KEY]).toMatchObject({ texts: ['auto welcome'] }));
+    expect(await cold.service.loadWithin({ creatorId: '1', session, timeoutMs: 20 })).toEqual({ texts: new Set(['auto welcome']), source: 'cache' });
+    expect(cold.fansly.getWelcomeDefinitions).toHaveBeenCalledOnce();
+  });
+
+  it('uses the stale texts when the read fails, then nothing', async () => {
+    const h = harness();
+    h.fansly.getWelcomeDefinitions.mockRejectedValue(new Error('offline'));
+    expect(await h.service.loadWithin({ creatorId: '1', session, timeoutMs: 1000 })).toEqual({ texts: new Set(), source: 'none', reason: 'error' });
+    h.values[KEY] = { texts: ['old welcome'], checkedAt: Date.now() - 3 * DAY };
+    expect(await h.service.loadWithin({ creatorId: '1', session, timeoutMs: 1000 })).toEqual({ texts: new Set(['old welcome']), source: 'stale', reason: 'error' });
+  });
+
+  it('degrades on unreadable storage or a corrupt cache instead of failing the caller', async () => {
+    const h = harness();
+    h.values[KEY] = { texts: ['ok', 7], checkedAt: Date.now() };
+    expect(await h.service.loadWithin({ creatorId: '1', session, timeoutMs: 1000 })).toEqual({ texts: new Set(), source: 'none', reason: 'error' });
+    h.storage.get.mockRejectedValue(new Error('storage offline'));
+    expect(await h.service.loadWithin({ creatorId: '1', session, timeoutMs: 1000 })).toEqual({ texts: new Set(), source: 'none', reason: 'error' });
+  });
+
+  it('rejects only when the caller itself is cancelled', async () => {
+    const h = harness();
+    const gate = deferred<unknown>();
+    h.fansly.getWelcomeDefinitions.mockReturnValue(gate.promise);
+    const leaving = new AbortController();
+    const pending = h.service.loadWithin({ creatorId: '1', session, timeoutMs: 5000, signal: leaving.signal });
+    await vi.waitFor(() => expect(h.fansly.getWelcomeDefinitions).toHaveBeenCalledOnce());
+    leaving.abort(new DOMException('route changed', 'AbortError'));
+    await expect(pending).rejects.toThrow('route changed');
+    await expect(h.service.loadWithin({ creatorId: '1', session, timeoutMs: 5000, signal: leaving.signal })).rejects.toThrow('route changed');
+    gate.resolve(definitions('auto welcome'));
+  });
+});
+
 describe('welcome definitions shared with the followers window', () => {
   afterEach(() => { vi.restoreAllMocks(); });
 

@@ -24,6 +24,17 @@ export interface WelcomeLoadRequest {
   signal?: AbortSignal;
 }
 
+/** A read that never waits long: where the texts came from, and why not from
+ * Fansly when they did not. */
+export interface BoundedWelcomeDefinitions {
+  texts: Set<string>;
+  /** `cache`: younger than 24 h, no network. `fresh`: read now. `stale`: an
+   * older cache, because the read failed or did not finish in time. `none`:
+   * nothing known, automation is judged by the independent markers only. */
+  source: 'cache' | 'fresh' | 'stale' | 'none';
+  reason?: 'timeout' | 'error';
+}
+
 interface Options {
   fansly: Pick<FanslyClient, 'followerSession' | 'getWelcomeDefinitions'>;
   storage: Storage;
@@ -52,6 +63,37 @@ export class WelcomeDefinitionsService {
       signal.addEventListener('abort', aborted, { once: true });
       void work.then(resolve, reject).finally(() => signal.removeEventListener('abort', aborted));
     });
+  }
+
+  /** Cached texts of ANY age, without touching Fansly. Null when nothing
+   * readable is cached. */
+  async peek(creatorId: string): Promise<WelcomeDefinitions | null> {
+    const storageKey = welcomeStorageKey(creatorId);
+    const cached = (await this.options.storage.get(storageKey))[storageKey] as { texts?: unknown; checkedAt?: unknown } | undefined;
+    if (typeof cached?.checkedAt !== 'number' || !Array.isArray(cached.texts) || !cached.texts.every((v: unknown) => typeof v === 'string')) return null;
+    return { texts: new Set((cached.texts as string[]).map(normalizeWelcome)), checkedAt: cached.checkedAt };
+  }
+
+  /** Cache-first read for a surface that must never wait on Fansly (the chat
+   * Hi): a cache younger than 24 h answers at once; otherwise the normal paced
+   * load gets `timeoutMs`, and past it (or on its failure) the stale cache
+   * answers, else an empty set. The shared read keeps running and fills the
+   * cache for the next caller. Only the caller's own `signal` rejects. */
+  async loadWithin({ timeoutMs, signal, ...request }: Omit<WelcomeLoadRequest, 'fresh'> & { timeoutMs: number }): Promise<BoundedWelcomeDefinitions> {
+    signal?.throwIfAborted();
+    const cached = await this.peek(request.creatorId).catch(() => null);
+    signal?.throwIfAborted();
+    if (cached && Date.now() - cached.checkedAt < WELCOME_CACHE_MS) return { texts: cached.texts, source: 'cache' };
+    const timeout = AbortSignal.timeout(timeoutMs);
+    try {
+      const loaded = await this.load({ ...request, signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
+      // `load` itself answers a failed Fansly read with the stale cache.
+      return cached && loaded.checkedAt === cached.checkedAt ? { texts: loaded.texts, source: 'stale', reason: 'error' } : { texts: loaded.texts, source: 'fresh' };
+    } catch {
+      signal?.throwIfAborted();
+      const reason = timeout.aborted ? 'timeout' : 'error';
+      return cached ? { texts: cached.texts, source: 'stale', reason } : { texts: new Set(), source: 'none', reason };
+    }
   }
 
   private async read({ creatorId: creator, session, fresh = false, trace: parent, traceId }: WelcomeLoadRequest): Promise<WelcomeDefinitions> {
