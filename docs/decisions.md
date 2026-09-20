@@ -122,6 +122,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E129 | 2026-09-19 | Re-vendor the SDK from deployed Core `b1d3bb81` before publishing 2.4.2; the release gate stopped the first attempt before signing |
 | E130 | 2026-09-20 | Fansly pacer replaces the follower read scheduler: policy per route family, learned spacing per key, 400 ms jittered lane gap, a limit slows its own key first, limits survive the background page; transient 404 rows rechecked once; unreleased until a live trace |
 | E131 | 2026-09-20 | Owner releases E130 as 2.4.3 without the temporary-load trace; the first production scans are the live measurement, the feed is the rollback |
+| E132 | 2026-09-20 | Pacer safety patch after two reviews and the first production trace: jitter on the binding deadline, a first limit widens the lane, FBuddy-grade cooldown, success only for a validated envelope, narrow delayed recheck with a fuse, writes refused under a cooldown, upward probing deleted |
 
 ## Entries
 
@@ -4384,3 +4385,70 @@ per the owner's numbering (E120); package and manifest advance together, both
 changelogs, the landing stamp and the README move with them. The vendored SDK
 already carries production's contract hash `8e761076…` (checked against
 `/api/v1/health` before the bump), so no re-vendor is needed.
+
+**E132 (2026-09-20).** The first production trace of 2.4.3 (148 followers,
+48 h, first 34 s) confirms E130's pace: 55 check-phase reads in 27.6 s, all
+200, no 429, no 404. It also shows what E130 got wrong: back-to-back reads of
+one key started 500-506 ms apart every time. The jitter was added to the lane
+gap only, the key spacing always bound later, so the dominant phase of a scan
+went out as a metronome. Two independent reviews of `0d27c52` (a Fable
+reviewer, then Codex blind) found no ship blocker and agree on the rest below;
+a third pass asked only what could be deleted.
+
+Corrections to E130. "Safer than FBuddy at every moment" was wrong on the
+reaction to a limit. FBuddy's cooldown is `max(5 s x 2^(consecutive-1),
+1.25 s x reads answered since the previous limit, spacing x clamp(answers,
+8..120))` up to 300 s: after forty answered reads it is already 50 s, ours was
+30 s. FBuddy also has one policy for every route, keys without the creator, no
+Retry-After and dead "global" options: there is no per-route tuning to borrow.
+And route independence is evidenced for `/account*` only (E128); for every
+other key it was FBuddy's assumption, not ours to inherit.
+
+Changes. (1) The jitter (0-100 ms) rides on whichever deadline binds, the lane
+gap or the key spacing. (2) A limit on an ordinary key widens the whole lane
+from the first one (400 ms x 2 per unhealed limit, 8 s at most); a policy
+marked `isolated`, today only `/account*`, slows its own key first and the lane
+from its second unhealed limit, as in E130. The lane gap comes back one step
+per forgiven level and every limited key halves toward its floor with it.
+(3) Cooldown = max(Retry-After capped at 6 h, the 30/60/120/240/300 s ladder,
+1.25 s per read answered since the previous limit up to 300 s). An HTTP-date
+from a skewed clock could park a creator for years and was persisted. (4) A
+read counts as answered only after its envelope is validated; `success:false`
+inside HTTP 200 earns nothing and its code is traced (`http.refused`). (5) The
+upward probing of E130 is deleted, not disabled: it earned at most ~3 s a scan,
+most keys never exercised it, and a 34-second clean trace says nothing about a
+faster sustained pace. A key never runs faster than its policy; the controller
+keeps the limit, its 24 h memory and the quarter margin. (6) The 1 s storage
+deadline stays, but an answer that arrives late is merged in (the stricter of
+each field) instead of discarded; a failed restore cannot wedge the lane; an
+idle lane that only keeps a remembered limit no longer writes on every
+acquire; a lane saved by 2.4.3 loads with its old gap rule. (7) Pace families
+match their method. (8) Row recheck (E130) is narrowed: once, only after HTTP
+404 or a network error, not sooner than 3 s (the live 404s came in runs of two
+or three seconds), never after a 5xx (the transport already spent four
+attempts), a refusal inside 200, or a search that gave up after twenty pages
+(which cost forty requests for a short username). Five blips in a row stop the
+pass with «Fansly отвечает ошибками…» and Continue resumes it. (9) Follower
+writes stay one attempt and outside the spacing queue. `POST /group` is refused
+at once with `rate_limited` while the lane is cooling down; `POST /message` is
+never held: by then the hub holds a dispatch, and a wait that outlives the
+send deadline would leave a permanent false «не подтверждено» for a message
+that never left. A write Fansly limits counts against the lane. A refused
+write carries `{status, code}` and a body-shape trace event; its error key
+stays the ambiguous one, so send custody is unchanged. (10) Note batches wait
+out the `/account*` gap off the lane: inside the FIFO a batch sitting out its
+5 s held every other read, and a send made meanwhile took 13.5 s in the
+audited run.
+
+Not done, on purpose. The two-stage queue that would let ready keys pass a
+waiting key: it is latency work on the ban-safety core, the observed stall has
+the one-line cure above, and it does not remove a generation's own wait on the
+`/account*` key. A clock stepping backwards can still put a lane to sleep for
+the size of the step. A 404 is still not treated as a throttle: the first
+production trace had none, and `http.error-body` has yet to see one.
+Supersedes E130's jitter placement, first-limit rule, 30 s first cooldown,
+`floorMs` and learned acceleration, and its broad recheck. This reverses one
+line of the 2.4.3 changelog («Ограничение замедляет только своё»): it now
+holds for `/account*` only. Validation is synthetic: mock transport, fake
+timers, thirty-six manual mutations of these rules. Ships with E133 in one
+release.

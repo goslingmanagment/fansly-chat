@@ -422,7 +422,6 @@ export class FanslyClient {
           credentials: 'omit',
         });
         attemptTrace?.event('http.response', { status: response.status });
-        if (response.ok) permit?.served();
 
         if (response.status === 401 || response.status === 403) {
           this.sessionStore.markDisconnected(session.accountId);
@@ -471,14 +470,21 @@ export class FanslyClient {
           throw new ChatGooseError('fansly_server_error', undefined, details);
         }
 
-        const data = (await response.json()) as { success: boolean; response?: T; error?: string };
+        const data = (await response.json()) as { success: boolean; response?: T; error?: unknown };
         if (!data.success || data.response === undefined) {
+          // A refusal inside HTTP 200 is not an answer: it earns the lane
+          // nothing, and its code is the only clue to what Fansly objected to.
+          const code = (data.error as { code?: unknown } | null | undefined)?.code;
+          attemptTrace?.event('http.refused', { status: response.status, code: typeof code === 'number' || typeof code === 'string' ? String(code).slice(0, 40) : null });
+          const details = { status: response.status, refused: true };
           if (optional) {
-            throw new ChatGooseError('unknown_error');
+            throw new ChatGooseError('unknown_error', undefined, details);
           }
-          throw new ChatGooseError('fansly_server_error');
+          throw new ChatGooseError('fansly_server_error', undefined, details);
         }
 
+        // Only a validated envelope counts as Fansly answering this read (E132).
+        permit?.served();
         attemptTrace?.end({ status: response.status, outcome: 'success' });
         return data.response;
       } catch (error) {
@@ -562,6 +568,15 @@ export class FanslyClient {
     const check = session.routeChecks[path] ?? session.latestCheck;
     if (check) headers.set('fansly-client-check', check);
     const requestUrl = withNgswBypass(new URL(`https://apiv3.fansly.com/api/v1/${path}`));
+    // A write stays one attempt and outside the read spacing. Opening a chat
+    // is refused at once while Fansly has the creator's lane in a cooldown;
+    // a message is never held here: by then the hub holds a dispatch, and a
+    // wait that outlives the send deadline would leave a false «не
+    // подтверждено» for a message that never left (E132).
+    const creatorId = session.resolvedAccountId ?? session.accountId;
+    const paced = this.followerSessions.has(session);
+    const coolingMs = paced && path === 'group' ? (this.followerReads.status(creatorId)?.cooldownUntil ?? 0) - Date.now() : 0;
+    if (coolingMs > 0) throw new ChatGooseError('rate_limited', { details: { status: 429, retryAfterMs: coolingMs, retryAtMs: Date.now() + coolingMs }, retryAfterMs: coolingMs, retryAtMs: Date.now() + coolingMs });
     const attemptTrace = trace?.start('http', { method: 'POST', path: requestUrl.pathname, query: requestUrl.search, attempt: 1, retry: false, timeoutMs: FANSLY_REQUEST_TIMEOUT_MS });
     try {
       const response = await fetch(requestUrl, {
@@ -569,9 +584,21 @@ export class FanslyClient {
         signal: AbortSignal.any([signal, AbortSignal.timeout(FANSLY_REQUEST_TIMEOUT_MS)]),
       });
       attemptTrace?.event('http.response', { status: response.status });
-      if (!response.ok) throw new ChatGooseError('fansly_server_error');
-      const envelope = await response.json() as { success?: boolean; response?: T };
-      if (envelope.success !== true || !envelope.response) throw new ChatGooseError('fansly_server_error');
+      if (!response.ok) {
+        if (paced && response.status === 429) this.followerReads.refused(creatorId, 'POST', requestUrl.pathname, parseRetryAfterMs(response.headers.get('retry-after')), trace);
+        // What the refusal is, never what it says; the error key stays the
+        // ambiguous one so send custody keeps treating it as unconfirmed.
+        const shape = bodyShape(response, await readResponseSnippet(response));
+        attemptTrace?.event('http.error-body', shape);
+        throw new ChatGooseError('fansly_server_error', undefined, { status: response.status, ...(typeof shape.code === 'string' ? { code: shape.code } : {}) });
+      }
+      const envelope = await response.json() as { success?: boolean; response?: T; error?: unknown };
+      if (envelope.success !== true || !envelope.response) {
+        const code = (envelope.error as { code?: unknown } | null | undefined)?.code;
+        const known = typeof code === 'number' || typeof code === 'string' ? String(code).slice(0, 40) : undefined;
+        attemptTrace?.event('http.refused', { status: response.status, code: known ?? null });
+        throw new ChatGooseError('fansly_server_error', undefined, { status: response.status, refused: true, ...(known ? { code: known } : {}) });
+      }
       attemptTrace?.end({ status: response.status, outcome: 'success' });
       return envelope.response;
     } catch (error) { attemptTrace?.fail(error); throw error; }

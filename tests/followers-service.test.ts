@@ -201,37 +201,81 @@ describe('followers scan and one-attempt send', () => {
     expect(h.service.state(7, first.scanId)).toMatchObject({ canContinue: false, rows: [{ status: 'ready' }] });
     expect(h.fansly.getFollowerPage).toHaveBeenCalledOnce();
   });
-  it('rechecks a row once after a transient Fansly failure and leaves a second failure to Continue', async () => {
-    const refused = () => new ChatGooseError('fansly_server_error', undefined, { status: 404 });
+  it('asks a row again only after a blip, not sooner than three seconds, and never after what will not pass on its own', async () => {
+    vi.useFakeTimers();
+    const blip = () => new ChatGooseError('fansly_server_error', undefined, { status: 404 });
     const once = harness(true);
-    once.fansly.listFanAccounts.mockResolvedValue({ fans: [], truncated: true });
-    once.fansly.findFollowerGroup.mockRejectedValueOnce(refused()).mockResolvedValue(null);
-    const healed = await once.start();
-    expect(healed).toMatchObject({ canContinue: false, rows: [{ status: 'ready', detail: undefined }] });
-    expect(once.fansly.findFollowerGroup).toHaveBeenCalledTimes(2);
-    const events = once.service.traces.get(healed.scanId)!.read().events;
-    expect(events).toContainEqual(expect.objectContaining({ name: 'row.recheck', data: { fanId: '2', errorCode: 'fansly_server_error' } }));
+    once.fansly.getMessagePage.mockRejectedValueOnce(blip());
+    const first = await once.service.start(7, 48);
+    await vi.advanceTimersByTimeAsync(2999);
+    // The live 404s came in runs of two or three seconds: no second read inside that window.
+    expect(once.fansly.getMessagePage).toHaveBeenCalledTimes(1);
+    expect(once.service.state(7, first.scanId)).toMatchObject({ scanning: true, rows: [{ status: 'checking' }] });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(once.service.state(7, first.scanId)).toMatchObject({ scanning: false, canContinue: false, rows: [{ status: 'ready', detail: undefined }] });
+    expect(once.fansly.getMessagePage).toHaveBeenCalledTimes(2);
+    const events = once.service.traces.get(first.scanId)!.read().events;
+    expect(events).toContainEqual(expect.objectContaining({ name: 'row.recheck', data: { fanId: '2', errorCode: 'fansly_server_error', status: 404 } }));
     expect(events.filter((event) => event.name === 'row.verdict').map((event) => event.data.status)).toEqual(['ready']);
 
-    const twice = harness();
-    twice.fansly.listFanAccounts.mockResolvedValue({ fans: [], truncated: true });
-    twice.fansly.findFollowerGroup.mockRejectedValue(refused());
-    expect(await twice.start()).toMatchObject({ canContinue: true, rows: [{ status: 'unknown' }] });
-    expect(twice.fansly.findFollowerGroup).toHaveBeenCalledTimes(2);
+    const settle = async (setup: (h: ReturnType<typeof harness>) => void) => { const h = harness(); setup(h); const scan = await h.service.start(7, 48); await vi.advanceTimersByTimeAsync(10_000); return { h, state: h.service.state(7, scan.scanId) }; };
+    const twice = await settle((h) => h.fansly.getMessagePage.mockRejectedValue(blip()));
+    expect(twice.state).toMatchObject({ canContinue: true, rows: [{ status: 'unknown' }] });
+    expect(twice.h.fansly.getMessagePage).toHaveBeenCalledTimes(2);
+    const network = await settle((h) => h.fansly.getMessagePage.mockRejectedValueOnce(new ChatGooseError('network_error')));
+    expect(network.state).toMatchObject({ canContinue: false, rows: [{ status: 'ready' }] });
+    expect(network.h.fansly.getMessagePage).toHaveBeenCalledTimes(2);
 
-    // Only a refusal that may pass on its own is asked again: an expired
-    // session will not, and a second read on it helps nobody.
-    const expired = harness();
-    expired.fansly.listFanAccounts.mockResolvedValue({ fans: [], truncated: true });
-    expired.fansly.findFollowerGroup.mockRejectedValue(new ChatGooseError('session_expired'));
-    expect(await expired.start()).toMatchObject({ canContinue: true, rows: [{ status: 'unknown' }] });
-    expect(expired.fansly.findFollowerGroup).toHaveBeenCalledOnce();
-
-    // A chat whose participants cannot be confirmed is a verdict, not a blip.
-    const custody = harness();
-    custody.fansly.getGroup.mockResolvedValue({ users: [{ userId: '1' }, { userId: '99' }] });
-    expect(await custody.start()).toMatchObject({ canContinue: true, rows: [{ status: 'unknown' }] });
-    expect(custody.fansly.getGroup).toHaveBeenCalledOnce();
+    // Asked once only: the transport already spent its own retries on a 5xx,
+    // a refusal inside HTTP 200 is an answer, an expired session will not
+    // come back, and a chat whose participants cannot be confirmed is a verdict.
+    for (const error of [
+      new ChatGooseError('fansly_server_error', undefined, { status: 503 }),
+      new ChatGooseError('fansly_server_error', undefined, { status: 200, refused: true }),
+      new ChatGooseError('fansly_server_error'),
+      new ChatGooseError('session_expired'),
+    ]) {
+      const final = await settle((h) => h.fansly.getMessagePage.mockRejectedValue(error));
+      expect(final.state).toMatchObject({ canContinue: true, rows: [{ status: 'unknown' }] });
+      expect(final.h.fansly.getMessagePage).toHaveBeenCalledOnce();
+    }
+    const custody = await settle((h) => h.fansly.getGroup.mockResolvedValue({ users: [{ userId: '1' }, { userId: '99' }] }));
+    expect(custody.state).toMatchObject({ canContinue: true, rows: [{ status: 'unknown' }] });
+    expect(custody.h.fansly.getGroup).toHaveBeenCalledOnce();
+  });
+  it('stops the pass on a run of blips instead of doubling the load on a failing Fansly', async () => {
+    vi.useFakeTimers();
+    const h = harness(true);
+    const firstId = BigInt(Date.now() - 3600_000 - 1561494360000) << 22n;
+    const fans = Array.from({ length: 12 }, (_, i) => ({ id: String(firstId - BigInt(i)), followerId: String(i + 2) }));
+    h.fansly.getFollowerPage.mockResolvedValue({ followers: fans, aggregationData: { accounts: fans.map((fan) => ({ id: fan.followerId, username: `fan${fan.followerId}`, notes: [] })) } });
+    h.fansly.listFanAccounts.mockResolvedValue({ fans: fans.map((fan) => ({ groupId: String(Number(fan.followerId) + 1000), fanAccountId: fan.followerId })), truncated: true });
+    h.fansly.getGroup.mockImplementation(async (id: string) => ({ users: [{ userId: '1' }, { userId: String(Number(id) - 1000) }] }));
+    h.fansly.getMessagePage.mockRejectedValue(new ChatGooseError('fansly_server_error', undefined, { status: 404 }));
+    const scan = await h.service.start(7, 48);
+    await vi.advanceTimersByTimeAsync(60_000);
+    const state = h.service.state(7, scan.scanId);
+    // Five failed reads plus the two already under way in the other workers,
+    // not twenty-four: nothing new is asked once the fuse trips.
+    expect(h.fansly.getMessagePage.mock.calls.length).toBeGreaterThanOrEqual(5);
+    expect(h.fansly.getMessagePage.mock.calls.length).toBeLessThanOrEqual(7);
+    expect(state).toMatchObject({ scanning: false, canContinue: true });
+    expect(state.rows.every((row) => row.status === 'unknown' && row.detail === 'Fansly отвечает ошибками. Проверка остановлена — нажмите «Продолжить» позже.')).toBe(true);
+    const events = h.service.traces.get(scan.scanId)!.read().events;
+    expect(events.filter((event) => event.name === 'rows.fuse').map((event) => event.data)).toEqual([{ failures: 5 }]);
+    // Answered reads between blips are not a run: the fuse counts consecutive
+    // failures only, so six scattered blips in twenty rows stop nothing.
+    const mixed = harness();
+    const many = Array.from({ length: 20 }, (_, i) => ({ id: String(firstId - BigInt(i)), followerId: String(i + 2) }));
+    mixed.fansly.getFollowerPage.mockResolvedValue({ followers: many, aggregationData: { accounts: many.map((fan) => ({ id: fan.followerId, username: `fan${fan.followerId}`, notes: [] })) } });
+    mixed.fansly.listFanAccounts.mockResolvedValue({ fans: many.map((fan) => ({ groupId: String(Number(fan.followerId) + 1000), fanAccountId: fan.followerId })), truncated: true });
+    mixed.fansly.getGroup.mockImplementation(async (id: string) => ({ users: [{ userId: '1' }, { userId: String(Number(id) - 1000) }] }));
+    const failed = new Set<string>();
+    mixed.fansly.getMessagePage.mockImplementation(async (group: string) => { if (['1004', '1007', '1010', '1013', '1016', '1019'].includes(group) && !failed.has(group)) { failed.add(group); throw new ChatGooseError('network_error'); } return { messages: [], accountMedia: [], accountMediaBundles: [] }; });
+    const second = await mixed.service.start(7, 48);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(mixed.service.state(7, second.scanId).rows.every((row) => row.status === 'ready')).toBe(true);
+    expect(failed.size).toBe(6);
   });
   it('replays the live 146-fan trace: a throttled /account?ids= costs no verdict, no pause and no lasting slowdown', async () => {
     vi.useFakeTimers();
@@ -266,20 +310,23 @@ describe('followers scan and one-attempt send', () => {
     expect(times.at(-1)?.ids).toBe(true);
     const pages = times.filter((entry) => entry.path.endsWith('/followersnew'));
     expect(pages[1]!.at - pages[0]!.at).toBeGreaterThanOrEqual(5000);
-    // One limit, on the /account family: the lane gap stays at its base (E130).
-    expect(final.pacing).toEqual({ cooldownUntil: times.at(-1)!.at + 30_000, intervalMs: 400 });
+    // One limit, on the isolated /account family: the lane gap stays at its
+    // base (E130). The cooldown is FBuddy-grade (E132): 1.25 s for every read
+    // Fansly answered since the previous limit, here well past the 30 s step.
+    const answered = times.filter((entry) => entry.status === 200).length;
+    expect(answered).toBeGreaterThan(140);
+    expect(final.pacing).toEqual({ cooldownUntil: times.at(-1)!.at + Math.min(300_000, answered * 1250), intervalMs: 400 });
     const report = h.service.traces.get(first.scanId)!.read();
     expect(report.events).toContainEqual(expect.objectContaining({ name: 'notes.skipped', data: { reason: 'rate_limited', remaining: 146 } }));
     expect(report.events).toContainEqual(expect.objectContaining({ name: 'http.cooldown', data: expect.objectContaining({ route: 'GET /account*', spacingMs: 10_000, intervalMs: 400 }) }));
-    // The limit was the account family's, so the searches never slowed down:
-    // they started at 500 ms and earned 400 ms within the scan.
-    const earned = times.filter((entry) => entry.path.endsWith('/messaging/groups')).map((entry) => entry.at);
-    expect(earned[2]! - earned[1]!).toBe(500);
-    expect(earned.at(-1)! - earned.at(-2)!).toBe(400);
+    // The limit was the account family's, so the searches never slowed down,
+    // and no key runs faster than its policy (E132): 500 ms from first to last.
+    const paced = times.filter((entry) => entry.path.endsWith('/messaging/groups')).map((entry) => entry.at);
+    expect(paced[2]! - paced[1]!).toBe(500);
+    expect(paced.at(-1)! - paced.at(-2)!).toBe(500);
     // The owner's next scan came 8.5 minutes later, before the lane counts as
-    // idle: the searches keep the pace they earned, the account family keeps
-    // its doubled gap, and idle time still forgives nothing: the level heals
-    // only after twenty answered reads of that scan.
+    // idle: the account family keeps its doubled gap, and idle time still
+    // forgives nothing: the level heals only after twenty answered reads.
     await vi.advanceTimersByTimeAsync(510_000);
     const before = times.length;
     const second = await h.service.start(7, 48);
@@ -287,11 +334,41 @@ describe('followers scan and one-attempt send', () => {
     expect(h.service.state(7, second.scanId).rows.every((row) => row.status === 'ready')).toBe(true);
     const searches = times.slice(before).filter((entry) => entry.path.endsWith('/messaging/groups')).map((entry) => entry.at);
     const gaps = searches.slice(1).map((value, index) => value - searches[index]!);
-    expect(gaps[1]).toBe(400);
-    expect(gaps.at(-1)).toBe(400);
+    expect(gaps[1]).toBe(500);
+    expect(gaps.at(-1)).toBe(500);
     const pagesAgain = times.slice(before).filter((entry) => entry.path.endsWith('/followersnew'));
     expect(pagesAgain[1]!.at - pagesAgain[0]!.at).toBeGreaterThanOrEqual(10_000);
     expect(h.service.traces.get(second.scanId)!.read().events.filter((event) => event.name === 'http.heal').map((event) => event.data)).toEqual([{ from: 1, to: 0, intervalMs: 400 }]);
+    h.service.close(7);
+  });
+  it('waits out the /account gap between note batches off the lane, so no other read is held behind it', async () => {
+    vi.useFakeTimers();
+    const h = harness(true, true); vi.spyOn(Math, 'random').mockReturnValue(0);
+    const firstId = BigInt(Date.now() - 3600_000 - 1561494360000) << 22n;
+    const fans = Array.from({ length: 146 }, (_, i) => ({ id: String(firstId - BigInt(i)), followerId: String(i + 2) }));
+    const notes: number[] = [];
+    vi.stubGlobal('fetch', vi.fn<typeof globalThis.fetch>(async (input) => {
+      const url = new URL(String(input));
+      let response: unknown;
+      if (url.pathname.endsWith('/message/automated')) response = [];
+      else if (url.pathname.endsWith('/followersnew')) {
+        const page = url.searchParams.get('before') === '0' ? fans.slice(0, 100) : fans.slice(100);
+        response = { followers: page, aggregationData: { accounts: page.map((fan) => ({ id: fan.followerId, username: `fan${fan.followerId}` })) } };
+      } else if (url.pathname.endsWith('/messaging/groups')) response = { data: [] };
+      else if (url.pathname === '/api/v1/account') { notes.push(Date.now()); response = (url.searchParams.get('ids') ?? '').split(',').map((id) => ({ id, username: `fan${id}`, notes: [] })); }
+      else throw new Error(`Unexpected route ${url.pathname}`);
+      return new Response(JSON.stringify({ success: true, response }), { status: 200 });
+    }));
+    const scan = await h.service.start(7, 48);
+    await vi.advanceTimersByTimeAsync(400_000);
+    expect(h.service.state(7, scan.scanId).scanning).toBe(false);
+    expect(notes).toHaveLength(2);
+    expect(notes[1]! - notes[0]!).toBeGreaterThanOrEqual(5000);
+    // Inside the FIFO that gap held every other read: in the audited run a
+    // send made meanwhile took 13.5 s. Off the lane the batch queues for nothing.
+    const events = h.service.traces.get(scan.scanId)!.read().events;
+    const planned = events.find((event) => event.name === 'notes.plan')!.seq;
+    expect(events.filter((event) => event.seq > planned && event.name === 'http.queue-wait' && event.data.reason === 'route-spacing').map((event) => event.data.waitMs)).toEqual([]);
     h.service.close(7);
   });
   it('runs 194 fans through the real paced transport, preserves all verdicts after 429 and logs every actual request', async () => {
@@ -340,10 +417,10 @@ describe('followers scan and one-attempt send', () => {
     const history = times.filter((entry) => entry.path === '/api/v1/message');
     expect(history[2]!.at - history[1]!.at).toBeGreaterThanOrEqual(1000);
     for (let i = 1; i < history.length; i++) expect(history[i]!.at - history[i - 1]!.at).toBeGreaterThanOrEqual(625);
-    // Searches that alternate with chat reads never ran at their own spacing
-    // and prove nothing; only the last run of back-to-back searches earns a step.
+    // The limit was on an ordinary key, so the whole lane widened with it (E132).
+    expect(times[limitIndex + 2]!.at - times[limitIndex + 1]!.at).toBeGreaterThanOrEqual(800);
     const searches = times.filter((entry) => entry.path.endsWith('/messaging/groups'));
-    expect(Math.min(...searches.slice(1).map((entry, index) => entry.at - searches[index]!.at))).toBe(450);
+    expect(Math.min(...searches.slice(1).map((entry, index) => entry.at - searches[index]!.at))).toBeGreaterThanOrEqual(500);
     const report = h.service.traces.get(first.scanId)!.read();
     expect(report.counters['http.start']).toBe(times.length);
     expect(report.droppedEvents).toBe(0);

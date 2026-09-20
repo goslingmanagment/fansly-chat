@@ -47,6 +47,21 @@ interface Options {
 
 const key = (kind: string, creator: string, fan = '') => `chatgoose:followers:v1:${kind}:${creator}:${fan}`;
 const ready = (row: FollowerRow) => row.status === 'ready' || row.status === 'reply';
+/** A blip is asked again no sooner than this: the live 404s came in runs of two or three seconds. */
+const RECHECK_DELAY_MS = 3000;
+/** This many blips in a row stop the pass instead of doubling the load on a failing Fansly. */
+const RECHECK_FUSE = 5;
+/** The `/account*` family's own spacing (E128), waited between note batches off the lane. */
+const NOTES_GAP_MS = 5000;
+const FUSED_TEXT = 'Fansly отвечает ошибками. Проверка остановлена — нажмите «Продолжить» позже.';
+function pause(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const abort = () => { clearTimeout(timer); reject(signal.reason); };
+    const timer = setTimeout(() => { signal.removeEventListener('abort', abort); resolve(); }, ms);
+    signal.addEventListener('abort', abort, { once: true });
+    if (signal.aborted) abort();
+  });
+}
 function errorText(error: unknown): string {
   if (error instanceof Error && ['AbortError', 'TimeoutError'].includes(error.name)) return 'Не успели проверить Fansly. Продолжите проверку или обновите список.';
   return error instanceof ChatGooseError ? toUserError(error).message : error instanceof Error ? error.message : 'Не удалось проверить Fansly.';
@@ -353,21 +368,34 @@ export class FollowersService {
     // Fansly answers some reads 404 for a second or two on routes that work
     // (live trace, E130). Such a row goes to the back of the queue once,
     // through the same paced lane, before it is left for a human Continue.
-    const rechecked = new Set<string>();
+    // Only a blip is asked again (E132): a 5xx already spent the transport's
+    // own retries, and a search that gave up after twenty pages will give up
+    // again. A run of blips is an incident, not bad luck: the pass stops.
+    const retryAt = new Map<string, number>();
+    let blips = 0, fused = false;
     await Promise.all(Array.from({ length: Math.min(3, queue.length) }, async () => {
       while (!signal.aborted) {
         this.assertCurrent(scan);
         const row = queue.shift();
         if (!row) return;
-        try { await this.check(scan, row, signal); }
-        catch (error) {
-          if (!signal.aborted && !rechecked.has(row.id) && error instanceof ChatGooseError && ['fansly_server_error', 'unknown_error', 'network_error'].includes(error.key)) {
-            rechecked.add(row.id); row.status = 'checking'; row.detail = undefined; queue.push(row);
-            scan.trace?.event('row.recheck', { fanId: row.id, errorCode: error.key });
+        try {
+          const waitMs = (retryAt.get(row.id) ?? 0) - Date.now();
+          if (waitMs > 0) await pause(waitMs, signal);
+          await this.check(scan, row, signal);
+          blips = 0;
+        } catch (error) {
+          const blip = !signal.aborted && error instanceof ChatGooseError && (error.key === 'network_error' || (error.details?.status === 404 && !error.details.refused));
+          if (blip && ++blips >= RECHECK_FUSE) {
+            fused = true;
+            scan.trace?.event('rows.fuse', { failures: blips });
+            scan.passController.abort();
+          } else if (blip && !retryAt.has(row.id)) {
+            retryAt.set(row.id, Date.now() + RECHECK_DELAY_MS); row.status = 'checking'; row.detail = undefined; queue.push(row);
+            scan.trace?.event('row.recheck', { fanId: row.id, errorCode: (error as ChatGooseError).key, status: (error as ChatGooseError).details?.status });
             continue;
           }
-          row.status = 'unknown'; row.detail = signal.aborted ? 'Проверка на паузе. Нажмите «Продолжить».' : errorText(error);
-          scan.trace?.event('row.verdict', { fanId: row.id, status: row.status, reason: signal.aborted ? 'paused' : 'check-failed' });
+          row.status = 'unknown'; row.detail = fused ? FUSED_TEXT : signal.aborted ? 'Проверка на паузе. Нажмите «Продолжить».' : errorText(error);
+          scan.trace?.event('row.verdict', { fanId: row.id, status: row.status, reason: fused ? 'fansly-failing' : signal.aborted ? 'paused' : 'check-failed' });
           // Repeated throttling stops the pass instead of spending the same
           // exhausted retry budget on every remaining fan.
           if (error instanceof ChatGooseError && error.key === 'rate_limited') scan.passController.abort();
@@ -375,8 +403,8 @@ export class FollowersService {
       }
     }));
     for (const row of rows) if (row.status === 'checking') {
-      row.status = 'unknown'; row.detail = 'Проверка приостановлена. Нажмите «Продолжить».';
-      scan.trace?.event('row.verdict', { fanId: row.id, status: row.status, reason: 'paused' });
+      row.status = 'unknown'; row.detail = fused ? FUSED_TEXT : 'Проверка приостановлена. Нажмите «Продолжить».';
+      scan.trace?.event('row.verdict', { fanId: row.id, status: row.status, reason: fused ? 'fansly-failing' : 'paused' });
     }
     scan.snapshot.canContinue = rows.some((row) => row.status === 'unknown');
     await this.hydrateNotes(scan, signal);
@@ -414,6 +442,10 @@ export class FollowersService {
     scan.trace?.event('notes.plan', { missing: pending.length, batchSize: 100 });
     for (let offset = 0; offset < pending.length; offset += 100) {
       const batch = pending.slice(offset, offset + 100);
+      // The lane is one FIFO: a batch sitting out the /account gap inside it
+      // held every other read, and a send made meanwhile took 13 s (live
+      // trace, E132). The gap is waited out here, off the lane.
+      if (offset > 0) { try { await pause(NOTES_GAP_MS, signal); } catch { return; } }
       // A label is not worth waiting out a cooldown. Another read can still
       // draw one while this batch is queued; Pause gets the chatter out.
       if ((this.options.fansly.followerReadStatus(scan.session)?.cooldownUntil ?? 0) > Date.now()) {

@@ -1,0 +1,3 @@
+[  116274ms] [WARNING] crbug/1173575, non-JS module files deprecated. @ file:///Users/dmitriy/code/agency/fbuddy-analysis/layout/:231
+[  116285ms] [WARNING] crbug/1173575, non-JS module files deprecated. @ file:///Users/dmitriy/code/agency/fbuddy-analysis/layout/pretty-bundles/:231
+[  116292ms] [WARNING] crbug/1173575, non-JS module files deprecated. @ file:///Users/dmitriy/code/agency/fbuddy-analysis/:231

@@ -662,6 +662,10 @@ export interface ChatGooseErrorDetails {
   responseSnippet?: string;
   retryAfterMs?: number;
   retryAtMs?: number;
+  /** Fansly refused inside HTTP 2xx (`success: false`). */
+  refused?: boolean;
+  /** Fansly's own error code, when the refused body carried one. */
+  code?: string;
 }
 
 export type UserErrorKey =
