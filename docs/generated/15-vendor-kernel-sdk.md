@@ -166,9 +166,6 @@ Notable groups (by key prefix / path):
   (`dist/operations.d.ts:418-505`).
 - `spenders`/`spender*` — 4 v2 spender routes (list, batch, detail, series)
   under `/api/v2/spenders` (`dist/operations.d.ts:514-529`).
-- `workboardV2*` — 13 workboard routes (board, lists, AI classify/settings/runs,
-  claim/unclaim, contact/undo, snooze/unsnooze, recompute)
-  (`dist/operations.d.ts:546-597`).
 - `*ofapi*` — ~14–17 OnlyFans-API routes (credits ledger/summary/daily, webhook
   register/status, read gateway, commands create/get/cancel), spanning both
   `admin/ofapi/*` and `ofapi/*` paths (`dist/operations.d.ts:94-125, 258-268,
