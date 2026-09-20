@@ -1,4 +1,5 @@
-import { FollowerReadScheduler } from './follower-read-scheduler.js';
+import { FanslyPacer } from './fansly-pacer/pacer.js';
+import type { PacerStorage } from './fansly-pacer/store.js';
 import type { TraceScope } from './followers-trace.js';
 import {
   FANSLY_PAGINATION_DELAY_MS,
@@ -112,6 +113,18 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
 
     signal?.addEventListener('abort', onAbort, { once: true });
   });
+}
+
+/** What a refused body is, never what it says: enough to tell a Fansly API
+ * error from an edge or WAF page in a follower trace (E130). */
+function bodyShape(response: Response, snippet: string): Record<string, string | number | boolean | null> {
+  return {
+    status: response.status,
+    contentType: response.headers.get('content-type')?.split(';')[0]?.trim().slice(0, 60) ?? null,
+    length: Number(response.headers.get('content-length')) || snippet.length,
+    json: /^\s*[{[]/.test(snippet),
+    code: /"code"\s*:\s*"?([\w-]{1,40})/.exec(snippet)?.[1] ?? null,
+  };
 }
 
 async function readResponseSnippet(response: Response): Promise<string> {
@@ -279,7 +292,7 @@ export class FanslyClient {
   private readonly subscriberSubscriptionCache = new Map<string, CachedSubscriberSubscription>();
   private readonly mediaPurchaseVerificationCache = new Map<string, CachedMediaPurchaseStatus>();
 
-  private readonly followerReads = new FollowerReadScheduler();
+  private readonly followerReads: FanslyPacer;
   private readonly followerSessions = new WeakMap<SessionTemplate, (() => void) | undefined>();
 
   /** An isolated identity snapshot explicitly opts this feature's reads into
@@ -294,7 +307,9 @@ export class FanslyClient {
     return this.followerReads.status(session.resolvedAccountId ?? session.accountId);
   }
 
-  constructor(private readonly sessionStore: SessionStore) {}
+  constructor(private readonly sessionStore: SessionStore, pacerStorage?: PacerStorage) {
+    this.followerReads = new FanslyPacer({ storage: pacerStorage });
+  }
 
   private getSubscriberSubscriptionCacheKey(fanAccountId: string, session: SessionTemplate): string {
     return `${session.resolvedAccountId ?? session.accountId}:${fanAccountId}`;
@@ -371,7 +386,7 @@ export class FanslyClient {
     // don't stack across retries (the finally clears it before the next loop).
     for (let attempt = 0; ; attempt++) {
       const permit = this.followerSessions.has(session)
-        ? await this.followerReads.acquire(session.resolvedAccountId ?? session.accountId, routeKey, signal, trace)
+        ? await this.followerReads.acquire(session.resolvedAccountId ?? session.accountId, 'GET', url.pathname, signal, trace)
         : undefined;
       const controller = new AbortController();
       const timeout = globalThis.setTimeout(() => controller.abort(), FANSLY_REQUEST_TIMEOUT_MS);
@@ -445,6 +460,7 @@ export class FanslyClient {
 
         if (!response.ok) {
           const snippet = await readResponseSnippet(response);
+          attemptTrace?.event('http.error-body', bodyShape(response, snippet));
           const details = {
             status: response.status,
             responseSnippet: snippet,

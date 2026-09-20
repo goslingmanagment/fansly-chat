@@ -1,8 +1,7 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FanslyClient } from '../src/background/fansly-client.js';
 import { SessionStore } from '../src/background/session-store.js';
 import { FollowersTrace } from '../src/background/followers-trace.js';
-import { FollowerReadScheduler } from '../src/background/follower-read-scheduler.js';
 
 function harness() {
   const store = new SessionStore();
@@ -12,6 +11,8 @@ function harness() {
 const envelope = (response: unknown) => new Response(JSON.stringify({ success: true, response }), { status: 200 });
 
 describe('Fansly browser-session outreach transport', () => {
+  // Jitter off: these tests pin exact starts. `fansly-pacer.test.ts` covers it.
+  beforeEach(() => { vi.spyOn(Math, 'random').mockReturnValue(0); });
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
   it('escalates repeated throttles and carries the last cooldown beyond retry exhaustion', async () => {
     vi.useFakeTimers(); const h = harness(); const session = h.client.followerSession(h.session);
@@ -21,7 +22,8 @@ describe('Fansly browser-session outreach transport', () => {
     const rejected = expect(work).rejects.toMatchObject({ key: 'rate_limited' });
     await vi.advanceTimersByTimeAsync(210_000); await rejected;
     expect(at).toEqual([0, 30_000, 90_000, 210_000]);
-    expect(h.client.followerReadStatus(session)).toEqual({ cooldownUntil: start + 450_000, intervalMs: 8000 });
+    // Four unhealed limits: the lane gap is 400 ms doubled three times.
+    expect(h.client.followerReadStatus(session)).toEqual({ cooldownUntil: start + 450_000, intervalMs: 3200 });
     const next = h.client.getMessagePage('4', null, h.client.followerSession(h.session), h.signal);
     await vi.advanceTimersByTimeAsync(239_999); expect(at).toHaveLength(4);
     await vi.advanceTimersByTimeAsync(1); await next; expect(at[4]).toBe(450_000);
@@ -40,54 +42,24 @@ describe('Fansly browser-session outreach transport', () => {
     await vi.advanceTimersByTimeAsync(294_999); expect(at).toEqual([0]);
     await vi.advanceTimersByTimeAsync(1); await next; expect(at).toEqual([0, 300_000]);
   });
-  it('does not prune a long cooldown but resets spacing after the lane is truly idle', async () => {
-    vi.useFakeTimers(); const scheduler = new FollowerReadScheduler(); const signal = new AbortController().signal; const start = Date.now();
-    const permit = await scheduler.acquire('1', 'message', signal); permit.limited(2_000_000); permit.release();
-    await vi.advanceTimersByTimeAsync(900_001);
-    const waiting = scheduler.acquire('1', 'message', signal);
-    await vi.advanceTimersByTimeAsync(1_099_998);
-    expect(scheduler.status('1')).toEqual({ cooldownUntil: start + 2_000_000, intervalMs: 2000 });
-    await vi.advanceTimersByTimeAsync(1); const after = await waiting; after.release();
-    await vi.advanceTimersByTimeAsync(900_001); const reset = await scheduler.acquire('1', 'group', signal);
-    expect(scheduler.status('1')).toEqual({ cooldownUntil: 0, intervalMs: 1000 }); reset.release();
-  });
-  it('forgives a penalty level only after five quiet minutes and then twenty answered reads', async () => {
-    vi.useFakeTimers(); const scheduler = new FollowerReadScheduler(); const signal = new AbortController().signal; const start = Date.now();
-    const at: number[] = [];
-    const reads = async (count: number, unanswered = -1) => { for (let i = 0; i < count; i++) { const permit = await scheduler.acquire('1', 'group', signal); at.push(Date.now()); if (i !== unanswered) permit.served(); permit.release(); } };
-    const gaps = () => at.slice(1).map((value, index) => value - at[index]!);
-    const first = await scheduler.acquire('1', 'account', signal); expect(first.limited()).toBe(30_000); first.release();
-    // The scan goes on after its cooldown: 25 answered reads inside the quiet
-    // five minutes forgive nothing, and neither does the idle time after them.
-    const busy = reads(25); await vi.advanceTimersByTimeAsync(30_000 + 50_000); await busy;
-    expect(gaps().every((gap) => gap === 2000)).toBe(true);
-    await vi.advanceTimersByTimeAsync(430_000);
-    expect(Date.now() - start).toBe(510_000);
-    expect(scheduler.status('1')).toEqual({ cooldownUntil: start + 30_000, intervalMs: 2000 });
-    // The next scan probes at the penalised pace. Read 5 got no answer from
-    // Fansly, so the level needs 21 reads, and only then does 1 s return.
-    at.length = 0;
-    const probe = reads(24, 5); await vi.advanceTimersByTimeAsync(60_000); await probe;
-    expect(gaps().slice(0, 21).every((gap) => gap === 2000)).toBe(true);
-    expect(gaps().slice(21)).toEqual([1000, 1000]);
-    expect(scheduler.status('1')?.intervalMs).toBe(1000);
-    const later = await scheduler.acquire('1', 'group', signal); expect(later.limited()).toBe(30_000); later.release();
-  });
   it('counts only reads Fansly answered 2xx towards forgiving a penalty', async () => {
     vi.useFakeTimers();
     const h = harness(); const session = h.client.followerSession(h.session);
     let status = 429;
     vi.stubGlobal('fetch', vi.fn<typeof globalThis.fetch>(async () => status === 200 ? envelope({ users: [] }) : new Response('', { status })));
     const settle = async (work: Promise<unknown>, ms: number) => { const done = work.then(() => 'ok', () => 'failed'); await vi.advanceTimersByTimeAsync(ms); return done; };
+    // Two limits: the second level is the one the lane gap shows (800 ms).
     expect(await settle(h.client.getAccountNames(['2'], session, h.signal, 'none'), 0)).toBe('failed');
-    await vi.advanceTimersByTimeAsync(30_000 + 300_000);
+    expect(await settle(h.client.getAccountNames(['2'], session, h.signal, 'none'), 30_000)).toBe('failed');
+    expect(h.client.followerReadStatus(session)?.intervalMs).toBe(800);
+    await vi.advanceTimersByTimeAsync(60_000 + 300_000);
     status = 503;
-    for (let i = 0; i < 20; i++) expect(await settle(h.client.getAccountNames(['2'], session, h.signal, 'none'), 5000)).toBe('failed');
+    for (let i = 0; i < 20; i++) expect(await settle(h.client.getAccountNames(['2'], session, h.signal, 'none'), 20_000)).toBe('failed');
     status = 200;
     for (let i = 0; i < 20; i++) expect(await settle(h.client.getGroup('3', session, h.signal), 2000)).toBe('ok');
-    expect(h.client.followerReadStatus(session)?.intervalMs).toBe(2000);
+    expect(h.client.followerReadStatus(session)?.intervalMs).toBe(800);
     expect(await settle(h.client.getGroup('3', session, h.signal), 2000)).toBe('ok');
-    expect(h.client.followerReadStatus(session)?.intervalMs).toBe(1000);
+    expect(h.client.followerReadStatus(session)?.intervalMs).toBe(400);
   });
   it('keeps account reads five seconds apart without widening the other routes', async () => {
     vi.useFakeTimers();
@@ -101,7 +73,7 @@ describe('Fansly browser-session outreach transport', () => {
       h.client.getGroup('5', session, h.signal),
     ]);
     await vi.advanceTimersByTimeAsync(6000); await work;
-    expect(at).toEqual([['/api/v1/account', 0], ['/api/v1/group/3/', 1000], ['/api/v1/account', 5000], ['/api/v1/group/5/', 6000]]);
+    expect(at).toEqual([['/api/v1/account', 0], ['/api/v1/group/3/', 400], ['/api/v1/account', 5000], ['/api/v1/group/5/', 5400]]);
   });
   it('records actual HTTP attempts, 429 backoff and status under the caller fan scope', async () => {
     const h = harness();
@@ -118,6 +90,28 @@ describe('Fansly browser-session outreach transport', () => {
     expect(report.events).toContainEqual(expect.objectContaining({ name: 'http.retry', data: { status: 429, backoffMs: 1000, retryAfterMs: 1000 } }));
     expect(report.events).toContainEqual(expect.objectContaining({ name: 'http', phase: 'end', data: expect.objectContaining({ outcome: 'success', status: 200 }) }));
     for (const secret of ['session-token', 'session-id', 'client-id', 'private-body']) expect(JSON.stringify(report)).not.toContain(secret);
+  });
+  it('records what a refused body is, never what it says', async () => {
+    const h = harness(); const session = h.client.followerSession(h.session);
+    const trace = new FollowersTrace({ id: crypto.randomUUID(), tabId: 7, hours: 48, version: 'test', build: 'test' });
+    const api = JSON.stringify({ success: false, error: { code: 22, details: 'private-detail' } });
+    const edge = '<html><body>private-page not found</body></html>';
+    const fetch = vi.fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(new Response(api, { status: 404, headers: { 'content-type': 'application/json; charset=utf-8' } }))
+      .mockResolvedValueOnce(new Response(edge, { status: 404, headers: { 'content-type': 'text/html' } }));
+    vi.stubGlobal('fetch', fetch); vi.useFakeTimers();
+    await expect(h.client.getGroup('3', session, h.signal, trace)).rejects.toMatchObject({ key: 'unknown_error' });
+    const second = expect(h.client.getGroup('3', session, h.signal, trace)).rejects.toMatchObject({ key: 'unknown_error' });
+    await vi.advanceTimersByTimeAsync(500); await second;
+    // A 404 is not a throttle: one attempt each, no cooldown, no slower pace.
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(h.client.followerReadStatus(session)).toEqual({ cooldownUntil: 0, intervalMs: 400 });
+    const report = trace.read();
+    expect(report.events.filter((event) => event.name === 'http.error-body').map((event) => event.data)).toEqual([
+      { status: 404, contentType: 'application/json', length: api.length, json: true, code: '22' },
+      { status: 404, contentType: 'text/html', length: edge.length, json: false, code: null },
+    ]);
+    for (const secret of ['private-detail', 'private-page']) expect(JSON.stringify(report)).not.toContain(secret);
   });
   it('spaces every follower GET across windows and honors a long shared Retry-After before any queued read', async () => {
     vi.useFakeTimers();
@@ -138,11 +132,11 @@ describe('Fansly browser-session outreach transport', () => {
     ]);
     await vi.advanceTimersByTimeAsync(0);
     expect(fetch).toHaveBeenCalledTimes(1);
-    expect(h.client.followerReadStatus(one)).toEqual({ cooldownUntil: started + 90_000, intervalMs: 2000 });
+    expect(h.client.followerReadStatus(one)).toEqual({ cooldownUntil: started + 90_000, intervalMs: 400 });
     await vi.advanceTimersByTimeAsync(89_999);
     expect(fetch).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(4001); await work;
-    expect(timestamps.map((time) => time - started)).toEqual([0, 90_000, 92_000, 94_000]);
+    expect(timestamps.map((time) => time - started)).toEqual([0, 90_000, 91_000, 92_000]);
   });
   it('uses a 30-second fallback for 429 and leaves another creator independent', async () => {
     vi.useFakeTimers();
@@ -199,7 +193,7 @@ describe('Fansly browser-session outreach transport', () => {
       h.client.getMessagePage('5', null, session, h.signal),
     ]);
     await vi.advanceTimersByTimeAsync(3500); await work;
-    expect(at.map((value) => value - at[0]!)).toEqual([0, 1000, 2000, 3500]);
+    expect(at.map((value) => value - at[0]!)).toEqual([0, 400, 800, 1300]);
   });
   it('records a failed POST exactly once, without its body', async () => {
     const h = harness();

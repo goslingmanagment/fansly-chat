@@ -120,6 +120,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E127 | 2026-09-16 | Release 2.4.1 packages storage readiness and sign-in-first fixes, preserves settings and credentials, and uses the production-matched SDK |
 | E128 | 2026-09-19 | Follower scan: saved-name reads leave the critical path, rate-limit penalty decays per five quiet minutes followed by twenty answered reads, `/account` reads 5 s apart; patch 2.4.2 |
 | E129 | 2026-09-19 | Re-vendor the SDK from deployed Core `b1d3bb81` before publishing 2.4.2; the release gate stopped the first attempt before signing |
+| E130 | 2026-09-20 | Fansly pacer replaces the follower read scheduler: policy per route family, learned spacing per key, 400 ms jittered lane gap, a limit slows its own key first, limits survive the background page; transient 404 rows rechecked once; unreleased until a live trace |
 
 ## Entries
 
@@ -4289,3 +4290,79 @@ follower-outreach routes are unchanged. `pnpm check` passes on the regenerated
 SDK (127 suites, 2,366 tests, typecheck, lint, gates, build). No vendored file
 is edited by hand and no release check is bypassed or weakened. The release
 version stays 2.4.2: nothing was published under that number.
+
+**E130 (2026-09-20).** The owner supplies the first live trace of a scan that
+reached the check phase under pacing (run 54bc95c0, 2.4.2, @itsaribae, 75
+followers, 24 h) and finds it too slow. Measured: 79 GETs in 82 s, 0.96 per
+second, exactly the E121 lane interval; no 429, no cooldown, no retry. About
+70% of the lane's time was deliberate sleep (mean HTTP time ~0.3 s) and the
+three workers only queued behind one lane. The scan needed ~112 reads (44
+native searches, 31 chats at a participant read plus a history page), about two
+minutes. Seven of the 79 reads answered 404 on routes that answered 200 around
+them (`messaging/groups?search=`, `/message`, `/group/<id>`), three in a row at
+16-18 s, two at 31-32 s, singles at 64 s and 77 s; for one fan the participant
+read answered 200 and the history read of the same chat 404 three seconds
+later. The failures follow time, not the fan. A 404 is not retried, so 7 of 59
+rows ended «Не проверен» until a human Continue. The trace holds no response
+body, so it cannot tell a sick node from a disguised throttle.
+
+Reference: the FBuddy extension (`~/code/agency/fbuddy-analysis`, pacer
+`fansly-api-pacer-v2`) paces each `METHOD /path` on its own with no coupling
+between routes, starts every route at 400 ms, speeds up 0.78x per 16 answered
+reads down to 25 ms and up to 8 concurrent requests, treats a 429 as routine
+(5 s cooldown, 2.25x spacing, a remembered bad spacing for 12 h), adds up to
+250 ms of jitter, keeps its state in `storage.local`, never reads Retry-After
+and does not retry a 404. Its risk is spread over thousands of customer
+accounts; ours is a handful of models. The owner's brief: fast enough rather
+than fastest, at least twice the current pace, slightly safer than FBuddy, a
+ban matters more than speed, and an architecture with room to grow.
+
+Changes. `src/background/fansly-pacer/` replaces `follower-read-scheduler.ts`.
+(1) `policy.ts` is data: a pace key is `METHOD /path` without the version prefix and with numeric segments
+folded, and a family groups paths that evidence says share a limit. Default
+policy: start 500 ms, floor 400 ms, ceiling 8 s. The `/account*` family keeps
+E128's 5 s for follower pages and id reads alike, never accelerates, ceiling
+20 s. A new family or pace is a row, not a scheduler change. The pace key is
+no longer the `RouteKey` of the client-check header. (2) `controller.ts` is a
+pure state machine per key: forty answered reads that actually ran at the
+current spacing (started within 1.25x of it) earn a 0.9x step toward the
+floor; a limit doubles the key, is remembered for 24 h and holds the key a
+quarter above the limited spacing; reads before the cooldown's end plus five
+quiet minutes count for nothing. (3) `pacer.ts` keeps E121's lane: one FIFO per
+creator, one attempt in flight, the 30/60/120/240/300 s cooldowns on any 429,
+Retry-After never shortened, E128's level decay unchanged, the 15-minute idle
+reset. New: a 400 ms gap between any two starts plus 0-100 ms of jitter; the
+first limit slows only its own key, and from the second unhealed level the lane
+gap doubles per level up to 8 s. A rested lane drops its penalty but not a
+remembered limit, and an earned faster pace is proved again after a rest.
+(4) `store.ts` keeps an open cooldown, the level and every remembered limit in
+`storage.local` under `chatgoose:fansly-pacer:v1:<creator>`, an operational
+cache like the follower proofs: no schema change, best effort both ways (a read
+that does not answer within a second is skipped, E124), and a
+lane with nothing to remember writes nothing. The MV3 background page can
+unload, and until now it forgot a cooldown when it did. (5) A row that fails
+with `fansly_server_error`, `unknown_error` or `network_error` goes to the back
+of the queue once, through the same lane, before it is left to Continue; an
+expired session, a rate limit and an unconfirmed participant list are not
+asked again. (6) A refused read records `http.error-body`: status, content
+type, length, whether it is JSON and its error code, never its text. New trace
+events: `http.pace`, `http.pace-restored`, `row.recheck`; `route` now carries
+the pace key.
+
+Safer than FBuddy at every moment: 400 ms is FBuddy's *starting* spacing per
+route and only shrinks from there; here it is the gap of the whole creator
+lane and the floor of every key, with one request in flight. Total pace tops
+out near 2.2 reads per second. A replay of the scheduler over this trace's
+request mix reproduces the live scan (116 s, 0.96/s) and gives 53 s for 75
+followers, 100 s for 146 and 201 s for 300, 2.2-2.4x. These figures are a
+simulation. Nothing here measures Fansly's threshold.
+
+Not done, on purpose: no concurrent requests, no probing below 400 ms, no
+treatment of a 404 as a throttle before its body is known, and the participant
+read stays on every chat (moving it to send time would save a quarter of the
+reads but is a custody change). Validation is synthetic: mock transport, fake
+timers, twenty mutations of the pacing and recheck rules each killed by a
+test. Supersedes E121's single lane interval and E128's lane-wide spacing
+penalty and `ROUTE_SPACING_MS`; keeps their cooldowns, decay and `/account`
+gap. No version bump: the owner loads the build as a temporary add-on, runs a
+large scan and exports the trace; release follows that trace.

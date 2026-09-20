@@ -350,6 +350,10 @@ export class FollowersService {
     for (const row of rows) this.applyProfile(scan, row);
     scan.snapshot.phase = 'checking';
     const queue = rows.filter((row) => !skipped.has(row.id));
+    // Fansly answers some reads 404 for a second or two on routes that work
+    // (live trace, E130). Such a row goes to the back of the queue once,
+    // through the same paced lane, before it is left for a human Continue.
+    const rechecked = new Set<string>();
     await Promise.all(Array.from({ length: Math.min(3, queue.length) }, async () => {
       while (!signal.aborted) {
         this.assertCurrent(scan);
@@ -357,6 +361,11 @@ export class FollowersService {
         if (!row) return;
         try { await this.check(scan, row, signal); }
         catch (error) {
+          if (!signal.aborted && !rechecked.has(row.id) && error instanceof ChatGooseError && ['fansly_server_error', 'unknown_error', 'network_error'].includes(error.key)) {
+            rechecked.add(row.id); row.status = 'checking'; row.detail = undefined; queue.push(row);
+            scan.trace?.event('row.recheck', { fanId: row.id, errorCode: error.key });
+            continue;
+          }
           row.status = 'unknown'; row.detail = signal.aborted ? 'Проверка на паузе. Нажмите «Продолжить».' : errorText(error);
           scan.trace?.event('row.verdict', { fanId: row.id, status: row.status, reason: signal.aborted ? 'paused' : 'check-failed' });
           // Repeated throttling stops the pass instead of spending the same
