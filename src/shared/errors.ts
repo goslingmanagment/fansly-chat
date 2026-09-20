@@ -323,7 +323,7 @@ const ERROR_REGISTRY: Record<UserErrorKey, ErrorRegistryEntry> = {
     key: 'hi_too_many_messages',
     code: 'CG-FLOW-09',
     message: 'В переписке слишком много сообщений для приветствия.',
-    description: 'Приветствие подходит для новых диалогов до 10 сообщений. Используйте Ответ.',
+    description: 'Приветствие подходит, пока в переписке не больше 10 личных сообщений (welcome и рассылки не считаются) и вся она умещается на одной странице истории. Используйте Ответ.',
   },
   coach_requires_newer_hub: {
     key: 'coach_requires_newer_hub',

@@ -3833,6 +3833,7 @@ export declare const aiFeatureStreamBodySchema: z.ZodObject<{
     }, z.core.$strict>>>;
     preset: z.ZodOptional<z.ZodLiteral<"situation">>;
     summaryMode: z.ZodOptional<z.ZodLiteral<"short">>;
+    variantCount: z.ZodOptional<z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<3>]>>;
     greetingMode: z.ZodOptional<z.ZodLiteral<"new-follower">>;
     clientContext: z.ZodOptional<z.ZodObject<{
         transcript: z.ZodString;
@@ -3844,6 +3845,7 @@ export declare const aiFeatureStreamBodySchema: z.ZodObject<{
         fanCustomName: z.ZodOptional<z.ZodString>;
         fanUsername: z.ZodOptional<z.ZodString>;
         fanAvatarUrl: z.ZodOptional<z.ZodString>;
+        personalMessageCount: z.ZodOptional<z.ZodNumber>;
         pingSegment: z.ZodOptional<z.ZodEnum<{
             active: "active";
             "segment-a": "segment-a";
@@ -21299,6 +21301,7 @@ declare const baseRouteSchemas: {
             }, z.core.$strict>>>;
             preset: z.ZodOptional<z.ZodLiteral<"situation">>;
             summaryMode: z.ZodOptional<z.ZodLiteral<"short">>;
+            variantCount: z.ZodOptional<z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<3>]>>;
             greetingMode: z.ZodOptional<z.ZodLiteral<"new-follower">>;
             clientContext: z.ZodOptional<z.ZodObject<{
                 transcript: z.ZodString;
@@ -21310,6 +21313,7 @@ declare const baseRouteSchemas: {
                 fanCustomName: z.ZodOptional<z.ZodString>;
                 fanUsername: z.ZodOptional<z.ZodString>;
                 fanAvatarUrl: z.ZodOptional<z.ZodString>;
+                personalMessageCount: z.ZodOptional<z.ZodNumber>;
                 pingSegment: z.ZodOptional<z.ZodEnum<{
                     active: "active";
                     "segment-a": "segment-a";

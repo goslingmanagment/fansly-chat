@@ -27,8 +27,14 @@ export interface KernelFeatureClientContext {
   fanSpendingData: string;
   fanSubscriptionData: string;
   fanBio?: string;
+  /** hi-greeting only (Core Decision 379): the kernel rejects them elsewhere,
+   * so the gateway sends them for that feature alone. */
   fanUsername?: string;
   fanAvatarUrl?: string;
+  /** hi-greeting only: messages of the shipped transcript that are not
+   * automated; what the kernel's freshness gate counts. Never above
+   * `messageCount` (build it with `buildGreetingContext`). */
+  personalMessageCount?: number;
   /** The chatter's saved name for the fan (Fansly rename, E115 / Core
    * Decision 290); read by the ping template. Absent when never renamed. */
   fanCustomName?: string;
@@ -78,7 +84,9 @@ export interface KernelFeatureRequest {
   /** fan-summary: sent ONLY as 'short' (a full run omits it — an old kernel
    * then never sees the field, keeping rollback safe). */
   summaryMode?: 'short';
-  greetingMode?: 'new-follower';
+  /** hi-greeting only (Core Decision 379): 3 variants for the chat overlay,
+   * 1 ready draft for the New Followers window. */
+  variantCount?: 1 | 3;
   /** The REQUESTED transcript window (deepMessageCount for a full recap, the
    * short const for a short recap, the quick window otherwise) — distinct from
    * `clientContext.messageCount` (the KEPT count). The kernel records it as the
@@ -428,6 +436,9 @@ export function createKernelFeatureGateway(
         }
       };
 
+      // Core Decision 379: these four are valid for hi-greeting only and a
+      // 400 anywhere else. One guard here beats trusting every caller.
+      const greetingFields = request.feature === 'hi-greeting';
       const handle = streamAiFeature(
         {
           baseUrl,
@@ -460,7 +471,9 @@ export function createKernelFeatureGateway(
             // Only ever 'short'; a full recap omits the field entirely so an old
             // kernel (which never learned it) still runs a legacy full summary.
             ...(request.summaryMode === 'short' ? { summaryMode: 'short' } : {}),
-            ...(request.greetingMode ? { greetingMode: request.greetingMode } : {}),
+            ...(greetingFields && request.variantCount !== undefined
+              ? { variantCount: request.variantCount }
+              : {}),
             // Top-level REQUESTED window (kernel records it as requestedCount);
             // clientContext.messageCount below is the KEPT count.
             ...(request.messageCount !== undefined
@@ -471,8 +484,11 @@ export function createKernelFeatureGateway(
               transcript: request.clientContext.transcript,
               messageCount: request.clientContext.messageCount,
               fanDisplayName: request.clientContext.fanDisplayName,
-              ...(request.clientContext.fanUsername !== undefined ? { fanUsername: request.clientContext.fanUsername } : {}),
-              ...(request.clientContext.fanAvatarUrl ? { fanAvatarUrl: request.clientContext.fanAvatarUrl } : {}),
+              ...(greetingFields && request.clientContext.fanUsername !== undefined ? { fanUsername: request.clientContext.fanUsername } : {}),
+              ...(greetingFields && request.clientContext.fanAvatarUrl ? { fanAvatarUrl: request.clientContext.fanAvatarUrl } : {}),
+              ...(greetingFields && request.clientContext.personalMessageCount !== undefined
+                ? { personalMessageCount: request.clientContext.personalMessageCount }
+                : {}),
               fanSpendingData: request.clientContext.fanSpendingData,
               fanSubscriptionData: request.clientContext.fanSubscriptionData,
               ...(request.clientContext.fanBio !== undefined

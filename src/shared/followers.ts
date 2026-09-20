@@ -98,6 +98,21 @@ export function welcomeTexts(raw: unknown): string[] {
   });
 }
 
+/** The one avatar URL check, mirroring Core's `fanslyAvatarUrlSchema`: https,
+ * a direct `*.fansly.com` host, at most 4096 chars. Signed-URL metadata, when
+ * given, is folded into the query first. Null when the URL must not be sent.
+ * Idempotent: an accepted URL is returned unchanged when checked again. */
+export function safeFanslyAvatarUrl(raw: string, metadata?: Record<string, unknown> | null): string | null {
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== 'https:' || !/^[-a-z0-9]+\.fansly\.com$/i.test(url.hostname) || url.username || url.password || url.port) return null;
+    for (const [key, value] of Object.entries(metadata ?? {})) {
+      if (['Key-Pair-Id', 'Policy', 'Signature'].includes(key) && typeof value === 'string') url.searchParams.set(key, value);
+    }
+    return url.href.length > 4096 ? null : url.href;
+  } catch { return null; /* A missing/broken avatar should use initials. */ }
+}
+
 export function fanslyAvatarUrl(account: FanslyAccountResponse): string | null {
   const avatar = account.avatar;
   if (!avatar) return null;
@@ -105,16 +120,8 @@ export function fanslyAvatarUrl(account: FanslyAccountResponse): string | null {
   for (const candidate of candidates) {
     const location = candidate.locations?.[0];
     const raw = location?.location || candidate.location;
-    if (!raw) continue;
-    try {
-      const url = new URL(raw);
-      if (url.protocol !== 'https:' || !/^[-a-z0-9]+\.fansly\.com$/i.test(url.hostname) || url.username || url.password || url.port) continue;
-      for (const [key, value] of Object.entries(location?.metadata ?? {})) {
-        if (['Key-Pair-Id', 'Policy', 'Signature'].includes(key) && typeof value === 'string') url.searchParams.set(key, value);
-      }
-      if (url.href.length > 4096) continue;
-      return url.href;
-    } catch { /* A missing/broken avatar should use initials. */ }
+    const url = raw ? safeFanslyAvatarUrl(raw, location?.metadata) : null;
+    if (url) return url;
   }
   return null;
 }

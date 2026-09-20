@@ -5,8 +5,10 @@ import { ChatGooseError, toUserError } from '../shared/errors.js';
 import { formatTranscriptForKernel } from '../shared/transcript.js';
 import {
   automationReason, fanslyAvatarUrl, followedAtFromId, isAutomatedMessage, isPersonalMessage,
-  normalizeWelcome, welcomeTexts, type FollowerDisplayMessage, type FollowerMessageEvidence, type FollowerRow, type FollowersSnapshot,
+  normalizeWelcome, type FollowerDisplayMessage, type FollowerMessageEvidence, type FollowerRow, type FollowersSnapshot,
 } from '../shared/followers.js';
+import { AUTOMATED_MESSAGE_LABEL, buildGreetingContext, countPersonalMessages, isAutomatedGreetingMessage } from '../shared/greeting-context.js';
+import { HI_GREETING_MAX_TRANSCRIPT } from '../shared/constants.js';
 import type { FanslyAccountResponse, FanslyGroup, FanslyMessage, PersistedState, SessionTemplate } from '../shared/types.js';
 import type { AgencyHubClient } from './agency-hub-client.js';
 import type { FanslyClient, InboxChat } from './fansly-client.js';
@@ -14,6 +16,7 @@ import type { KernelFeatureGateway } from './kernel-feature-gateway.js';
 import type { SessionStore } from './session-store.js';
 import { resolveHubBearer } from './agency-hub-client.js';
 import { FollowersTraceStore, traced, type FollowersTrace, type TraceScope, type TraceSpan } from './followers-trace.js';
+import { WelcomeDefinitionsService, type WelcomeDefinitions } from './welcome-definitions.js';
 
 type Storage = Pick<browser.storage.StorageArea, 'get' | 'set'>;
 interface Scan {
@@ -43,7 +46,6 @@ interface Scan {
   welcomeCheckedAt: number;
   welcomeRefresh?: Promise<void>;
 }
-interface WelcomeCache { texts: Set<string>; checkedAt: number }
 interface Options {
   fansly: FanslyClient;
   sessions: SessionStore;
@@ -51,10 +53,15 @@ interface Options {
   hub: AgencyHubClient;
   readState: () => Promise<PersistedState>;
   storage: Storage;
+  /** Shared with the chat Hi; a private one is created when absent. */
+  welcome?: WelcomeDefinitionsService;
 }
 
 const key = (kind: string, creator: string, fan = '') => `chatgoose:followers:v1:${kind}:${creator}:${fan}`;
 const ready = (row: FollowerRow) => row.status === 'ready' || row.status === 'reply';
+/** Hi is for a conversation that has barely started. Past the limit the fan
+ * needs a real reply with the whole chat in view, not a one-line opener. */
+const NEEDS_REPLY = `В переписке уже больше ${HI_GREETING_MAX_TRANSCRIPT} личных сообщений: это диалог, а не приветствие. Откройте чат и используйте Ответ (Reply).`;
 /** Workable is not sendable: a message leaves only a row whose chat was read. */
 const sendable = (row: FollowerRow) => ready(row) && row.evidence === 'history';
 /** The chat id a saved mapping, a proof or a send journal carries, if any. */
@@ -99,12 +106,14 @@ function errorText(error: unknown): string {
 export class FollowersService {
   private readonly scans = new Map<number, Scan>();
   private readonly locks = new Set<string>();
-  private readonly welcomeLoads = new Map<string, { work: Promise<WelcomeCache>; traceId?: string }>();
+  private readonly welcome: WelcomeDefinitionsService;
   private readonly starts = new Map<number, number>();
   readonly traces = new FollowersTraceStore();
   private readonly lastTraces = new Map<number, string>();
 
-  constructor(private readonly options: Options) {}
+  constructor(private readonly options: Options) {
+    this.welcome = options.welcome ?? new WelcomeDefinitionsService({ fansly: options.fansly, storage: options.storage });
+  }
 
   async debugEnabled(): Promise<boolean> { return (await this.options.readState()).settings.debugMode; }
 
@@ -220,44 +229,8 @@ export class FollowersService {
     if (!scan.controller.signal.aborted) scan.trace.update({ state: scan.snapshot.canContinue ? 'paused' : scan.snapshot.error ? 'error' : 'completed' });
   }
 
-  private async loadWelcome(scan: Scan, fresh = false, parent: TraceScope | undefined = scan.trace): Promise<WelcomeCache> {
-    return traced(parent, 'welcome.load', async (scope) => {
-      const creator = scan.snapshot.creatorId;
-      const storageKey = key('welcome', creator);
-      const values = await traced(scope, 'welcome.cache-read', () => this.options.storage.get(storageKey));
-      const cached = values[storageKey] as { texts?: unknown; checkedAt?: number } | undefined;
-      if (cached && (!Array.isArray(cached.texts) || !cached.texts.every((v: unknown) => typeof v === 'string'))) throw new Error('Повреждён кэш welcome-сообщений.');
-      const old = (cached?.texts ?? []) as string[];
-      if (!fresh && cached?.checkedAt && Date.now() - cached.checkedAt < 24 * 3600_000) {
-        scope?.event('welcome.cache-hit', { count: old.length, ageMs: Date.now() - cached.checkedAt });
-        return { texts: new Set(old.map(normalizeWelcome)), checkedAt: cached.checkedAt };
-      }
-      const existing = this.welcomeLoads.get(creator);
-      if (existing) {
-        scope?.event('welcome.join', { ownerTraceId: existing.traceId, fresh });
-        return existing.work;
-      }
-      scope?.event('welcome.fetch', { fresh, cachedCount: old.length, ageMs: cached?.checkedAt ? Date.now() - cached.checkedAt : null });
-      // Account-scoped single-flight is independent of an individual window's
-      // cancellation. A closed tab must not poison another tab's welcome read.
-      const work = (async () => {
-        const raw = await this.options.fansly.getWelcomeDefinitions(this.options.fansly.followerSession(scan.session), new AbortController().signal, scope);
-        const texts = [...new Set([...old, ...welcomeTexts(raw)])];
-        const checkedAt = Date.now();
-        await traced(scope, 'welcome.cache-write', () => this.options.storage.set({ [storageKey]: { texts, checkedAt } }), { count: texts.length });
-        scope?.event('welcome.loaded', { definitions: Array.isArray(raw) ? raw.length : 0, retainedTexts: texts.length });
-        return { texts: new Set(texts.map(normalizeWelcome)), checkedAt };
-      })();
-      this.welcomeLoads.set(creator, { work, traceId: scan.trace?.info().id });
-      try { return await work; }
-      catch (error) {
-        if (!fresh && cached?.checkedAt) {
-          scope?.event('welcome.stale-fallback', { ageMs: Date.now() - cached.checkedAt, count: old.length });
-          return { texts: new Set(old.map(normalizeWelcome)), checkedAt: cached.checkedAt };
-        }
-        throw error;
-      } finally { this.welcomeLoads.delete(creator); }
-    }, { fresh });
+  private loadWelcome(scan: Scan, fresh = false, parent: TraceScope | undefined = scan.trace): Promise<WelcomeDefinitions> {
+    return this.welcome.load({ creatorId: scan.snapshot.creatorId, session: scan.session, fresh, trace: parent, traceId: scan.trace?.info().id });
   }
 
   private async ensureFreshWelcome(scan: Scan, scope?: TraceScope, signal = scan.controller.signal): Promise<void> {
@@ -831,6 +804,13 @@ export class FollowersService {
     row.detail = undefined;
   }
 
+  /** The bounded history the chatter can review, with each message's
+   * automation verdict, oldest first. */
+  private greetingWindow(scan: Scan, fanId: string): { history: FanslyMessage[]; window: Array<{ automated: boolean }> } {
+    const history = (scan.histories.get(fanId) ?? []).slice(-30);
+    return { history, window: history.map((message) => ({ automated: isAutomatedGreetingMessage(message, scan.snapshot.creatorId, scan.welcome) })) };
+  }
+
   /** «Проверить чат» (E134): the explicit human action that resolves an
    * unverified row by identity. It spends no generation and sends nothing. */
   async verify(tabId: number, scanId: string, fanId: string): Promise<FollowersSnapshot> {
@@ -880,6 +860,14 @@ export class FollowersService {
       // old conversation stops here, a fan's own message becomes the transcript.
       await this.resolveByIdentity(scan, row, signal, scope);
       if (!sendable(row)) throw new Error(blockedText(row, 'generate'));
+      // The same limit as Core's gate_hi_greeting_limit, on the history the
+      // resolved chat actually has, before a hub read is spent on a row that
+      // cannot be greeted.
+      const personalMessages = countPersonalMessages(this.greetingWindow(scan, fanId).window);
+      if (personalMessages > HI_GREETING_MAX_TRANSCRIPT) {
+        scope?.event('generation.refused', { reason: 'too-many-personal-messages', personalMessages, limit: HI_GREETING_MAX_TRANSCRIPT });
+        throw new Error(NEEDS_REPLY);
+      }
       const source = JSON.stringify([state.settings.agencyHubBaseUrl, resolveHubBearer(state.settings), state.personaCatalogSource, persona.key, persona.definitionId]);
       const assertPersona = async () => {
         this.assertCurrent(scan);
@@ -915,13 +903,13 @@ export class FollowersService {
       }
       await assertPersona();
       // The draft uses the same bounded history the chatter can review.
-      const history = (scan.histories.get(fanId) ?? []).slice(-30);
-      scope?.event('generation.context', { messages: history.length, avatar: Boolean(row.avatarUrl), bioChars: row.bio.slice(0, 5000).length, customName: Boolean(row.customName) });
-      const transcript = formatTranscriptForKernel(history.map((message) => ({
+      const { history, window } = this.greetingWindow(scan, fanId);
+      scope?.event('generation.context', { messages: history.length, personalMessages: countPersonalMessages(window), avatar: Boolean(row.avatarUrl), bioChars: row.bio.slice(0, 5000).length, customName: Boolean(row.customName) });
+      const transcript = formatTranscriptForKernel(history.map((message, index) => ({
         id: message.id, createdAt: message.createdAt, senderId: message.senderId,
         senderLabel: message.senderId === scan.snapshot.creatorId ? 'Model' : 'Fan', type: message.type,
         text: message.content || '', labels: [
-          ...(message.senderId === scan.snapshot.creatorId && isAutomatedMessage(message, scan.welcome) ? ['[Automatic / mass message]'] : []),
+          ...(window[index]!.automated ? [AUTOMATED_MESSAGE_LABEL] : []),
           ...(message.attachments?.length ? ['[Media: purchase state unknown]'] : []),
         ],
       })));
@@ -929,20 +917,20 @@ export class FollowersService {
       const text = await traced(scope, 'hub.generate', (request) => {
         let firstText = false;
         return this.options.gateway.streamFeature(state.settings, {
-          feature: 'hi-greeting', greetingMode: 'new-follower', clientRequestId,
+          feature: 'hi-greeting', variantCount: 1, clientRequestId,
           pageLabel, conversationRef: fanId, fanRef: fanId, personaKey: persona.key, expectedPersonaDefinitionId: persona.definitionId,
-          clientContext: {
-            ...transcript, fanDisplayName: row.displayName.slice(0, 200), fanUsername: row.username.slice(0, 200),
-            fanCustomName: row.customName?.slice(0, 200), fanBio: row.bio.slice(0, 5000),
-            ...(row.avatarUrl ? { fanAvatarUrl: row.avatarUrl } : {}), fanSpendingData: '', fanSubscriptionData: '',
-          },
+          clientContext: { ...transcript, ...buildGreetingContext({ profile: row, messages: window, transcript }), fanSpendingData: '', fanSubscriptionData: '' },
         }, {
           onText: () => { if (!firstText) { firstText = true; request?.event('generation.first-text'); } },
           onMeta: (meta) => request?.event('generation.meta', { requestId: meta.requestId, model: meta.model, personaDefinitionId: meta.personaDefinitionId }),
           onUsage: (usage) => request?.event('generation.usage', { ...usage }),
           onStopReason: (reason) => request?.event('generation.stop', { reason }),
         }, signal);
-      }, { clientRequestId, feature: 'hi-greeting', greetingMode: 'new-follower' });
+      }, { clientRequestId, feature: 'hi-greeting', variantCount: 1 }).catch((error: unknown) => {
+        // The kernel gate counts the same thing; the chatter gets one wording.
+        if (error instanceof ChatGooseError && error.key === 'hi_too_many_messages') throw new Error(NEEDS_REPLY);
+        throw error;
+      });
       await assertPersona();
       if (!text.trim() || text.length > 5000 || /\[(VARIANT|NEXT)\]/.test(text)) throw new ChatGooseError('ai_output_unusable');
       scope?.event('generation.result', { textChars: text.trim().length });

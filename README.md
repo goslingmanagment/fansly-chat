@@ -36,7 +36,15 @@ from prose when checking what is installed or live; verify the signed update fee
 - **Review** — a readable conversation evaluation with recommendations and examples.
 - **Voice** — script, paid audio takes, preview, MP3 download, and native Fansly
   attachment, only for pages whose Hub capability enables it. Sending stays manual.
-- **Ping / Hi** — re-engage an inactive fan or greet a new conversation.
+- **Ping / Hi** — re-engage an inactive fan or greet a new conversation. Hi in
+  the chat (three variants) and the **Новые** followers window (one draft) are
+  one kernel feature, `hi-greeting` with `variantCount`, fed by one greeting
+  context (`src/shared/greeting-context.ts`): display name, username, saved
+  name, bio, avatar, welcome and mass messages labelled as automated, and a
+  freshness gate of at most 10 *personal* messages. Welcome definitions come
+  from one shared, cached, paced service
+  (`src/background/welcome-definitions.ts`). The chat reads one Fansly page; a
+  conversation that does not fit it is Reply or Ping territory (E136).
 - **Spenders** — kernel-backed ranking with data freshness and deleted-account labels.
 - **Vault uploader** — on `/creator/vault`, a folder of media goes into the open
   album one file at a time through Fansly's own upload form, each confirmed by
@@ -118,6 +126,17 @@ Important references:
   architecture.
 
 ## Release
+
+Release 2.4.5 unifies the Hi greeting across both surfaces: one `hi-greeting`
+contract (`variantCount`, `personalMessageCount`) replaces the `greetingMode`
+flag, one shared greeting context (`src/shared/greeting-context.ts`) and one
+welcome-definitions service (`src/background/welcome-definitions.ts`) feed the
+chat button and the New Followers window alike. The chat Hi gains the fan's
+avatar, username and saved name and labels automated messages; its gate counts
+personal messages only, so welcome and mass messages no longer lock a fan out,
+while a follower with more than 10 personal messages is refused as a
+conversation, not a greeting (E136, E137). Ships on the SDK re-vendored from the
+deployed Core `82571f3c` (Core Decision 379).
 
 Release 2.4.4 stops the new-followers window from reading an inbox listing or
 search miss as «не писали»: such a row says «Чат не найден», the chat is
