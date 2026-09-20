@@ -36,7 +36,15 @@ from prose when checking what is installed or live; verify the signed update fee
 - **Review** — a readable conversation evaluation with recommendations and examples.
 - **Voice** — script, paid audio takes, preview, MP3 download, and native Fansly
   attachment, only for pages whose Hub capability enables it. Sending stays manual.
-- **Ping / Hi** — re-engage an inactive fan or greet a new conversation.
+- **Ping / Hi** — re-engage an inactive fan or greet a new conversation. Hi in
+  the chat (three variants) and the **Новые** followers window (one draft) are
+  one kernel feature, `hi-greeting` with `variantCount`, fed by one greeting
+  context (`src/shared/greeting-context.ts`): display name, username, saved
+  name, bio, avatar, welcome and mass messages labelled as automated, and a
+  freshness gate of at most 10 *personal* messages. Welcome definitions come
+  from one shared, cached, paced service
+  (`src/background/welcome-definitions.ts`). The chat reads one Fansly page; a
+  conversation that does not fit it is Reply or Ping territory (E133).
 - **Spenders** — kernel-backed ranking with data freshness and deleted-account labels.
 - **Vault uploader** — on `/creator/vault`, a folder of media goes into the open
   album one file at a time through Fansly's own upload form, each confirmed by
@@ -118,6 +126,11 @@ Important references:
   architecture.
 
 ## Release
+
+Unreleased on `main`: the unified Hi greeting (E133). It needs Core Decision 379
+deployed first (an older kernel answers the new fields with 400), and the
+vendored SDK must be re-vendored from the DEPLOYED core commit before the
+release that carries it.
 
 Release 2.4.3 replaces the follower read scheduler with the Fansly pacer
 (`src/background/fansly-pacer/`): a pace policy per route family, a learned

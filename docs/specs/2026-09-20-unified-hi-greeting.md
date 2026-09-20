@@ -5,6 +5,11 @@ button must not lag behind the New Followers window in context and analysis
 (avatar, saved name, username, automation labels), and the architecture must
 be one feature rather than two parallel ones.
 
+Status: built. Kernel half is core PR #246 (Decision 379), extension half is
+E133. Sections 4.2 to 4.4 were updated on 2026-09-20 to match what was built
+after the owner's decisions on the phase 1 findings (avatar, gate coverage,
+welcome wait, names ordering); the changed points are marked "Decided".
+
 Repos: `~/code/goose/hub` (GitHub `core`, the kernel) and
 `~/code/goose/fansly-ext` (GitHub `chatgoose`). `~/code/goose/of-desktop` is a
 follow-up (section 7), it keeps working unchanged through a compatibility alias.
@@ -243,14 +248,28 @@ it. Behaviour of the followers window must not change; keep the diff in
 The Fansly read stays on the existing paced client (E130 pacer). No new route,
 no unpaced request.
 
+Decided: ONE instance is built in `src/background/index.ts` and injected into
+both the followers service and the chat operations path, so the cache and the
+single-flight are truly shared. Two additions for the chat caller, which must
+never wait on the paced lane (a running scan or a 429 cooldown can hold it for
+minutes): `peek(creatorId)` returns cached texts of ANY age with no network, and
+`loadWithin({ ..., timeoutMs })` is the cache-first bounded read described in
+4.3. `load` also takes an optional caller-only `signal`: it detaches that caller
+and never aborts the shared read.
+
 ### 4.3 Chat Hi path (`src/background/operations.ts`)
 
 For `feature === 'hi-greeting'`:
 
-- Load welcome definitions through 4.2 (cache is fine, never forced fresh).
-  If loading fails, continue with an empty set: automation is then detected by
-  the independent markers only (type 2, non-reply correlation id). A failure
-  here never blocks or retries the generation.
+- Load welcome definitions through 4.2, before the gate, never forced fresh.
+  Decided: cache-first with a short wait. A cache younger than 24 h is used
+  with no network. Otherwise the normal paced load gets
+  `HI_WELCOME_LOAD_TIMEOUT_MS` (4 s) through the caller-only signal; on timeout
+  or error the stale cached texts are used if any, else an empty set, and
+  automation is then detected by the independent markers only (type 2,
+  non-reply correlation id). The shared paced read keeps running and fills the
+  cache for next time. This never blocks, fails or retries the generation; the
+  outcome is a `welcome-definitions` profiling stage, visible in debug mode.
 - Classify fetched messages, add the automation label to the model's automated
   messages in the formatted transcript, compute `personalMessageCount`.
 - Client gate: replace "total > `HI_GREETING_MAX_TRANSCRIPT`" with
@@ -259,13 +278,34 @@ For `feature === 'hi-greeting'`:
   history (older messages may be personal; those fans are Ping territory). Net
   effect: Hi opens for fans whose full history fits one page and holds <= 10
   personal messages.
+  Decided: coverage is `providerReachedEnd` of the existing one-page
+  `loadMessages` call (a page shorter than 25). A fan with exactly 25 messages
+  is cut, accepted. The client gate counts personal messages over the whole
+  loaded page (`countPersonalMessages`); the `personalMessageCount` sent to the
+  kernel comes from `buildGreetingContext` over the window the formatter kept,
+  so it can never exceed `messageCount`. Hi stays at ONE page. Known limitation
+  and open owner question: a fan with 25+ messages, even all automatic, stays
+  locked in the chat while the New Followers window greets him; multi-page Hi
+  reads would close that at the cost of extra Fansly egress.
 - Send `variantCount: 3`, `fanUsername`, `fanAvatarUrl`,
-  `personalMessageCount`, plus everything sent today.
-- Avatar freshness: signed avatar URLs expire. Use the account read this
-  generation already performs. If that read can be served from a cache, refresh
-  through the same paced call the followers path uses at its generation click
-  (one request per explicit human click). On failure fall back to text-only.
-  The AI request is never auto-retried.
+  `personalMessageCount`, plus everything sent today (spending, subscription,
+  coverage and so on).
+- Decided, names: for `hi-greeting` only, the chat sends the followers ordering
+  through the shared module: `displayName` = account display name, else
+  username, else `fan`; `username` = account username; custom name, bio and
+  avatar from the same account read. Every other feature keeps the
+  username-first `kernelFanDisplayName` (E115 / Core Decision 290). In both
+  cases kernel-facing names come from the account lookup, never the DOM label.
+  Without this the kernel's username line would almost never render and the
+  real display name would never reach the model.
+- Decided, avatar: the chat's account read is live and uncached on every
+  generation, so the signed URL is fresh. There is NO extra Fansly request for
+  the avatar (the draft's "refresh if cached" branch is dropped). A failed
+  lookup stays non-fatal and gives a text-only Hi. The AI request is never
+  auto-retried.
+- Decided, custom name cap: for Hi it goes through the shared module (UTF-16
+  units, surrogate-safe). `kernelFanCustomName` (code points) is left alone for
+  the other features: follow-up.
 - The chat keeps its own media/PPV transcript formatter; only profile fields,
   automation labels and the count come from the shared module.
 
@@ -276,6 +316,9 @@ and `personalMessageCount` INSTEAD of `greetingMode`. Same client-side check
 against `HI_GREETING_MAX_TRANSCRIPT` before calling the kernel; a row over the
 limit gets a Russian message telling the chatter to open the chat and use
 Reply. The `[VARIANT]|[NEXT]` output guard and all persona/session fencing stay.
+Built: the check runs right after the pre-generation recheck, before any further
+Fansly or hub read; the kernel's `gate_hi_greeting_limit` maps to the same
+wording; the row stays composable by hand.
 
 Known accepted behaviour change: a follower who wrote more than 10 unanswered
 messages no longer gets a one-line draft from the queue. That conversation
@@ -286,7 +329,9 @@ needs a real reply with full context.
 Request type: `variantCount?: 1 | 3` replaces `greetingMode`; `fanUsername`,
 `fanAvatarUrl`, `personalMessageCount` pass through for `hi-greeting`. The
 `gate_hi_greeting_limit` mapping stays. Trace fields that recorded
-`greetingMode` record `variantCount`.
+`greetingMode` record `variantCount`. Built: the gateway sends the four greeting
+fields for `hi-greeting` only (Core answers 400 elsewhere), and `greetingMode`
+no longer appears in `src/`.
 
 ### 4.6 SDK
 
