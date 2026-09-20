@@ -4582,3 +4582,26 @@ display-name search finds; what Fansly makes of one `POST /group` per
 place of a search per unlisted fan), so E130's pace figures no longer describe
 it. Validation is synthetic: mocked transport, fake timers, jsdom, and manual
 mutations of each new rule. No settings or schema migration; no version bump.
+
+E133 integration follow-up (2026-09-20). A design audit that ran while this was
+being built asked for a simpler shape; the implementer never received it (the
+amendments reached it inside a tool result and it rightly ignored them), so
+they were weighed against the finished code instead. Kept as built: the
+budgeted background search and the `evidence` field, both already pinned by
+tests and mutations. Changed on the merged branch: the search hint reads one
+page only (a common display name would otherwise page twenty requests for one
+fan, and a miss proves nothing either way); the inbox prefix stops as soon as
+every wanted fan is matched; a listing `lastMessage` is a verdict only when it
+carries `type`, `correlationId` and `inReplyTo` (Fansly's key sets drift, and an
+absent `correlationId` would turn a mass DM into a personal one and hide a fan
+as already greeted); verify, generate and send refuse at once while the lane is
+in a cooldown, before anything is reserved (E132 made a first cooldown minutes
+long, and an action that joined the lane burned its own 60 s / 180 s into a
+bare timeout); a refused `POST /group` shows Fansly's own code («Fansly отказал
+в открытии чата (код N)…») and guesses nothing about its meaning; the window no
+longer loads the chat it has just written to (two reads a send); «Чат не
+найден» is a neutral colour, because on some creators it is the normal state of
+almost every newcomer. Not taken: confirming participants once per send
+operation instead of three times (two fewer reads a send, sends being most of
+a session's Fansly traffic). It is sound on paper and it is the send path, so
+it waits for the owner's decision and a live trace.
