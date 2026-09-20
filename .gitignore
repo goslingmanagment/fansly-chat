@@ -11,3 +11,6 @@ drafts/
 prompts/drafts/
 .claude/
 *.zip
+
+# Local browser-automation logs
+.playwright-mcp/

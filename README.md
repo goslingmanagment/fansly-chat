@@ -44,7 +44,7 @@ from prose when checking what is installed or live; verify the signed update fee
   freshness gate of at most 10 *personal* messages. Welcome definitions come
   from one shared, cached, paced service
   (`src/background/welcome-definitions.ts`). The chat reads one Fansly page; a
-  conversation that does not fit it is Reply or Ping territory (E133).
+  conversation that does not fit it is Reply or Ping territory (E136).
 - **Spenders** — kernel-backed ranking with data freshness and deleted-account labels.
 - **Vault uploader** — on `/creator/vault`, a folder of media goes into the open
   album one file at a time through Fansly's own upload form, each confirmed by
@@ -127,10 +127,19 @@ Important references:
 
 ## Release
 
-Unreleased on `main`: the unified Hi greeting (E133). It needs Core Decision 379
+Unreleased on `main`: the unified Hi greeting (E136). It needs Core Decision 379
 deployed first (an older kernel answers the new fields with 400), and the
 vendored SDK must be re-vendored from the DEPLOYED core commit before the
 release that carries it.
+
+Release 2.4.4 stops the new-followers window from reading an inbox listing or
+search miss as «не писали»: such a row says «Чат не найден», the chat is
+resolved by identity (`POST /group`) at «Проверить чат» / «Сгенерировать», a
+blocked send is loud, and the scan reads an inbox prefix instead of one search
+per fan. The pacer gets its safety patch: jitter on the binding deadline, a
+first limit widens the whole lane, a FBuddy-grade cooldown, no upward probing,
+a narrow delayed recheck with a fuse (E133, E134, E135). Ships on the SDK
+re-vendored from Core `301a127a` (E132).
 
 Release 2.4.3 replaces the follower read scheduler with the Fansly pacer
 (`src/background/fansly-pacer/`): a pace policy per route family, a learned

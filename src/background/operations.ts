@@ -2402,7 +2402,7 @@ export class OperationCoordinator {
         throw new ChatGooseError('not_enough_history');
       }
 
-      // Hi (E133, Core Decision 379): the same greeting context as the New
+      // Hi (E136, Core Decision 379): the same greeting context as the New
       // Followers window. Welcome and mass messages get the shared transcript
       // label and do not count against the freshness gate.
       let greetingWindow: GreetingWindowMessage[] | undefined;

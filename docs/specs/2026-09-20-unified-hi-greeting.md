@@ -6,7 +6,8 @@ button must not lag behind the New Followers window in context and analysis
 be one feature rather than two parallel ones.
 
 Status: built. Kernel half is core PR #246 (Decision 379), extension half is
-E133. Sections 4.2 to 4.4 were updated on 2026-09-20 to match what was built
+E136 (written as E133 before E132–E135 landed on `main`). Sections 4.2 to 4.4
+were updated on 2026-09-20 to match what was built
 after the coordinating session's decisions on the phase 1 findings (avatar, gate
 coverage, welcome wait, names ordering; reported to the owner, not individually
 approved); the changed points are marked "Decided".

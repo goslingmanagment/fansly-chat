@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FollowersService } from '../src/background/followers-service.js';
-import type { FanslyClient } from '../src/background/fansly-client.js';
+import type { FanslyClient, InboxChat } from '../src/background/fansly-client.js';
 import type { SessionStore } from '../src/background/session-store.js';
 import type { AgencyHubClient } from '../src/background/agency-hub-client.js';
 import type { KernelFeatureGateway } from '../src/background/kernel-feature-gateway.js';
@@ -17,6 +17,9 @@ import { routeSchemas } from '@kernel/sdk';
 
 const REQUEST_ID = '00000000-0000-4000-8000-000000000001';
 const msg = (overrides: Partial<FanslyMessage> = {}): FanslyMessage => ({ id: '40', senderId: '1', groupId: '3', content: 'auto welcome', type: 1, createdAt: 1000, attachments: [], embeds: [], ...overrides });
+/** The fan's chat as the inbox prefix lists it: participants unlisted, so the
+ * check reads `GET /group` and the row's verdict rests on a read history. */
+const chat = (fanId: string, groupId: string, extra: Partial<InboxChat> = {}): InboxChat => ({ fanId, groupId, verified: false, lastMessageId: null, lastMessage: null, ...extra });
 const hhmm = (seconds: number) => {
   const date = new Date(seconds * 1000);
   return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
@@ -30,14 +33,16 @@ function harness(account: FanslyAccountResponse, messages: FanslyMessage[], debu
   const fansly = {
     followerSession: vi.fn((value: SessionTemplate) => structuredClone(value)),
     followerReadStatus: vi.fn(() => undefined),
+    followerReadReadyAt: vi.fn(() => 0),
     getAuthenticatedAccount: vi.fn(async () => ({ id: '1', username: 'creator' })),
     getFollowerPage: vi.fn(async () => ({ followers: [{ id: String(BigInt(Date.now() - 3600_000 - 1561494360000) << 22n), followerId: '2' }], aggregationData: { accounts: [account] } })),
     getWelcomeDefinitions: vi.fn(async () => [{ messageTemplate: { content: 'auto welcome' } }]),
     getAccountNames: vi.fn(async (): Promise<FanslyAccountResponse[]> => []),
-    listFanAccounts: vi.fn(async () => ({ fans: [{ groupId: '3', fanAccountId: '2' }], truncated: true })),
-    findFollowerGroup: vi.fn(async (): Promise<string | null> => '3'),
+    listInboxPrefix: vi.fn(async (): Promise<InboxChat[]> => [chat('2', '3')]),
+    findFollowerGroup: vi.fn(async (): Promise<InboxChat | null> => chat('2', '3')),
     getGroup: vi.fn(async () => ({ users: [{ userId: '1' }, { userId: '2' }] })),
     getMessagePage: vi.fn(async (_group: string, before: string | null) => ({ messages: before ? [] : messages, accountMedia: [], accountMediaBundles: [] })),
+    createFollowerGroup: vi.fn(async (): Promise<{ id: string; lastMessage: FanslyMessage | null }> => ({ id: '3', lastMessage: null })),
   };
   const storage = {
     get: vi.fn(async (keys: string | string[]) => Object.fromEntries((Array.isArray(keys) ? keys : [keys]).map((key) => [key, values[key]]))),
@@ -48,7 +53,7 @@ function harness(account: FanslyAccountResponse, messages: FanslyMessage[], debu
   const service = new FollowersService({ fansly: fansly as unknown as FanslyClient, sessions: { getSessionForTab: () => session } as unknown as SessionStore, gateway: gateway as unknown as KernelFeatureGateway, hub: hub as unknown as AgencyHubClient, readState: async () => state, storage: storage as unknown as browser.storage.StorageArea });
   const scan = async () => {
     const snapshot = await service.start(7, 48);
-    await vi.waitFor(() => expect(service.state(7, snapshot.scanId).scanning).toBe(false));
+    await vi.waitFor(() => { const current = service.state(7, snapshot.scanId); expect(current.scanning || current.background?.active).toBeFalsy(); });
     return snapshot;
   };
   const generate = async () => {
