@@ -125,6 +125,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E132 | 2026-09-20 | Re-vendor the SDK from Core `301a127a` (Core Decision 376, in-core Workboard v2 removed); merge only once production serves contractHash `42c705b8…` |
 | E133 | 2026-09-20 | Pacer safety patch after two reviews and the first production trace: jitter on the binding deadline, a first limit widens the lane, FBuddy-grade cooldown, success only for a validated envelope, narrow delayed recheck with a fuse, writes refused under a cooldown, upward probing deleted |
 | E134 | 2026-09-20 | New followers: an inbox listing or search miss is never «не писали»; the chat is resolved by identity (`POST /group`) at an explicit human action, never during a scan; saved fan → chat id; a blocked send is an error the chatter sees; text search demoted to a budgeted background hint |
+| E135 | 2026-09-20 | Release E133 + E134 as 2.4.4 in one release on the owner's word, on the SDK re-vendored in E132; no live measurement yet, trace counters added for every unverified assumption |
 
 ## Entries
 
@@ -4634,3 +4635,31 @@ almost every newcomer. Not taken: confirming participants once per send
 operation instead of three times (two fewer reads a send, sends being most of
 a session's Fansly traffic). It is sound on paper and it is the send path, so
 it waits for the owner's decision and a live trace.
+
+**E135 (2026-09-20).** The owner authorizes releasing the pacer safety patch
+(E133) and the chat-identity fix (E134) as 2.4.4, in one release as asked
+(«релизы не дробить»). Production Core moved to contract hash `42c705b8…` the
+same day, so the release rides on the SDK re-vendored from Core `301a127a`
+(E132, merged first; its own condition — production serving that hash — was
+checked against `/api/v1/health` before the merge). That re-vendor took the
+number E132 on main first; this branch's decisions were renumbered to E133 and
+E134 in the log, the code comments and the tests alike. Both changes went
+through one pull request: the pacer branch was merged into the chat-identity
+branch and its own pull request closed as superseded.
+
+Validation is synthetic throughout: mock transport, fake timers, jsdom, and
+about 150 manual mutations across the two changes, all killed but one that is
+unreachable behind a second guard. Nothing here was measured against Fansly.
+The first production scans are that measurement, and the trace now answers
+each open question by itself: `inbox.page` / `group.search-page` count how
+often a listing entry is thin, `group.last-message` whether `POST /group` and
+`GET /group` carry a last message, `background.result` how many chats the
+display-name search finds, `http.cooldown` / `http.refused` / `http.error-body`
+what Fansly objects to and how. This reverses one line of the 2.4.3 changelog
+(«Ограничение замедляет только своё» now holds for profile reads only); the
+2.4.4 changelog says so. Still open and the owner's to decide: confirming
+participants once per send operation instead of three times, and a truthful
+status for fans whose DMs are restricted (needs one real `GET /group` capture
+of such a chat). Rollback is a feed release; neither change migrates storage,
+and the new operational keys (`chatgoose:fansly-pacer:v1:*`,
+`chatgoose:followers:v1:group:*`) are ignored by older builds.
