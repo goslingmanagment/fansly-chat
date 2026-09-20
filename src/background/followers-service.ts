@@ -5,7 +5,7 @@ import { ChatGooseError, toUserError } from '../shared/errors.js';
 import { formatTranscriptForKernel } from '../shared/transcript.js';
 import {
   automationReason, fanslyAvatarUrl, followedAtFromId, isAutomatedMessage, isPersonalMessage,
-  normalizeWelcome, welcomeTexts, type FollowerDisplayMessage, type FollowerMessageEvidence, type FollowerRow, type FollowersSnapshot,
+  normalizeWelcome, type FollowerDisplayMessage, type FollowerMessageEvidence, type FollowerRow, type FollowersSnapshot,
 } from '../shared/followers.js';
 import { AUTOMATED_MESSAGE_LABEL, greetingProfileFields, isAutomatedGreetingMessage } from '../shared/greeting-context.js';
 import type { FanslyAccountResponse, FanslyMessage, PersistedState, SessionTemplate } from '../shared/types.js';
@@ -15,6 +15,7 @@ import type { KernelFeatureGateway } from './kernel-feature-gateway.js';
 import type { SessionStore } from './session-store.js';
 import { resolveHubBearer } from './agency-hub-client.js';
 import { FollowersTraceStore, traced, type FollowersTrace, type TraceScope } from './followers-trace.js';
+import { WelcomeDefinitionsService, type WelcomeDefinitions } from './welcome-definitions.js';
 
 type Storage = Pick<browser.storage.StorageArea, 'get' | 'set'>;
 interface Scan {
@@ -36,7 +37,6 @@ interface Scan {
   welcomeCheckedAt: number;
   welcomeRefresh?: Promise<void>;
 }
-interface WelcomeCache { texts: Set<string>; checkedAt: number }
 interface Options {
   fansly: FanslyClient;
   sessions: SessionStore;
@@ -44,6 +44,8 @@ interface Options {
   hub: AgencyHubClient;
   readState: () => Promise<PersistedState>;
   storage: Storage;
+  /** Shared with the chat Hi; a private one is created when absent. */
+  welcome?: WelcomeDefinitionsService;
 }
 
 const key = (kind: string, creator: string, fan = '') => `chatgoose:followers:v1:${kind}:${creator}:${fan}`;
@@ -59,12 +61,14 @@ function errorText(error: unknown): string {
 export class FollowersService {
   private readonly scans = new Map<number, Scan>();
   private readonly locks = new Set<string>();
-  private readonly welcomeLoads = new Map<string, { work: Promise<WelcomeCache>; traceId?: string }>();
+  private readonly welcome: WelcomeDefinitionsService;
   private readonly starts = new Map<number, number>();
   readonly traces = new FollowersTraceStore();
   private readonly lastTraces = new Map<number, string>();
 
-  constructor(private readonly options: Options) {}
+  constructor(private readonly options: Options) {
+    this.welcome = options.welcome ?? new WelcomeDefinitionsService({ fansly: options.fansly, storage: options.storage });
+  }
 
   async debugEnabled(): Promise<boolean> { return (await this.options.readState()).settings.debugMode; }
 
@@ -169,44 +173,8 @@ export class FollowersService {
     if (!scan.controller.signal.aborted) scan.trace.update({ state: scan.snapshot.canContinue ? 'paused' : scan.snapshot.error ? 'error' : 'completed' });
   }
 
-  private async loadWelcome(scan: Scan, fresh = false, parent: TraceScope | undefined = scan.trace): Promise<WelcomeCache> {
-    return traced(parent, 'welcome.load', async (scope) => {
-      const creator = scan.snapshot.creatorId;
-      const storageKey = key('welcome', creator);
-      const values = await traced(scope, 'welcome.cache-read', () => this.options.storage.get(storageKey));
-      const cached = values[storageKey] as { texts?: unknown; checkedAt?: number } | undefined;
-      if (cached && (!Array.isArray(cached.texts) || !cached.texts.every((v: unknown) => typeof v === 'string'))) throw new Error('Повреждён кэш welcome-сообщений.');
-      const old = (cached?.texts ?? []) as string[];
-      if (!fresh && cached?.checkedAt && Date.now() - cached.checkedAt < 24 * 3600_000) {
-        scope?.event('welcome.cache-hit', { count: old.length, ageMs: Date.now() - cached.checkedAt });
-        return { texts: new Set(old.map(normalizeWelcome)), checkedAt: cached.checkedAt };
-      }
-      const existing = this.welcomeLoads.get(creator);
-      if (existing) {
-        scope?.event('welcome.join', { ownerTraceId: existing.traceId, fresh });
-        return existing.work;
-      }
-      scope?.event('welcome.fetch', { fresh, cachedCount: old.length, ageMs: cached?.checkedAt ? Date.now() - cached.checkedAt : null });
-      // Account-scoped single-flight is independent of an individual window's
-      // cancellation. A closed tab must not poison another tab's welcome read.
-      const work = (async () => {
-        const raw = await this.options.fansly.getWelcomeDefinitions(this.options.fansly.followerSession(scan.session), new AbortController().signal, scope);
-        const texts = [...new Set([...old, ...welcomeTexts(raw)])];
-        const checkedAt = Date.now();
-        await traced(scope, 'welcome.cache-write', () => this.options.storage.set({ [storageKey]: { texts, checkedAt } }), { count: texts.length });
-        scope?.event('welcome.loaded', { definitions: Array.isArray(raw) ? raw.length : 0, retainedTexts: texts.length });
-        return { texts: new Set(texts.map(normalizeWelcome)), checkedAt };
-      })();
-      this.welcomeLoads.set(creator, { work, traceId: scan.trace?.info().id });
-      try { return await work; }
-      catch (error) {
-        if (!fresh && cached?.checkedAt) {
-          scope?.event('welcome.stale-fallback', { ageMs: Date.now() - cached.checkedAt, count: old.length });
-          return { texts: new Set(old.map(normalizeWelcome)), checkedAt: cached.checkedAt };
-        }
-        throw error;
-      } finally { this.welcomeLoads.delete(creator); }
-    }, { fresh });
+  private loadWelcome(scan: Scan, fresh = false, parent: TraceScope | undefined = scan.trace): Promise<WelcomeDefinitions> {
+    return this.welcome.load({ creatorId: scan.snapshot.creatorId, session: scan.session, fresh, trace: parent, traceId: scan.trace?.info().id });
   }
 
   private async ensureFreshWelcome(scan: Scan, scope?: TraceScope, signal = scan.controller.signal): Promise<void> {
