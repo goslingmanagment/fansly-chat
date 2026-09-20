@@ -122,6 +122,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E129 | 2026-09-19 | Re-vendor the SDK from deployed Core `b1d3bb81` before publishing 2.4.2; the release gate stopped the first attempt before signing |
 | E130 | 2026-09-20 | Fansly pacer replaces the follower read scheduler: policy per route family, learned spacing per key, 400 ms jittered lane gap, a limit slows its own key first, limits survive the background page; transient 404 rows rechecked once; unreleased until a live trace |
 | E131 | 2026-09-20 | Owner releases E130 as 2.4.3 without the temporary-load trace; the first production scans are the live measurement, the feed is the rollback |
+| E133 | 2026-09-20 | New followers: an inbox listing or search miss is never «не писали»; the chat is resolved by identity (`POST /group`) at an explicit human action, never during a scan; saved fan → chat id; a blocked send is an error the chatter sees; text search demoted to a budgeted background hint |
 
 ## Entries
 
@@ -4384,3 +4385,115 @@ per the owner's numbering (E120); package and manifest advance together, both
 changelogs, the landing stamp and the README move with them. The vendored SDK
 already carries production's contract hash `8e761076…` (checked against
 `/api/v1/health` before the bump), so no re-vendor is needed.
+
+**E133 (2026-09-20).** An audit of a real 148-follower run (run e12f516f,
+@itsaribae, 2.4.3, 48 h; report and raw trace in
+`~/Documents/Codex/Logs/ari-extension-audit-2026-09-20/`)
+shows that the scan called fans «не писали» on no evidence. All 115 inbox
+searches of the run (59 at scan, 56 before send) returned nothing; every
+correct «уже писали» came from the saved proof. `check()` read a search miss
+as `groupId === null`, that as a complete history, and that as `ready` with
+«Личной переписки ещё нет». Two fans with an old personal conversation came out
+that way (KBilly212, colossal_torpedoes). On a creator with a cold cache 38 of
+152 searches missed and most of those fans had a conversation. Why the search
+misses (strong evidence, not needed for the fix): the inbox row carries
+`partnerUsername = lower(displayName || username)` as a snapshot that goes
+stale, the server `search` matches that field, and the scan searched by
+username, so it missed every fan whose display name differs (~18%). One of the
+two chats is absent even from a full enumeration of the inbox and still opens
+by link, and the listing has no total: no listing and no search can prove
+absence. `POST /group` is get-or-create by identity: in 45 of 56 sends it
+answered with a group older than the request. The last line of defence held
+(send resolves the group by `POST /group` and re-checks before the Hub
+reserve), but it held silently: the screen looked exactly like a delivery, a
+refresh brought the false `ready` back because the learned chat id lived for
+one scan, and an `uncertain` row never re-read its history through the chat id
+in its own journal. 10 of 55 history reads ~0.5 s after a send returned an
+empty page with HTTP 200. All 56 messages of the session were typed by hand;
+«Сгенерировать» was never pressed.
+
+Changes. (1) A follower row says what a `ready`/`reply` verdict rests on:
+`evidence: 'history'` (the chat was resolved and read to a confirmed end) or
+`'unverified'` (no chat found, nothing proved; verdict reason `chat-not-found`,
+`native-search-no-group` is retired). An unverified row stays workable, since
+56 of the 59 in the audit were genuine newcomers, but the window says «Чат не
+найден» in amber, not the red «Не писали», explains under the history pane that
+this is not proof, and has its own status filter. «Личной переписки ещё нет» is
+said only over a history read to its end; a chat that is known but unread says
+«Историю прочитать не удалось» and its row is `unknown`, never «чат не найден».
+(2) This amends E117's "No group is created during a scan": a chat may be
+resolved by identity, `POST /group`, one attempt and never retried, at an
+explicit human action before the send decision. The actions are the new
+«Проверить чат» button (`verify`) and «Сгенерировать», where it happens after
+the persona check and before any context is built or AI is spent; the send path
+already did it. The row is then re-checked through the real history. A fan who
+turns out to be contacted costs no generation, a fan who wrote first gets a
+draft over the real transcript. Still forbidden: `POST /group` during a scan,
+a Continue, a row selection (the window selects rows by itself), a preview or
+the background phase; a test runs a scan, a preview, a pause and a Continue
+over the real transport and sees only GETs. Nothing is sent or generated from
+an unverified row: both paths require `evidence === 'history'` after their own
+resolution, whatever the re-check returned. (3) An empty first history page is
+believed only when no answer of this scan named a last message for the chat
+(`GET /group`, the listing entry, the `POST /group` answer); otherwise the read
+is lagging and the row is `unknown`. E117 is not weakened: a negative verdict
+still needs the empty terminal page, the 30-page cap, errors and partial data
+stay `unknown`. (4) The fan → chat id mapping is an operational cache,
+`chatgoose:followers:v1:group:<creator>:<fan>`, written whenever an id passed a
+participant check and read in the row's existing `storage.get`; the personal
+proof carries the id too. Resolution order: this scan (listing, search hit,
+`POST /group`), the saved id, the send journal's id. A saved id is a lead, not
+a fact: every use passes the participant fence, and a mismatch or a 404 forgets
+it while the check fails closed. It outlives a rename and lets the read-only
+preview of an excluded fan open the real chat instead of searching. (5) A
+re-check that takes a row out of a send or a generation throws with explicit
+copy («Сообщение не отправлено: у фана уже есть личная переписка. Строка
+перенесена в «Уже писали».») instead of returning a snapshot. The window shows
+it as a banner that names the fan, keeps that fan on screen with the history
+that was found until the chatter moves on, and leaves the typed draft alone:
+never deleted, never sent, never turned into a continuation. (6) An
+`uncertain` row is read through its journal's chat id. Finding a personal
+message there is positive; not finding one changes nothing, and the retry
+stays blocked. (7) The inbox listing is used for what it already returns. A
+new client read takes the prefix of `/messaging/groups` as deep as the scan's
+period (while the last row's `lastMessageId` snowflake is newer than the
+cutoff, ten pages at most, page 0 once more for chats that jumped up
+meanwhile) and replaces the fixed top 100; malformed `data` throws there. At
+scan time an `aggregationData.groups[]` entry that lists exactly the creator
+and the fan is the participant check and spares `GET /group`; a thin entry
+falls back to it, and every human action still reads `GET /group`. A chat's
+`lastMessage` by the creator that is personal under the history path's own
+rule, with fresh welcome definitions, is a positive verdict without a history
+read at scan time, and at any time it outvotes a history that does not show
+it yet; it is never negative evidence. `inbox.page` and `group.search-page`
+trace `count`, `groups`, `withUsers`. (8) The text search leaves every verdict
+path. After the checks, outside `scanning`, a background phase searches the
+still-unverified rows one request at a time by `displayName || username`,
+accepts a hit only by `partnerAccountId`, and checks it like a listed chat; a
+miss or a failed search changes nothing. It ends after 20 searches without a
+hit (on some creators the search never finds anybody), at 150 per scan, on
+Pause, close, a cooling lane or a rate limit, and gives way at once to a human
+action on the same fan. «Проверено N из N» is shown as soon as the checks are
+done and the hints are reported beside it. A matching search row with an
+unusable chat id throws instead of reading as a miss. (9) The spenders board
+resolves a chat by `displayName || username` too, and its hint says that the
+search returned nothing, not that no conversation exists.
+
+Deliberate deviations from the brief. The blocked-send error is a plain
+`Error`, not a `ChatGooseError`: `followers-runtime` and `errorText` replace a
+`ChatGooseError`'s message with its registry copy, so explicit copy survives
+only on the plain errors this file already uses. A failed re-check of a row
+whose chat has just become known turns the row `unknown` and offers Continue
+(which needs no second `POST /group`), rather than leaving «чат не найден» on a
+chat that was found. The page-0 re-read is skipped when only one page was
+read, because nothing could have jumped over it.
+
+Not verified live: whether `GET /group` and `POST /group` always carry
+`lastMessage` for a chat with messages (an absent field is read as "no last
+message", which is today's behaviour); how often the listing entry is thin;
+whether the inbox order is strictly by `lastMessageId`; how many fans the
+display-name search finds; what Fansly makes of one `POST /group` per
+«Проверить чат». The scan issues far fewer reads than before (one listing in
+place of a search per unlisted fan), so E130's pace figures no longer describe
+it. Validation is synthetic: mocked transport, fake timers, jsdom, and manual
+mutations of each new rule. No settings or schema migration; no version bump.

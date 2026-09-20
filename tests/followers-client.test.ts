@@ -247,3 +247,122 @@ describe('Fansly browser-session outreach transport', () => {
     expect(fetch).toHaveBeenCalledOnce();
   });
 });
+
+// E133. The page shape is Fansly's own (the hub's verbatim fixture): `data[]`
+// rows beside `aggregationData.groups[]` with `users[]` and a full `lastMessage`.
+describe('Fansly inbox as a positive-only source', () => {
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+  const snowflake = (ms: number, n = 0) => String((BigInt(ms - 1561494360000) << 22n) + BigInt(n));
+  const now = Date.parse('2026-09-20T12:00:00Z'), cutoff = now - 48 * 3600_000;
+  const message = (id: string, groupId: string, senderId: string) => ({ id, type: 1, content: 'hi', groupId, senderId, correlationId: null, inReplyTo: null, createdAt: 1, attachments: [], embeds: [] });
+  const row = (fanId: string, at: number) => ({ groupId: `9${fanId}`, partnerAccountId: fanId, partnerUsername: `fan${fanId}`, lastMessageId: snowflake(at, Number(fanId)) });
+  const page = (from: number, count: number, at: (index: number) => number) => ({ data: Array.from({ length: count }, (_, index) => row(String(from + index), at(index))) });
+  const offsets = (fetch: ReturnType<typeof vi.fn>) => fetch.mock.calls.map((call) => new URL(String(call[0])).searchParams.get('offset'));
+
+  it('inbox prefix stops at the cutoff, re-reads page 0, throws on malformed data', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(now);
+    const h = harness();
+    // Three pages: the third ends below the cutoff, so nothing is read after it.
+    const fetch = vi.fn<typeof globalThis.fetch>(async (input) => {
+      const offset = Number(new URL(String(input)).searchParams.get('offset'));
+      return envelope(page(1000 + offset, 100, (index) => offset < 200 ? now - offset * 1000 - index : cutoff - 1 - index));
+    });
+    vi.stubGlobal('fetch', fetch);
+    const trace = new FollowersTrace({ id: crypto.randomUUID(), tabId: 7, hours: 48, version: 'test', build: 'test' });
+    const found = await h.client.listInboxPrefix('1', cutoff, new Set(['1005', '1250', '4000']), h.session, h.signal, trace);
+    expect(offsets(fetch)).toEqual(['0', '100', '200', '0']);
+    const url = new URL(String(fetch.mock.calls[0]![0]));
+    expect(Object.fromEntries(url.searchParams)).toMatchObject({ limit: '100', flags: '0', search: '', sortOrder: '1' });
+    // Only the wanted fans come back, and only as positive matches.
+    expect(found.map((chat) => [chat.fanId, chat.groupId, chat.verified])).toEqual([['1005', '91005', false], ['1250', '91250', false]]);
+    expect(trace.read().events.filter((event) => event.name === 'inbox.page').map((event) => event.data)).toEqual([0, 100, 200, 0].map((offset) => ({ offset, count: 100, groups: 0, withUsers: 0 })));
+    expect(trace.read().events).toContainEqual(expect.objectContaining({ name: 'inbox.stop', data: { pages: 3, reason: 'period-boundary' } }));
+
+    // A single page has nothing to have jumped over: no second read.
+    fetch.mockClear(); fetch.mockImplementation(async () => envelope(page(1000, 40, (index) => now - index)));
+    await h.client.listInboxPrefix('1', cutoff, new Set(['1005']), h.session, h.signal);
+    expect(offsets(fetch)).toEqual(['0']);
+    // A full page whose last row carries no usable date cannot show that the period continues.
+    fetch.mockClear(); fetch.mockImplementation(async () => envelope({ data: page(1000, 100, () => now).data.map((entry) => ({ ...entry, lastMessageId: undefined })) }));
+    await h.client.listInboxPrefix('1', cutoff, new Set(['1005']), h.session, h.signal);
+    expect(offsets(fetch)).toEqual(['0']);
+    fetch.mockClear(); fetch.mockImplementation(async () => envelope({ data: page(1000, 100, () => now).data.map((entry) => ({ ...entry, lastMessageId: 'not-a-snowflake' })) }));
+    await h.client.listInboxPrefix('1', cutoff, new Set(['1005']), h.session, h.signal);
+    expect(offsets(fetch)).toEqual(['0']);
+    // Ten pages at most, however busy the inbox.
+    fetch.mockClear(); fetch.mockImplementation(async (input) => envelope(page(1000 + Number(new URL(String(input)).searchParams.get('offset')), 100, (index) => now - index)));
+    await h.client.listInboxPrefix('1', cutoff, new Set(['1005']), h.session, h.signal);
+    expect(offsets(fetch)).toEqual(['0', '100', '200', '300', '400', '500', '600', '700', '800', '900', '0']);
+    // A chat that jumped to the top while the pages were read is caught by the re-read.
+    let reads = 0;
+    fetch.mockClear(); fetch.mockImplementation(async (input) => {
+      const offset = Number(new URL(String(input)).searchParams.get('offset'));
+      reads += 1;
+      if (offset === 0 && reads > 1) return envelope({ data: [row('7777', now), ...page(1000, 99, (index) => now - index).data] });
+      return envelope(page(1000 + offset, 100, (index) => offset ? cutoff - 1 - index : now - index));
+    });
+    expect((await h.client.listInboxPrefix('1', cutoff, new Set(['7777']), h.session, h.signal)).map((chat) => chat.fanId)).toEqual(['7777']);
+
+    // An unread page is never an empty inbox.
+    for (const malformed of [{}, { data: null }, { data: 'none' }]) {
+      fetch.mockImplementation(async () => envelope(malformed));
+      await expect(h.client.listInboxPrefix('1', cutoff, new Set(['1005']), h.session, h.signal)).rejects.toMatchObject({ key: 'fansly_server_error' });
+    }
+    // A listed fan whose chat id cannot be used is simply not matched.
+    fetch.mockImplementation(async () => envelope({ data: [{ groupId: 'abc', partnerAccountId: '1005', lastMessageId: snowflake(now) }] }));
+    expect(await h.client.listInboxPrefix('1', cutoff, new Set(['1005']), h.session, h.signal)).toEqual([]);
+  });
+
+  it('reads participants and the last message from the page; a thin entry verifies nothing', async () => {
+    const h = harness();
+    const head = message('500', '92', '1');
+    vi.stubGlobal('fetch', vi.fn<typeof globalThis.fetch>(async () => envelope({
+      data: [row('2', now), row('3', now), row('4', now), row('5', now), row('6', now)],
+      aggregationData: { groups: [
+        { id: '92', users: [{ userId: '1' }, { userId: '2' }], lastMessage: head },
+        { id: '93', users: [{ userId: '3' }], lastMessage: message('501', '93', '3') },
+        { id: '94', users: [{ userId: '1' }, { userId: '99' }] },
+        { id: '95', users: [{ userId: '1' }, { userId: '5' }, { userId: '99' }] },
+      ] },
+    })));
+    const trace = new FollowersTrace({ id: crypto.randomUUID(), tabId: 7, hours: 48, version: 'test', build: 'test' });
+    const found = await h.client.listInboxPrefix('1', cutoff, new Set(['2', '3', '4', '5', '6']), h.session, h.signal, trace);
+    expect(found.map((chat) => [chat.fanId, chat.verified])).toEqual([['2', true], ['3', false], ['4', false], ['5', false], ['6', false]]);
+    expect(found[0]).toMatchObject({ groupId: '92', lastMessage: head });
+    expect(found[1]?.lastMessage).toMatchObject({ id: '501' });
+    expect(found[4]).toMatchObject({ lastMessage: null, lastMessageId: snowflake(now, 6) });
+    expect(trace.read().events).toContainEqual(expect.objectContaining({ name: 'inbox.page', data: { offset: 0, count: 5, groups: 4, withUsers: 1 } }));
+  });
+
+  it('searches by the given term, matches by account id only, and never reads a broken match as a miss', async () => {
+    const h = harness();
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => envelope({ data: [row('3', now), row('2', now)], aggregationData: { groups: [{ id: '92', users: [{ userId: '2' }, { userId: '1' }] }] } }));
+    vi.stubGlobal('fetch', fetch);
+    const trace = new FollowersTrace({ id: crypto.randomUUID(), tabId: 7, hours: 48, version: 'test', build: 'test' });
+    expect(await h.client.findFollowerGroup('2', 'Display Name ✨', '1', h.session, h.signal, trace)).toMatchObject({ fanId: '2', groupId: '92', verified: true });
+    expect(new URL(String(fetch.mock.calls[0]![0])).searchParams.get('search')).toBe('Display Name ✨');
+    expect(trace.read().events).toContainEqual(expect.objectContaining({ name: 'group.search-page', data: { offset: 0, count: 2, groups: 1, withUsers: 1, match: '92' } }));
+    // A row with the same name and another account is not the fan.
+    expect(await h.client.findFollowerGroup('7', 'fan2', '1', h.session, h.signal)).toBeNull();
+    fetch.mockImplementation(async () => envelope({ data: [{ groupId: 'oops', partnerAccountId: '2' }] }));
+    await expect(h.client.findFollowerGroup('2', 'fan2', '1', h.session, h.signal)).rejects.toMatchObject({ key: 'fansly_server_error' });
+    fetch.mockImplementation(async () => envelope({ data: [{ partnerAccountId: '2' }] }));
+    await expect(h.client.findFollowerGroup('2', 'fan2', '1', h.session, h.signal)).rejects.toMatchObject({ key: 'fansly_server_error' });
+    fetch.mockImplementation(async () => envelope({}));
+    await expect(h.client.findFollowerGroup('2', 'fan2', '1', h.session, h.signal)).rejects.toMatchObject({ key: 'fansly_server_error' });
+    await expect(h.client.findFollowerGroup('2', '  ', '1', h.session, h.signal)).rejects.toMatchObject({ key: 'fansly_server_error' });
+  });
+
+  it('carries the last message of GET /group and POST /group to the caller', async () => {
+    const h = harness();
+    const last = message('500', '3', '1');
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => envelope({ id: '3', users: [{ userId: '1' }, { userId: '2' }], lastMessage: last }));
+    vi.stubGlobal('fetch', fetch);
+    expect(await h.client.createFollowerGroup('2', '1', h.session, h.signal)).toEqual({ id: '3', lastMessage: last });
+    expect((await h.client.getGroup('3', h.session, h.signal)).lastMessage).toEqual(last);
+    fetch.mockImplementation(async () => envelope({ id: '3', users: [{ userId: '1' }, { userId: '2' }], lastMessage: null }));
+    expect(await h.client.createFollowerGroup('2', '1', h.session, h.signal)).toEqual({ id: '3', lastMessage: null });
+    // Still one attempt, and still a POST.
+    expect(fetch.mock.calls.filter((call) => (call[1] as RequestInit).method === 'POST')).toHaveLength(2);
+  });
+});

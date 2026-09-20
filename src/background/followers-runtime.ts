@@ -38,6 +38,7 @@ export function registerFollowersRuntime(service: FollowersService): void {
           case 'pause': return { ok: true, snapshot: service.pause(tabId, value.scanId) };
           case 'conversation': return { ok: true, snapshot: service.conversation(tabId, value.scanId, value.fanId, value.older) };
           case 'state': return { ok: true, snapshot: service.state(tabId, value.scanId) };
+          case 'verify': return { ok: true, snapshot: await service.verify(tabId, value.scanId, value.fanId) };
           case 'generate': return { ok: true, text: await service.generate(tabId, value.scanId, value.fanId) };
           case 'send': return { ok: true, snapshot: await service.send(tabId, value.scanId, value.fanId, value.text, value.historyRevision) };
           case 'close': service.close(tabId); return { ok: true };
