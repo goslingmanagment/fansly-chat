@@ -4436,9 +4436,26 @@ send deadline would leave a permanent false «не подтверждено» fo
 that never left. A write Fansly limits counts against the lane. A refused
 write carries `{status, code}` and a body-shape trace event; its error key
 stays the ambiguous one, so send custody is unchanged. (10) Note batches wait
-out the `/account*` gap off the lane: inside the FIFO a batch sitting out its
-5 s held every other read, and a send made meanwhile took 13.5 s in the
-audited run.
+out the `/account*` key off the lane, first batch included and whatever a
+limit has made of its spacing (the pacer reports when a key is next free):
+inside the FIFO a batch sitting out its 5 s held every other read, and a send
+made meanwhile took 13.5 s in the audited run.
+
+E132 review follow-up (an independent Fable review of the pull request, no
+ship blocker). A cooldown saved before the six-hour cap existed is cut to it
+on restore. A late storage answer zeroes the heal counter: reads answered
+before the penalty arrived ran at the unpenalised pace and forgive nothing
+(E128). A read that got no HTTP answer at all carries `status: 0`, so a
+network failure on the optional participant read is a blip like any other. A
+run of 5xx trips the fuse too, without rechecks. Our own refusal of
+`POST /group` is traced as `http.write-refused`, so an export cannot read it
+as a 429 Fansly sent. The reviewer also showed that a send or a generation
+started during a cooldown waits inside the lane until its own deadline
+(60 s / 180 s) and fails with a raw timeout, now that a first cooldown can be
+minutes long: the instant refusal at the entry of those actions ships with
+E133, which owns that code. The success-scaled cooldown counts reads in
+memory only, so a background restart starts it over; FBuddy's third cooldown
+term (spacing x clamp(answers)) is not taken.
 
 Not done, on purpose. The two-stage queue that would let ready keys pass a
 waiting key: it is latency work on the ban-safety core, the observed stall has
@@ -4450,5 +4467,5 @@ Supersedes E130's jitter placement, first-limit rule, 30 s first cooldown,
 `floorMs` and learned acceleration, and its broad recheck. This reverses one
 line of the 2.4.3 changelog («Ограничение замедляет только своё»): it now
 holds for `/account*` only. Validation is synthetic: mock transport, fake
-timers, thirty-six manual mutations of these rules. Ships with E133 in one
+timers, forty-eight manual mutations of these rules. Ships with E133 in one
 release.

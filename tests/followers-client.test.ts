@@ -121,8 +121,22 @@ describe('Fansly browser-session outreach transport', () => {
     expect(report.events.filter((event) => event.name === 'http.error-body').map((event) => event.data.code)).toEqual(['99', '99']);
     expect(report.counters['http.start']).toBe(2);
     expect(JSON.stringify(report)).not.toContain('private-detail');
-    // An ordinary chat client's session is not paced and is never refused here.
-    await expect(h.client.createFollowerGroup('2', '1', h.session, h.signal)).rejects.toMatchObject({ details: { status: 429 } });
+    // An ordinary chat client's session is not paced and is never refused
+    // here: the write goes out and it is Fansly's own 429 that comes back.
+    const posts = calls.filter(([method]) => method === 'POST').length;
+    await expect(h.client.createFollowerGroup('2', '1', h.session, h.signal)).rejects.toMatchObject({ key: 'fansly_server_error', details: { status: 429 } });
+    expect(calls.filter(([method]) => method === 'POST')).toHaveLength(posts + 1);
+    // …while the paced session, now cooling down again, is refused locally and says so in the trace.
+    await expect(h.client.createFollowerGroup('2', '1', session, h.signal, trace)).rejects.toMatchObject({ key: 'rate_limited' });
+    expect(calls.filter(([method]) => method === 'POST')).toHaveLength(posts + 1);
+    expect(trace.read().events.filter((event) => event.name === 'http.write-refused').map((event) => event.data.reason)).toEqual(['lane-cooling-down']);
+  });
+  it('marks a read that got no HTTP answer at all, whichever error key it keeps', async () => {
+    const h = harness(); const session = h.client.followerSession(h.session);
+    vi.stubGlobal('fetch', vi.fn<typeof globalThis.fetch>(async () => { throw new TypeError('NetworkError when attempting to fetch resource.'); }));
+    // The participant read is optional and keeps `unknown_error`; `status: 0` is what tells the row recheck it was the network.
+    await expect(h.client.getGroup('3', session, h.signal)).rejects.toMatchObject({ key: 'unknown_error', details: { status: 0 } });
+    await expect(h.client.getMessagePage('3', null, session, h.signal)).rejects.toMatchObject({ key: 'network_error' });
   });
   it('keeps account reads five seconds apart without widening the other routes', async () => {
     vi.useFakeTimers();

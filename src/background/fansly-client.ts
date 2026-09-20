@@ -307,6 +307,11 @@ export class FanslyClient {
     return this.followerReads.status(session.resolvedAccountId ?? session.accountId);
   }
 
+  /** When the pace key of this read is next free (0 = now). */
+  followerReadReadyAt(session: SessionTemplate, pathname: string): number {
+    return this.followerReads.readyAt(session.resolvedAccountId ?? session.accountId, 'GET', pathname);
+  }
+
   constructor(private readonly sessionStore: SessionStore, pacerStorage?: PacerStorage) {
     this.followerReads = new FanslyPacer({ storage: pacerStorage });
   }
@@ -495,7 +500,9 @@ export class FanslyClient {
         if (error instanceof DOMException && error.name === 'AbortError') {
           throw error;
         }
-        throw new ChatGooseError(optional ? 'unknown_error' : 'network_error');
+        // `status: 0` = no HTTP answer at all: an optional read keeps its own
+        // error key, and the row recheck still knows it was the network.
+        throw optional ? new ChatGooseError('unknown_error', undefined, { status: 0 }) : new ChatGooseError('network_error');
       } finally {
         clearTimeout(timeout);
         permit?.release();
@@ -576,6 +583,8 @@ export class FanslyClient {
     const creatorId = session.resolvedAccountId ?? session.accountId;
     const paced = this.followerSessions.has(session);
     const coolingMs = paced && path === 'group' ? (this.followerReads.status(creatorId)?.cooldownUntil ?? 0) - Date.now() : 0;
+    // Traced as our own refusal: in an export it must not read as a 429 Fansly sent.
+    if (coolingMs > 0) trace?.event('http.write-refused', { method: 'POST', path: requestUrl.pathname, reason: 'lane-cooling-down', coolingMs });
     if (coolingMs > 0) throw new ChatGooseError('rate_limited', { details: { status: 429, retryAfterMs: coolingMs, retryAtMs: Date.now() + coolingMs }, retryAfterMs: coolingMs, retryAtMs: Date.now() + coolingMs });
     const attemptTrace = trace?.start('http', { method: 'POST', path: requestUrl.pathname, query: requestUrl.search, attempt: 1, retry: false, timeoutMs: FANSLY_REQUEST_TIMEOUT_MS });
     try {

@@ -17,6 +17,7 @@ function harness(debugMode = false, realTransport = false) {
   const fansly = {
     followerSession: vi.fn((session: SessionTemplate) => structuredClone(session)),
     followerReadStatus: vi.fn(() => undefined),
+    followerReadReadyAt: vi.fn(() => 0),
     getAuthenticatedAccount: vi.fn(async () => ({ id: '1', username: 'creator' })),
     getFollowerPage: vi.fn(async (): Promise<Awaited<ReturnType<FanslyClient['getFollowerPage']>>> => ({ followers: [{ id: String(BigInt(Date.now() - 3600_000 - 1561494360000) << 22n), followerId: '2' }], aggregationData: { accounts: [{ id: '2', username: 'fan', notes: [{ contentType: 12002, note: 'Alex' }] }] } })),
     getWelcomeDefinitions: vi.fn(async () => [{ messageTemplate: { content: 'auto welcome' } }]),
@@ -225,6 +226,11 @@ describe('followers scan and one-attempt send', () => {
     const network = await settle((h) => h.fansly.getMessagePage.mockRejectedValueOnce(new ChatGooseError('network_error')));
     expect(network.state).toMatchObject({ canContinue: false, rows: [{ status: 'ready' }] });
     expect(network.h.fansly.getMessagePage).toHaveBeenCalledTimes(2);
+    // The participant read is an optional read: its network failure keeps
+    // its own error key and is told apart by `status: 0`.
+    const optional = await settle((h) => h.fansly.getGroup.mockRejectedValueOnce(new ChatGooseError('unknown_error', undefined, { status: 0 })));
+    expect(optional.state).toMatchObject({ canContinue: false, rows: [{ status: 'ready' }] });
+    expect(optional.h.fansly.getGroup).toHaveBeenCalledTimes(2);
 
     // Asked once only: the transport already spent its own retries on a 5xx,
     // a refusal inside HTTP 200 is an answer, an expired session will not
@@ -263,6 +269,17 @@ describe('followers scan and one-attempt send', () => {
     expect(state.rows.every((row) => row.status === 'unknown' && row.detail === 'Fansly отвечает ошибками. Проверка остановлена — нажмите «Продолжить» позже.')).toBe(true);
     const events = h.service.traces.get(scan.scanId)!.read().events;
     expect(events.filter((event) => event.name === 'rows.fuse').map((event) => event.data)).toEqual([{ failures: 5 }]);
+    // A run of 5xx is the same incident: nobody is asked again (the transport
+    // already retried), and the pass stops all the same.
+    const down = harness();
+    down.fansly.getFollowerPage.mockResolvedValue({ followers: fans, aggregationData: { accounts: fans.map((fan) => ({ id: fan.followerId, username: `fan${fan.followerId}`, notes: [] })) } });
+    down.fansly.listFanAccounts.mockResolvedValue({ fans: fans.map((fan) => ({ groupId: String(Number(fan.followerId) + 1000), fanAccountId: fan.followerId })), truncated: true });
+    down.fansly.getGroup.mockImplementation(async (id: string) => ({ users: [{ userId: '1' }, { userId: String(Number(id) - 1000) }] }));
+    down.fansly.getMessagePage.mockRejectedValue(new ChatGooseError('fansly_server_error', undefined, { status: 503 }));
+    const outage = await down.service.start(7, 48);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(down.fansly.getMessagePage.mock.calls.length).toBeLessThanOrEqual(7);
+    expect(down.service.state(7, outage.scanId).rows.every((row) => row.status === 'unknown')).toBe(true);
     // Answered reads between blips are not a run: the fuse counts consecutive
     // failures only, so six scattered blips in twenty rows stop nothing.
     const mixed = harness();
@@ -368,6 +385,38 @@ describe('followers scan and one-attempt send', () => {
     // send made meanwhile took 13.5 s. Off the lane the batch queues for nothing.
     const events = h.service.traces.get(scan.scanId)!.read().events;
     const planned = events.find((event) => event.name === 'notes.plan')!.seq;
+    expect(events.filter((event) => event.seq > planned && event.name === 'http.queue-wait' && event.data.reason === 'route-spacing').map((event) => event.data.waitMs)).toEqual([]);
+    h.service.close(7);
+  });
+  it('waits out a penalised /account key off the lane as well, first note batch included', async () => {
+    vi.useFakeTimers();
+    const h = harness(true, true); vi.spyOn(Math, 'random').mockReturnValue(0);
+    const firstId = BigInt(Date.now() - 3600_000 - 1561494360000) << 22n;
+    const fans = Array.from({ length: 146 }, (_, i) => ({ id: String(firstId - BigInt(i)), followerId: String(i + 2) }));
+    let limitNotes = true;
+    vi.stubGlobal('fetch', vi.fn<typeof globalThis.fetch>(async (input) => {
+      const url = new URL(String(input));
+      let response: unknown; let status = 200;
+      if (url.pathname.endsWith('/message/automated')) response = [];
+      else if (url.pathname.endsWith('/followersnew')) {
+        const page = url.searchParams.get('before') === '0' ? fans.slice(0, 100) : fans.slice(100);
+        response = { followers: page, aggregationData: { accounts: page.map((fan) => ({ id: fan.followerId, username: `fan${fan.followerId}` })) } };
+      } else if (url.pathname.endsWith('/messaging/groups')) response = { data: [] };
+      else if (url.pathname === '/api/v1/account') { if (limitNotes) status = 429; response = (url.searchParams.get('ids') ?? '').split(',').map((id) => ({ id, username: `fan${id}`, notes: [] })); }
+      else throw new Error(`Unexpected route ${url.pathname}`);
+      return new Response(JSON.stringify({ success: true, response }), { status });
+    }));
+    // The first scan ends with a limited notes read: the /account key is now 10 s.
+    const first = await h.service.start(7, 48);
+    await vi.advanceTimersByTimeAsync(400_000);
+    expect(h.service.state(7, first.scanId).scanning).toBe(false);
+    limitNotes = false;
+    const second = await h.service.start(7, 48);
+    await vi.advanceTimersByTimeAsync(400_000);
+    expect(h.service.state(7, second.scanId).scanning).toBe(false);
+    const events = h.service.traces.get(second.scanId)!.read().events;
+    const planned = events.find((event) => event.name === 'notes.plan')!.seq;
+    expect(events.filter((event) => event.name === 'notes.batch-result')).toHaveLength(2);
     expect(events.filter((event) => event.seq > planned && event.name === 'http.queue-wait' && event.data.reason === 'route-spacing').map((event) => event.data.waitMs)).toEqual([]);
     h.service.close(7);
   });

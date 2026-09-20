@@ -210,6 +210,40 @@ describe('creator lane', () => {
     const from = Date.now(); const first = hung.acquire('1', 'GET', GROUP, signal);
     await vi.advanceTimersByTimeAsync(1000); (await first).release(); expect(Date.now() - from).toBe(1000);
   });
+  it('merges a late storage answer without weakening what memory already holds, and never shortens a cooldown', async () => {
+    vi.useFakeTimers(); const opened = Date.now();
+    const saved = { usedAt: opened, cooldownUntil: opened + 20_000, level: 1, gapLevel: 0, healFrom: opened + 20_000, clean: 19, routes: { 'GET /message': { spacingMs: 700, badMs: 500, badAt: opened } } };
+    const slow = { get: vi.fn((key: string) => new Promise<Record<string, unknown>>((resolve) => { setTimeout(() => resolve({ [key]: saved }), 1500); })), set: vi.fn(async () => {}) };
+    const pacer = new FanslyPacer({ storage: slow, random: () => 0 });
+    // The late answer lands while the lane already holds two limits of its own.
+    const first = await drive(pacer.acquire('1', 'GET', MESSAGE, signal), 1000); first.limited(); first.limited(); first.release();
+    const held = pacer.status('1')!;
+    expect(held).toEqual({ cooldownUntil: opened + 1000 + 60_000, intervalMs: 1600 });
+    await vi.advanceTimersByTimeAsync(2000);
+    // The saved lane is milder on every field: nothing moves.
+    expect(pacer.status('1')).toEqual(held);
+    expect(await drive(starts(pacer, [GROUP, MESSAGE, MESSAGE]), 200_000)).toEqual([1600, 2000]);
+    // A limited write during a long server wait cannot pull the cooldown in either.
+    const long = new FanslyPacer({ random: () => 0 }); const from = Date.now();
+    const permit = await long.acquire('1', 'GET', GROUP, signal); permit.limited(2_000_000); permit.release();
+    long.refused('1', 'POST', '/api/v1/message', undefined);
+    expect(long.status('1')?.cooldownUntil).toBe(from + 2_000_000);
+    // A cooldown saved before the six-hour cap existed is cut to it on restore.
+    const ancient = new FanslyPacer({ storage: memory({ 'chatgoose:fansly-pacer:v1:1': { usedAt: Date.now(), cooldownUntil: Date.now() + 10 * 365 * 86_400_000, level: 1, healFrom: 0, clean: 0, routes: {} } }), random: () => 0 });
+    const at = Date.now(); void ancient.acquire('1', 'GET', GROUP, signal).then((p) => p.release());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ancient.status('1')?.cooldownUntil).toBe(at + 6 * 3600_000);
+  });
+  it('does not let reads answered before a late penalty arrived forgive it', async () => {
+    vi.useFakeTimers(); const opened = Date.now();
+    const saved = { usedAt: opened, cooldownUntil: 0, level: 2, gapLevel: 2, healFrom: opened - 400_000, clean: 0, routes: {} };
+    const slow = { get: vi.fn((key: string) => new Promise<Record<string, unknown>>((resolve) => { setTimeout(() => resolve({ [key]: saved }), 13_000); })), set: vi.fn(async () => {}) };
+    const pacer = new FanslyPacer({ storage: slow, random: () => 0 });
+    await drive(starts(pacer, Array<string>(24).fill(GROUP)), 13_500);
+    expect(pacer.status('1')?.intervalMs).toBe(1600);
+    // Twenty-four answers at the unpenalised pace bought nothing: the next reads still run at 1600 ms.
+    expect(await drive(starts(pacer, [GROUP, GROUP, GROUP]), 10_000)).toEqual([1600, 1600]);
+  });
   it('writes nothing for an idle lane that only keeps a remembered limit', async () => {
     vi.useFakeTimers(); const storage = memory(); const pacer = new FanslyPacer({ storage, random: () => 0 });
     const hit = await pacer.acquire('1', 'GET', MESSAGE, signal); hit.limited(); hit.release();

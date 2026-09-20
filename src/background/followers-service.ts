@@ -51,8 +51,6 @@ const ready = (row: FollowerRow) => row.status === 'ready' || row.status === 're
 const RECHECK_DELAY_MS = 3000;
 /** This many blips in a row stop the pass instead of doubling the load on a failing Fansly. */
 const RECHECK_FUSE = 5;
-/** The `/account*` family's own spacing (E128), waited between note batches off the lane. */
-const NOTES_GAP_MS = 5000;
 const FUSED_TEXT = 'Fansly отвечает ошибками. Проверка остановлена — нажмите «Продолжить» позже.';
 function pause(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -384,8 +382,11 @@ export class FollowersService {
           await this.check(scan, row, signal);
           blips = 0;
         } catch (error) {
-          const blip = !signal.aborted && error instanceof ChatGooseError && (error.key === 'network_error' || (error.details?.status === 404 && !error.details.refused));
-          if (blip && ++blips >= RECHECK_FUSE) {
+          const status = error instanceof ChatGooseError ? error.details?.status : undefined;
+          const blip = !signal.aborted && error instanceof ChatGooseError && (error.key === 'network_error' || status === 0 || (status === 404 && !error.details?.refused));
+          // A 5xx is not asked again, but a run of them is the same incident.
+          const failing = blip || (!signal.aborted && typeof status === 'number' && status >= 500);
+          if (failing && ++blips >= RECHECK_FUSE) {
             fused = true;
             scan.trace?.event('rows.fuse', { failures: blips });
             scan.passController.abort();
@@ -444,8 +445,12 @@ export class FollowersService {
       const batch = pending.slice(offset, offset + 100);
       // The lane is one FIFO: a batch sitting out the /account gap inside it
       // held every other read, and a send made meanwhile took 13 s (live
-      // trace, E132). The gap is waited out here, off the lane.
-      if (offset > 0) { try { await pause(NOTES_GAP_MS, signal); } catch { return; } }
+      // trace, E132). The gap, whatever a limit has made of it, is waited out
+      // here, off the lane.
+      const gapMs = this.options.fansly.followerReadReadyAt(scan.session, '/api/v1/account') - Date.now();
+      if (gapMs > 0) {
+        try { await pause(gapMs, signal); } catch { scan.trace?.event('notes.skipped', { reason: 'paused', remaining: pending.length - offset }); return; }
+      }
       // A label is not worth waiting out a cooldown. Another read can still
       // draw one while this batch is queued; Pause gets the chatter out.
       if ((this.options.fansly.followerReadStatus(scan.session)?.cooldownUntil ?? 0) > Date.now()) {

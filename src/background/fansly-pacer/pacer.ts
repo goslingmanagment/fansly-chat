@@ -16,7 +16,8 @@ const SAVE_EVERY_MS = 60_000;
  * clock must not park a creator for days, and the value is persisted. */
 const RETRY_AFTER_MAX_MS = 6 * 3600_000;
 /** FBuddy's cooldown grows with the reads answered since the previous limit
- * (1.25 s each, 300 s at most); ours is never the shorter of the two (E132). */
+ * (1.25 s each, 300 s at most); ours takes the same term (E132). The count
+ * lives in memory: a background restart or a rest starts it over. */
 const COOLDOWN_PER_ANSWER_MS = 1250;
 const COOLDOWN_MAX_MS = 300_000;
 
@@ -151,6 +152,13 @@ export class FanslyPacer {
     } catch (error) { scope?.fail(error, { callerAborted: signal.aborted }); release(); throw error; }
   }
 
+  /** When this key is next free. A caller that can wait elsewhere does so,
+   * instead of sitting in the FIFO and holding every read behind it. */
+  readyAt(creatorId: string, method: string, pathname: string): number {
+    const route = this.lanes.get(creatorId)?.routes.get(paceFor(method, pathname).key);
+    return route?.lastStartAt ? route.lastStartAt + route.spacingMs : 0;
+  }
+
   /** A write Fansly limited counts against the lane like a limited read. */
   refused(creatorId: string, method: string, pathname: string, retryAfterMs: number | undefined, trace?: TraceScope): void {
     this.limit(creatorId, this.lane(creatorId, trace), method, pathname, retryAfterMs, trace);
@@ -201,11 +209,14 @@ export class FanslyPacer {
     const idle = Math.max(saved.usedAt + IDLE_MS, saved.cooldownUntil) < now;
     lane.stored = true;
     if (!idle) {
-      lane.cooldownUntil = Math.max(lane.cooldownUntil, saved.cooldownUntil);
+      // A cooldown saved before the cap existed must not park the creator for years.
+      lane.cooldownUntil = Math.max(lane.cooldownUntil, Math.min(saved.cooldownUntil, now + RETRY_AFTER_MAX_MS));
       lane.level = Math.max(lane.level, Math.min(MAX_LEVEL, saved.level));
       lane.gapLevel = Math.min(lane.level, Math.max(lane.gapLevel, saved.gapLevel));
       lane.healFrom = Math.max(lane.healFrom, saved.healFrom);
-      if (!late) lane.clean = saved.clean;
+      // Reads answered before a late penalty arrived ran at the unpenalised
+      // pace: they forgive nothing (E128).
+      lane.clean = late ? 0 : saved.clean;
     }
     for (const [key, route] of Object.entries(saved.routes)) {
       // The policy may have moved since the key was saved.
