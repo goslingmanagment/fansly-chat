@@ -35,7 +35,7 @@ const sessionStore = new SessionStore();
 const tabContexts = new TabContextStore();
 const storageCoordinator = new StorageCoordinator();
 const voiceAttempts = new VoiceAttemptRepository();
-const fanslyClient = new FanslyClient(sessionStore);
+const fanslyClient = new FanslyClient(sessionStore, browser.storage.local);
 const spendersService = new SpendersService(
   fanslyClient,
   {

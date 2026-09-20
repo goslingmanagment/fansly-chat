@@ -119,6 +119,12 @@ Important references:
 
 ## Release
 
+Release 2.4.3 replaces the follower read scheduler with the Fansly pacer
+(`src/background/fansly-pacer/`): a pace policy per route family, a learned
+spacing per key, a 400 ms jittered gap on the creator lane, limits that survive
+the background page, and one automatic recheck of a row that hit a passing
+Fansly error (E130, E131).
+
 Release 2.4.2 takes saved-name reads off the new-follower scan's critical path
 (names show from discovery, notes load after the verdicts, best-effort), lets a
 Fansly rate-limit penalty decay one level per five quiet minutes followed by

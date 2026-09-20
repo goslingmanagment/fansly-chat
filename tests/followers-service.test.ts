@@ -201,9 +201,41 @@ describe('followers scan and one-attempt send', () => {
     expect(h.service.state(7, first.scanId)).toMatchObject({ canContinue: false, rows: [{ status: 'ready' }] });
     expect(h.fansly.getFollowerPage).toHaveBeenCalledOnce();
   });
+  it('rechecks a row once after a transient Fansly failure and leaves a second failure to Continue', async () => {
+    const refused = () => new ChatGooseError('fansly_server_error', undefined, { status: 404 });
+    const once = harness(true);
+    once.fansly.listFanAccounts.mockResolvedValue({ fans: [], truncated: true });
+    once.fansly.findFollowerGroup.mockRejectedValueOnce(refused()).mockResolvedValue(null);
+    const healed = await once.start();
+    expect(healed).toMatchObject({ canContinue: false, rows: [{ status: 'ready', detail: undefined }] });
+    expect(once.fansly.findFollowerGroup).toHaveBeenCalledTimes(2);
+    const events = once.service.traces.get(healed.scanId)!.read().events;
+    expect(events).toContainEqual(expect.objectContaining({ name: 'row.recheck', data: { fanId: '2', errorCode: 'fansly_server_error' } }));
+    expect(events.filter((event) => event.name === 'row.verdict').map((event) => event.data.status)).toEqual(['ready']);
+
+    const twice = harness();
+    twice.fansly.listFanAccounts.mockResolvedValue({ fans: [], truncated: true });
+    twice.fansly.findFollowerGroup.mockRejectedValue(refused());
+    expect(await twice.start()).toMatchObject({ canContinue: true, rows: [{ status: 'unknown' }] });
+    expect(twice.fansly.findFollowerGroup).toHaveBeenCalledTimes(2);
+
+    // Only a refusal that may pass on its own is asked again: an expired
+    // session will not, and a second read on it helps nobody.
+    const expired = harness();
+    expired.fansly.listFanAccounts.mockResolvedValue({ fans: [], truncated: true });
+    expired.fansly.findFollowerGroup.mockRejectedValue(new ChatGooseError('session_expired'));
+    expect(await expired.start()).toMatchObject({ canContinue: true, rows: [{ status: 'unknown' }] });
+    expect(expired.fansly.findFollowerGroup).toHaveBeenCalledOnce();
+
+    // A chat whose participants cannot be confirmed is a verdict, not a blip.
+    const custody = harness();
+    custody.fansly.getGroup.mockResolvedValue({ users: [{ userId: '1' }, { userId: '99' }] });
+    expect(await custody.start()).toMatchObject({ canContinue: true, rows: [{ status: 'unknown' }] });
+    expect(custody.fansly.getGroup).toHaveBeenCalledOnce();
+  });
   it('replays the live 146-fan trace: a throttled /account?ids= costs no verdict, no pause and no lasting slowdown', async () => {
     vi.useFakeTimers();
-    const h = harness(true, true);
+    const h = harness(true, true); vi.spyOn(Math, 'random').mockReturnValue(0);
     const firstId = BigInt(Date.now() - 3600_000 - 1561494360000) << 22n;
     const fans = Array.from({ length: 146 }, (_, i) => ({ id: String(firstId - BigInt(i)), followerId: String(i + 2) }));
     const times: Array<{ path: string; ids: boolean; at: number; status: number }> = [];
@@ -234,27 +266,37 @@ describe('followers scan and one-attempt send', () => {
     expect(times.at(-1)?.ids).toBe(true);
     const pages = times.filter((entry) => entry.path.endsWith('/followersnew'));
     expect(pages[1]!.at - pages[0]!.at).toBeGreaterThanOrEqual(5000);
-    expect(final.pacing).toEqual({ cooldownUntil: times.at(-1)!.at + 30_000, intervalMs: 2000 });
+    // One limit, on the /account family: the lane gap stays at its base (E130).
+    expect(final.pacing).toEqual({ cooldownUntil: times.at(-1)!.at + 30_000, intervalMs: 400 });
     const report = h.service.traces.get(first.scanId)!.read();
     expect(report.events).toContainEqual(expect.objectContaining({ name: 'notes.skipped', data: { reason: 'rate_limited', remaining: 146 } }));
-    // The owner's next scan came 8.5 minutes later. Idle time forgives nothing:
-    // it probes at the penalised pace and returns to 1 s after 20 clean reads.
+    expect(report.events).toContainEqual(expect.objectContaining({ name: 'http.cooldown', data: expect.objectContaining({ route: 'GET /account*', spacingMs: 10_000, intervalMs: 400 }) }));
+    // The limit was the account family's, so the searches never slowed down:
+    // they started at 500 ms and earned 400 ms within the scan.
+    const earned = times.filter((entry) => entry.path.endsWith('/messaging/groups')).map((entry) => entry.at);
+    expect(earned[2]! - earned[1]!).toBe(500);
+    expect(earned.at(-1)! - earned.at(-2)!).toBe(400);
+    // The owner's next scan came 8.5 minutes later, before the lane counts as
+    // idle: the searches keep the pace they earned, the account family keeps
+    // its doubled gap, and idle time still forgives nothing: the level heals
+    // only after twenty answered reads of that scan.
     await vi.advanceTimersByTimeAsync(510_000);
-    expect(h.service.state(7, first.scanId).pacing?.intervalMs).toBe(2000);
     const before = times.length;
     const second = await h.service.start(7, 48);
     await vi.advanceTimersByTimeAsync(400_000);
     expect(h.service.state(7, second.scanId).rows.every((row) => row.status === 'ready')).toBe(true);
     const searches = times.slice(before).filter((entry) => entry.path.endsWith('/messaging/groups')).map((entry) => entry.at);
     const gaps = searches.slice(1).map((value, index) => value - searches[index]!);
-    expect(gaps[1]).toBe(2000);
-    expect(gaps.at(-1)).toBe(1000);
-    expect(h.service.traces.get(second.scanId)!.read().events.filter((event) => event.name === 'http.heal').map((event) => event.data)).toEqual([{ from: 1, to: 0, intervalMs: 1000 }]);
+    expect(gaps[1]).toBe(400);
+    expect(gaps.at(-1)).toBe(400);
+    const pagesAgain = times.slice(before).filter((entry) => entry.path.endsWith('/followersnew'));
+    expect(pagesAgain[1]!.at - pagesAgain[0]!.at).toBeGreaterThanOrEqual(10_000);
+    expect(h.service.traces.get(second.scanId)!.read().events.filter((event) => event.name === 'http.heal').map((event) => event.data)).toEqual([{ from: 1, to: 0, intervalMs: 400 }]);
     h.service.close(7);
   });
   it('runs 194 fans through the real paced transport, preserves all verdicts after 429 and logs every actual request', async () => {
     vi.useFakeTimers();
-    const h = harness(true, true);
+    const h = harness(true, true); vi.spyOn(Math, 'random').mockReturnValue(0);
     const firstId = BigInt(Date.now() - 3600_000 - 1561494360000) << 22n;
     const fans = Array.from({ length: 194 }, (_, i) => ({ id: String(firstId - BigInt(i)), followerId: String(i + 2) }));
     for (const fan of fans.slice(0, 11)) h.values[`chatgoose:followers:v1:personal:1:${fan.followerId}`] = { message: msg() };
@@ -292,9 +334,16 @@ describe('followers scan and one-attempt send', () => {
     expect(final.rows.filter((row) => row.status === 'reply')).toHaveLength(1);
     const limitIndex = times.findIndex((entry) => entry.status === 429);
     expect(times[limitIndex + 1]!.at - times[limitIndex]!.at).toBeGreaterThanOrEqual(30_000);
-    for (let i = 1; i < times.length; i++) expect(times[i]!.at - times[i - 1]!.at).toBeGreaterThanOrEqual(1000);
+    for (let i = 1; i < times.length; i++) expect(times[i]!.at - times[i - 1]!.at).toBeGreaterThanOrEqual(400);
+    // The very first history read was limited at 500 ms: that key runs at 1 s
+    // afterwards and never recovers past a quarter above the limit, 625 ms.
     const history = times.filter((entry) => entry.path === '/api/v1/message');
-    for (let i = 1; i < history.length; i++) expect(history[i]!.at - history[i - 1]!.at).toBeGreaterThanOrEqual(1500);
+    expect(history[2]!.at - history[1]!.at).toBeGreaterThanOrEqual(1000);
+    for (let i = 1; i < history.length; i++) expect(history[i]!.at - history[i - 1]!.at).toBeGreaterThanOrEqual(625);
+    // Searches that alternate with chat reads never ran at their own spacing
+    // and prove nothing; only the last run of back-to-back searches earns a step.
+    const searches = times.filter((entry) => entry.path.endsWith('/messaging/groups'));
+    expect(Math.min(...searches.slice(1).map((entry, index) => entry.at - searches[index]!.at))).toBe(450);
     const report = h.service.traces.get(first.scanId)!.read();
     expect(report.counters['http.start']).toBe(times.length);
     expect(report.droppedEvents).toBe(0);
