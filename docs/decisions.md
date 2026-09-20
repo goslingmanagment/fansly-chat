@@ -4418,8 +4418,8 @@ of the mode. (5) Chat Hi: `variantCount: 3`, the automation label on the model's
 automated messages inside the chat's own media/PPV transcript, profile fields
 from the shared module, `personalMessageCount`, and the new gate.
 
-Owner-side decisions taken during the work, where they differ from the first
-spec draft. **Avatar:** the chat's account read (`getAccountNames`) is live and
+Decisions taken by the coordinating session during the work (reported to the
+owner, not individually approved), where they differ from the first spec draft. **Avatar:** the chat's account read (`getAccountNames`) is live and
 uncached on every generation, so the signed URL is fresh; no extra Fansly
 request exists for the avatar and the draft's "refresh if cached" branch is
 dropped. A failed lookup stays non-fatal and gives a text-only Hi. **Gate in

@@ -7,8 +7,9 @@ be one feature rather than two parallel ones.
 
 Status: built. Kernel half is core PR #246 (Decision 379), extension half is
 E133. Sections 4.2 to 4.4 were updated on 2026-09-20 to match what was built
-after the owner's decisions on the phase 1 findings (avatar, gate coverage,
-welcome wait, names ordering); the changed points are marked "Decided".
+after the coordinating session's decisions on the phase 1 findings (avatar, gate
+coverage, welcome wait, names ordering; reported to the owner, not individually
+approved); the changed points are marked "Decided".
 
 Repos: `~/code/goose/hub` (GitHub `core`, the kernel) and
 `~/code/goose/fansly-ext` (GitHub `chatgoose`). `~/code/goose/of-desktop` is a
