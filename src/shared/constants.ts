@@ -228,7 +228,15 @@ export const PORT_RECONNECT_DELAYS_MS = [100, 200, 400];
 // ─── Feature Thresholds ─────────────────────────────────────────────────
 
 export const MIN_MESSAGES_FOR_DEEP = 30;
+/** Hi is for a conversation that has barely started: at most this many
+ * PERSONAL messages (fan messages plus the model's own personal ones; welcome
+ * and mass messages do not count). Mirrors Core's `gate_hi_greeting_limit`. */
 export const HI_GREETING_MAX_TRANSCRIPT = 10;
+/** How long the chat Hi waits for welcome definitions when the 24 h cache is
+ * cold. The read rides the paced follower lane, which a running scan or a
+ * cooldown can hold for minutes; past this the stale cache (or nothing) is
+ * used and the shared read finishes in the background. */
+export const HI_WELCOME_LOAD_TIMEOUT_MS = 4_000;
 export const PING_ACTIVE_DAYS = 5;
 export const PING_MIN_FAN_MESSAGES = 3;
 

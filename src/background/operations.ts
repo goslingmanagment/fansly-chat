@@ -15,13 +15,23 @@ import {
   FANSLY_PAGE_LIMIT,
   FANSLY_PAGINATION_DELAY_MS,
   HI_GREETING_MAX_TRANSCRIPT,
+  HI_WELCOME_LOAD_TIMEOUT_MS,
   MIN_MESSAGES_FOR_DEEP,
   QUICK_OPERATION_TIMEOUT_MS,
   SHORT_SUMMARY_MESSAGE_COUNT,
   STREAM_CHUNK_FLUSH_MS,
   SUMMARY_SYNC_RETRY_COOLDOWN_MS,
 } from '../shared/constants.js';
-import { kernelFanCustomName } from '../shared/fansly-custom-name.js';
+import { customNameFromAccount, kernelFanCustomName } from '../shared/fansly-custom-name.js';
+import { fanslyAvatarUrl } from '../shared/followers.js';
+import {
+  AUTOMATED_MESSAGE_LABEL,
+  buildGreetingContext,
+  countPersonalMessages,
+  isAutomatedGreetingMessage,
+  type GreetingProfile,
+  type GreetingWindowMessage,
+} from '../shared/greeting-context.js';
 import { isOutputExhausted } from '@kernel/sdk';
 import { mapWithConcurrency } from '../shared/concurrency.js';
 import {
@@ -122,6 +132,7 @@ import {
   type KernelFeatureUsage,
 } from './kernel-feature-gateway.js';
 import { createDebugPromptStore, type DebugPromptStore } from './debug-prompt-store.js';
+import { WelcomeDefinitionsService } from './welcome-definitions.js';
 import { projectKernelContext } from '../shared/kernel-context.js';
 import {
   cancelCompareOperation,
@@ -503,6 +514,11 @@ export class OperationCoordinator {
     /** E28 prompt-echo custody; shared with the runtime API, which serves the
      * viewer page. In-memory by construction — see debug-prompt-store.ts. */
     readonly debugPrompts: DebugPromptStore = createDebugPromptStore(),
+    /** Welcome definitions for the Hi automation labels. The composition root
+     * passes the instance the New Followers window uses, so the 24 h cache and
+     * the one-read-per-creator rule are shared. */
+    private readonly welcomeDefinitions: WelcomeDefinitionsService =
+      new WelcomeDefinitionsService({ fansly: fanslyClient, storage: browser.storage.local }),
   ) {}
 
   setVoiceCapabilityResolver(resolver: (tabId: number) => Promise<boolean>): void {
@@ -2326,6 +2342,10 @@ export class OperationCoordinator {
       let kernelFanName = 'fan';
       let fanCustomName: string | undefined;
       let fanBio: string | undefined;
+      // Hi only: the profile the shared greeting-context module turns into
+      // kernel fields. Same source as the names above (the account lookup,
+      // never the DOM label); a failed lookup leaves the neutral text-only one.
+      let greetingProfile: GreetingProfile = { displayName: 'fan' };
       fanAccountId =
         groupUsers?.find(
           (user) => user.userId !== resolvedAccountId,
@@ -2382,11 +2402,74 @@ export class OperationCoordinator {
         throw new ChatGooseError('not_enough_history');
       }
 
-      if (
-        payload.feature === 'hi-greeting' &&
-        transcriptMessages.length > HI_GREETING_MAX_TRANSCRIPT
-      ) {
-        throw new ChatGooseError('hi_too_many_messages');
+      // Hi (E133, Core Decision 379): the same greeting context as the New
+      // Followers window. Welcome and mass messages get the shared transcript
+      // label and do not count against the freshness gate.
+      let greetingWindow: GreetingWindowMessage[] | undefined;
+      if (payload.feature === 'hi-greeting') {
+        // Cache-first, never forced fresh, never in the way: a cold cache gets
+        // a few seconds of the paced follower lane, then the stale texts or an
+        // empty set. With no texts automation is still seen by its independent
+        // markers (type 2, a correlation id that is not a reply).
+        let welcomeTexts: ReadonlySet<string> = new Set<string>();
+        startStage('welcome-definitions', 'Load welcome definitions');
+        try {
+          const welcome = await this.welcomeDefinitions.loadWithin({
+            creatorId: resolvedAccountId,
+            session: validated.session,
+            timeoutMs: HI_WELCOME_LOAD_TIMEOUT_MS,
+            signal,
+          });
+          welcomeTexts = welcome.texts;
+          const detail = `${welcome.source}${welcome.reason ? ` after ${welcome.reason}` : ''}, ${welcome.texts.size} texts`;
+          if (welcome.reason) {
+            failStage('welcome-definitions', `Load welcome definitions degraded: ${detail}`, detail);
+          } else {
+            completeStage('welcome-definitions', `Loaded welcome definitions: ${detail}`, detail);
+          }
+          logDebug(debugEnabled, 'welcome definitions resolved', {
+            source: welcome.source,
+            reason: welcome.reason,
+            count: welcome.texts.size,
+          });
+        } catch (error) {
+          // Only a cancelled operation rejects; everything else degrades above.
+          if (signal.aborted) {
+            throw error;
+          }
+          const failureCode = errorCode(error);
+          failStage('welcome-definitions', `Load welcome definitions failed: ${failureCode}`, failureCode);
+          logDebug(debugEnabled, 'welcome definitions failed', { code: failureCode });
+        }
+
+        const rawById = new Map(
+          transcriptPages.flatMap((page) => page.messages ?? []).map((message) => [message.id, message]),
+        );
+        const window = transcriptMessages.map((message) => {
+          const raw = rawById.get(message.id);
+          return {
+            automated: raw !== undefined && isAutomatedGreetingMessage(raw, resolvedAccountId, welcomeTexts),
+          };
+        });
+        transcriptMessages = transcriptMessages.map((message, index) =>
+          window[index]!.automated
+            ? { ...message, labels: [AUTOMATED_MESSAGE_LABEL, ...message.labels] }
+            : message,
+        );
+        greetingWindow = window;
+
+        // One Fansly page is all Hi reads. If it does not reach the start of
+        // the conversation, older messages may be personal: fail closed, that
+        // fan is Reply or Ping territory. Otherwise only personal messages count.
+        const personalMessages = countPersonalMessages(window);
+        logDebug(debugEnabled, 'hi greeting gate', {
+          messages: window.length,
+          personalMessages,
+          historyCovered: Boolean(providerReachedEnd),
+        });
+        if (!providerReachedEnd || personalMessages > HI_GREETING_MAX_TRANSCRIPT) {
+          throw new ChatGooseError('hi_too_many_messages');
+        }
       }
 
       let pingSegment: PingSegment | undefined;
@@ -2448,6 +2531,19 @@ export class OperationCoordinator {
           // bio for coach + help-me, the bug this fixes).
           if (featureIncludesFanBio(payload.feature) && account?.about?.trim()) {
             fanBio = account.about.trim();
+          }
+          if (payload.feature === 'hi-greeting' && account) {
+            // The New Followers ordering: display name first, username beside
+            // it in its own field (the kernel drops the username line when the
+            // two are equal). This read is live on every generation, so the
+            // signed avatar URL is fresh without any extra Fansly request.
+            greetingProfile = {
+              displayName: account.displayName?.trim() || account.username?.trim() || 'fan',
+              username: account.username?.trim() || null,
+              customName: customNameFromAccount(account),
+              bio: fanBio ?? null,
+              avatarUrl: fanslyAvatarUrl(account),
+            };
           }
           completeStage(
             'account-name-lookup',
@@ -2778,6 +2874,17 @@ export class OperationCoordinator {
         fanAccountId,
         validated.urlGroupId,
       );
+      // Hi: profile fields, avatar and the personal count of the KEPT window
+      // come from the shared module (it bounds them to the Core contract, and
+      // the count can never exceed clientContext.messageCount).
+      const greetingContext =
+        greetingWindow !== undefined
+          ? buildGreetingContext({
+              profile: greetingProfile,
+              messages: greetingWindow,
+              transcript: { messageCount: keptMessageCount },
+            })
+          : undefined;
       const kernelRequest = {
         feature: payload.feature,
         clientRequestId: payload.operationId,
@@ -2800,6 +2907,8 @@ export class OperationCoordinator {
           ? { coachHistory: payload.coachHistory }
           : {}),
         ...(isShortRecap ? { summaryMode: 'short' as const } : {}),
+        // Three variants for the overlay; the New Followers window asks for 1.
+        ...(greetingContext !== undefined ? { variantCount: 3 as const } : {}),
         // The REQUESTED window (kernel records requestedCount from this): the
         // short const for a short recap, else the feature's window (deep for a
         // full recap). Distinct from clientContext.messageCount (the kept count).
@@ -2810,14 +2919,18 @@ export class OperationCoordinator {
         clientContext: {
           transcript: formattedTranscript,
           messageCount: keptMessageCount,
-          // Kernel-facing name is account-lookup only, never the DOM label
-          // (which fanDisplayName still uses for UI); the chatter's saved name
-          // travels beside it in its own field (E115, Core Decision 290).
-          fanDisplayName: kernelFanName,
           fanSpendingData: spendingData,
           fanSubscriptionData: subscriptionData,
-          ...(fanBio !== undefined ? { fanBio } : {}),
-          ...(fanCustomName !== undefined ? { fanCustomName } : {}),
+          ...(greetingContext !== undefined
+            ? greetingContext
+            : {
+                // Kernel-facing name is account-lookup only, never the DOM label
+                // (which fanDisplayName still uses for UI); the chatter's saved name
+                // travels beside it in its own field (E115, Core Decision 290).
+                fanDisplayName: kernelFanName,
+                ...(fanBio !== undefined ? { fanBio } : {}),
+                ...(fanCustomName !== undefined ? { fanCustomName } : {}),
+              }),
           ...(pingSegment !== undefined ? { pingSegment } : {}),
           ...(fanSilenceDays !== undefined ? { fanSilenceDays } : {}),
           ...(transcriptCoverage !== undefined ? { transcriptCoverage } : {}),

@@ -11,6 +11,7 @@ import {
   DEEP_OPERATION_LLM_TTFB_TIMEOUT_MS,
   DEEP_OPERATION_PREP_TIMEOUT_MS,
   FANSLY_MEDIA_PURCHASE_VERIFICATION_LIMIT,
+  HI_WELCOME_LOAD_TIMEOUT_MS,
   QUICK_OPERATION_TIMEOUT_MS,
   STORAGE_SCHEMA_VERSION,
   SUMMARY_SYNC_RETRY_COOLDOWN_MS,
@@ -317,6 +318,8 @@ async function createCoordinatorHarness(options?: {
   unusedReporter?: {
     enqueue: (...args: any[]) => void;
   };
+  /** Hi only. Default: a warm, empty welcome cache (no Fansly read). */
+  welcomeDefinitions?: { loadWithin: (...args: any[]) => Promise<any> };
 }) {
   mockStorage.personaCatalogSource = personaCatalogSource(
     migrateState(mockStorage).settings,
@@ -354,6 +357,9 @@ async function createCoordinatorHarness(options?: {
   };
   const storageCoordinator = new StorageCoordinator();
   activeStorageCoordinator = storageCoordinator;
+  const welcomeDefinitions = options?.welcomeDefinitions ?? {
+    loadWithin: vi.fn(async () => ({ texts: new Set<string>(), source: 'cache' })),
+  };
 
   const coordinator = new OperationCoordinator(
     sessionStore,
@@ -363,6 +369,8 @@ async function createCoordinatorHarness(options?: {
     storageCoordinator,
     agencyHubClient as never,
     options?.unusedReporter as never,
+    undefined,
+    welcomeDefinitions as never,
   ) as any;
   const port = createMockRuntimePort(1);
   coordinator.registerPort(port as never);
@@ -375,6 +383,7 @@ async function createCoordinatorHarness(options?: {
     port,
     sessionStore,
     storageCoordinator,
+    welcomeDefinitions,
   };
 }
 
@@ -5365,9 +5374,207 @@ describe(`OperationCoordinator (${part})`, () => {
         parts: ['hey :)', 'coffee or tea?', 'tell me a bad joke'],
       } });
     expect(postedMessages(port).some((message) => message.type === 'operation:error')).toBe(false);
+    // The unified contract (Core Decision 379): three variants, never the old mode.
+    const request = kernelRequestFromStreamCall(kernelGateway);
+    expect(request.variantCount).toBe(3);
+    expect(request).not.toHaveProperty('greetingMode');
+    expect(request.clientContext).toMatchObject({ messageCount: 10, personalMessageCount: 10 });
   });
 
-  it('refuses Hi above ten messages with a named error before calling the kernel', async () => {
+  it('sends the New Followers greeting context from the chat: names, bio, saved name, avatar, labels, personal count', async () => {
+    const fanslyClient = buildFanslyClientMock();
+    // 14 mass messages and one welcome from the model, two fan messages and a
+    // personal model reply: 18 messages, only 3 of them personal.
+    const mass = Array.from({ length: 14 }, (_, index) => ({
+      id: `${100 + index}`, type: 1, content: `mass ${index}`, groupId: 'g1', senderId: 'account-1',
+      createdAt: 1_000 + index, attachments: [], embeds: [], totalTipAmount: 0, correlationId: '77',
+    }));
+    const tail = [
+      { id: '200', senderId: 'account-1', content: 'welcome   to my  page', createdAt: 2_000 },
+      { id: '201', senderId: 'fan-1', content: 'hey there', createdAt: 2_001 },
+      { id: '202', senderId: 'account-1', content: 'hi you', createdAt: 2_002, correlationId: '88', inReplyTo: '201' },
+      { id: '203', senderId: 'fan-1', content: 'how are you', createdAt: 2_003 },
+    ].map((message) => ({ type: 1, groupId: 'g1', attachments: [], embeds: [], totalTipAmount: 0, ...message }));
+    fanslyClient.loadMessages.mockResolvedValue({
+      pages: [{ messages: [...mass, ...tail], accountMedia: [], accountMediaBundles: [], accountMediaOrders: [] }],
+      pagesLoaded: 1, targetPages: 1, reachedEnd: true,
+    });
+    fanslyClient.getAccountNames.mockResolvedValue([{
+      id: 'fan-1', username: 'alice77', displayName: 'Alice', about: '  cats and coffee  ',
+      notes: [{ contentType: 12002, note: 'Alice VIP' }],
+      avatar: { locations: [{ location: 'https://cdn3.fansly.com/a.jpg', metadata: { Signature: 'sig' } }] },
+    }] as never);
+    const welcomeDefinitions = {
+      loadWithin: vi.fn(async () => ({ texts: new Set(['welcome to my page']), source: 'cache' })),
+    };
+    const { coordinator, port, kernelGateway } = await createCoordinatorHarness({
+      fanslyClient, welcomeDefinitions,
+      anthropicRawText: 'one [VARIANT] two [VARIANT] three',
+    });
+    await coordinator.startOperation(1, {
+      type: 'operation:start', operationId: '33333333-3333-4333-8333-333333333333', feature: 'hi-greeting',
+      groupId: 'group-1', routeNonce: 1, domFanDisplayName: 'DOM rename', forceRegenerate: true,
+    });
+
+    expect(postedMessages(port).some((message) => message.type === 'operation:error')).toBe(false);
+    expect(welcomeDefinitions.loadWithin).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      creatorId: 'account-1', timeoutMs: HI_WELCOME_LOAD_TIMEOUT_MS, signal: expect.any(AbortSignal),
+      session: expect.objectContaining({ accountId: 'account-1' }),
+    }));
+    // One account read serves names, bio, saved name AND the signed avatar.
+    expect(fanslyClient.getAccountNames).toHaveBeenCalledTimes(1);
+    const request = kernelRequestFromStreamCall(kernelGateway);
+    expect(request.variantCount).toBe(3);
+    expect(request.clientContext).toMatchObject({
+      // The followers ordering: display name first, username in its own field.
+      fanDisplayName: 'Alice', fanUsername: 'alice77', fanCustomName: 'Alice VIP', fanBio: 'cats and coffee',
+      fanAvatarUrl: 'https://cdn3.fansly.com/a.jpg?Signature=sig',
+      messageCount: 18, personalMessageCount: 3,
+    });
+    expect(JSON.stringify(request.clientContext)).not.toContain('DOM rename');
+    const lines = String(request.clientContext.transcript).split('\n');
+    expect(lines.filter((line) => line.includes('[Automatic / mass message]'))).toHaveLength(15);
+    // The welcome text matches after whitespace normalization, as in the followers window.
+    expect(lines.at(-4)).toMatch(/Model: \[Automatic \/ mass message\] welcome {3}to my {2}page$/);
+    expect(lines.some((line) => /Model: hi you$/.test(line))).toBe(true);
+    expect(lines.some((line) => /Fan: hey there$/.test(line))).toBe(true);
+    // What the gateway would put on the wire is a body the vendored Core accepts.
+    const { feature: _feature, debugPromptEcho: _echo, ...body } = request;
+    const parsed = routeSchemas.aiFeatureStream.body!.safeParse({ platform: 'fansly', ...body });
+    expect(parsed.error?.issues ?? []).toEqual([]);
+  });
+
+  it('fails Hi closed when the single page does not reach the start of the conversation', async () => {
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.loadMessages.mockResolvedValue({
+      pages: buildMessagePages(4), pagesLoaded: 1, targetPages: 1, reachedEnd: false,
+    });
+    const { coordinator, port, kernelGateway } = await createCoordinatorHarness({ fanslyClient });
+    await coordinator.startOperation(1, {
+      type: 'operation:start', operationId: 'hi-uncovered', feature: 'hi-greeting',
+      groupId: 'group-1', routeNonce: 1, domFanDisplayName: 'alice', forceRegenerate: true,
+    });
+    expect(kernelGateway.streamFeature).not.toHaveBeenCalled();
+    expect(fanslyClient.loadMessages).toHaveBeenCalledTimes(1);
+    expect(fanslyClient.loadMessages.mock.calls[0]![1]).toBe(25);
+    expect(postedMessages(port).find((message) => message.type === 'operation:error'))
+      .toMatchObject({ operationId: 'hi-uncovered', error: { key: 'hi_too_many_messages' } });
+  });
+
+  it.each([
+    ['the stale texts after a timeout', { texts: new Set(['message 1']), source: 'stale', reason: 'timeout' }, 5, 'stale after timeout, 1 texts'],
+    ['nothing after a timeout', { texts: new Set<string>(), source: 'none', reason: 'timeout' }, 6, 'none after timeout, 0 texts'],
+    ['nothing after an unexpected failure', new Error('storage offline'), 6, 'unknown_error'],
+  ] as const)('never blocks Hi on welcome definitions: uses %s', async (_name, outcome, personalMessages, stageDetail) => {
+    mockStorage.settings = { ...(mockStorage.settings as Record<string, unknown>), debugMode: true };
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.loadMessages.mockResolvedValue({
+      pages: buildMessagePages(6), pagesLoaded: 1, targetPages: 1, reachedEnd: true,
+    });
+    const welcomeDefinitions = {
+      loadWithin: vi.fn(async () => { if (outcome instanceof Error) throw outcome; return outcome; }),
+    };
+    const { coordinator, port, kernelGateway } = await createCoordinatorHarness({
+      fanslyClient, welcomeDefinitions, anthropicRawText: 'one [VARIANT] two [VARIANT] three',
+    });
+    await coordinator.startOperation(1, {
+      type: 'operation:start', operationId: 'hi-welcome-slow', feature: 'hi-greeting',
+      groupId: 'group-1', routeNonce: 1, domFanDisplayName: 'alice', forceRegenerate: true,
+    });
+    expect(kernelGateway.streamFeature).toHaveBeenCalledTimes(1);
+    expect(kernelRequestFromStreamCall(kernelGateway).clientContext.personalMessageCount).toBe(personalMessages);
+    const complete = postedMessages(port).find(
+      (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> => message.type === 'operation:complete',
+    );
+    // A slow or failed welcome load is visible in the debug profile.
+    expect(complete?.profiling?.stages.find((stage) => stage.key === 'welcome-definitions'))
+      .toMatchObject({ status: 'failed', detail: stageDetail });
+  });
+
+  it('reads a warm welcome cache without any Fansly request', async () => {
+    const { WelcomeDefinitionsService } = await import('../src/background/welcome-definitions.js');
+    mockStorage['chatgoose:followers:v1:welcome:account-1:'] = { texts: ['message 1'], checkedAt: Date.now() - 3600_000 };
+    const paced = { followerSession: vi.fn(), getWelcomeDefinitions: vi.fn() };
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.loadMessages.mockResolvedValue({
+      pages: buildMessagePages(3), pagesLoaded: 1, targetPages: 1, reachedEnd: true,
+    });
+    const { coordinator, kernelGateway } = await createCoordinatorHarness({
+      fanslyClient, anthropicRawText: 'one [VARIANT] two [VARIANT] three',
+      welcomeDefinitions: new WelcomeDefinitionsService({ fansly: paced as never, storage: browser.storage.local }),
+    });
+    await coordinator.startOperation(1, {
+      type: 'operation:start', operationId: 'hi-warm', feature: 'hi-greeting',
+      groupId: 'group-1', routeNonce: 1, domFanDisplayName: 'alice', forceRegenerate: true,
+    });
+    expect(paced.getWelcomeDefinitions).not.toHaveBeenCalled();
+    expect(paced.followerSession).not.toHaveBeenCalled();
+    const context = kernelRequestFromStreamCall(kernelGateway).clientContext;
+    // «message 1» is the model's welcome text: labelled and not counted.
+    expect(String(context.transcript).split('\n')[0]).toMatch(/Model: \[Automatic \/ mass message\] message 1$/);
+    expect(context).toMatchObject({ messageCount: 3, personalMessageCount: 2 });
+  });
+
+  it('falls back to a text-only Hi when the account lookup fails, without a second Fansly read', async () => {
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.loadMessages.mockResolvedValue({
+      pages: buildMessagePages(2), pagesLoaded: 1, targetPages: 1, reachedEnd: true,
+    });
+    fanslyClient.getAccountNames.mockRejectedValue(new ChatGooseError('rate_limited'));
+    const { coordinator, port, kernelGateway } = await createCoordinatorHarness({
+      fanslyClient, anthropicRawText: 'one [VARIANT] two [VARIANT] three',
+    });
+    await coordinator.startOperation(1, {
+      type: 'operation:start', operationId: 'hi-text-only', feature: 'hi-greeting',
+      groupId: 'group-1', routeNonce: 1, domFanDisplayName: 'alice', forceRegenerate: true,
+    });
+    expect(postedMessages(port).some((message) => message.type === 'operation:complete')).toBe(true);
+    expect(fanslyClient.getAccountNames).toHaveBeenCalledTimes(1);
+    const request = kernelRequestFromStreamCall(kernelGateway);
+    expect(request.variantCount).toBe(3);
+    expect(request.clientContext).toMatchObject({ fanDisplayName: 'fan', messageCount: 2, personalMessageCount: 2 });
+    for (const field of ['fanUsername', 'fanCustomName', 'fanBio', 'fanAvatarUrl']) {
+      expect(request.clientContext).not.toHaveProperty(field);
+    }
+  });
+
+  it('never retries a failed Hi generation', async () => {
+    const fanslyClient = buildFanslyClientMock();
+    fanslyClient.loadMessages.mockResolvedValue({
+      pages: buildMessagePages(2), pagesLoaded: 1, targetPages: 1, reachedEnd: true,
+    });
+    const kernelGateway = {
+      isConfigured: vi.fn(() => true),
+      streamFeature: vi.fn(async () => { throw new ChatGooseError('hi_too_many_messages'); }),
+    };
+    const { coordinator, port } = await createCoordinatorHarness({ fanslyClient, kernelGateway });
+    await coordinator.startOperation(1, {
+      type: 'operation:start', operationId: 'hi-kernel-gate', feature: 'hi-greeting',
+      groupId: 'group-1', routeNonce: 1, domFanDisplayName: 'alice', forceRegenerate: true,
+    });
+    expect(kernelGateway.streamFeature).toHaveBeenCalledTimes(1);
+    expect(postedMessages(port).find((message) => message.type === 'operation:error'))
+      .toMatchObject({ operationId: 'hi-kernel-gate', error: { key: 'hi_too_many_messages' } });
+  });
+
+  it('keeps the greeting fields and the welcome read away from every other feature', async () => {
+    const { coordinator, kernelGateway, welcomeDefinitions } = await createCoordinatorHarness();
+    await coordinator.startOperation(1, {
+      type: 'operation:start', operationId: 'reply-untouched', feature: 'fast-reply',
+      groupId: 'group-1', routeNonce: 1, domFanDisplayName: 'DOM rename', forceRegenerate: false, replyMode: 'default',
+    });
+    expect(welcomeDefinitions.loadWithin).not.toHaveBeenCalled();
+    const request = kernelRequestFromStreamCall(kernelGateway);
+    expect(request).not.toHaveProperty('variantCount');
+    // E115 / Core Decision 290: username-first kernel name, as before.
+    expect(request.clientContext.fanDisplayName).toBe('alice');
+    for (const field of ['fanUsername', 'fanAvatarUrl', 'personalMessageCount']) {
+      expect(request.clientContext).not.toHaveProperty(field);
+    }
+    expect(String(request.clientContext.transcript)).not.toContain('[Automatic / mass message]');
+  });
+
+  it('refuses Hi above ten personal messages with a named error before calling the kernel', async () => {
     const fanslyClient = buildFanslyClientMock();
     fanslyClient.loadMessages.mockResolvedValue({
       pages: buildMessagePages(11), pagesLoaded: 1, targetPages: 1, reachedEnd: true,

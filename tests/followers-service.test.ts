@@ -502,7 +502,8 @@ describe('followers scan and one-attempt send', () => {
       followers: [{ id: String(BigInt(Date.now() - 3600_000 - 1561494360000) << 22n), followerId: '2' }],
       aggregationData: { accounts: [{ id: '2', username: 'fan', notes: [], avatar: { location: 'https://cdn3.fansly.com/old.jpg' } }] },
     }));
-    h.setMessages(Array.from({ length: 40 }, (_, index) => msg({ id: String(100 + index), createdAt: index + 1, senderId: '2', content: `incoming-${String(index).padStart(2, '0')}` })));
+    // Mass messages: forty of them stay under the personal-message limit of Hi (E133).
+    h.setMessages(Array.from({ length: 40 }, (_, index) => msg({ id: String(100 + index), createdAt: index + 1, correlationId: '77', content: `incoming-${String(index).padStart(2, '0')}` })));
     const snapshot = await h.start();
     expect(h.gateway.streamFeature).not.toHaveBeenCalled();
     if (failImageRead) h.fansly.getAccountNames.mockRejectedValueOnce(new Error('image unavailable'));

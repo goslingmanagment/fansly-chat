@@ -27,6 +27,7 @@ import {
 import { buildAgencyHubOriginPattern } from '../shared/agency-hub.js';
 import { readStorageState } from '../shared/storage.js';
 import { FollowersService } from './followers-service.js';
+import { WelcomeDefinitionsService } from './welcome-definitions.js';
 import { registerFollowersRuntime } from './followers-runtime.js';
 
 // ─── Composition Root (DI, no module-level mutable state) ───────────────
@@ -66,9 +67,15 @@ const kernelGateway = createKernelFeatureGateway(
   undefined,
   () => personaCatalog.refresh(),
 );
+// ONE instance for both Hi surfaces: the New Followers window and the chat Hi
+// share the 24 h cache and the one-paced-read-per-creator rule.
+const welcomeDefinitions = new WelcomeDefinitionsService({
+  fansly: fanslyClient,
+  storage: browser.storage.local,
+});
 registerFollowersRuntime(new FollowersService({
   fansly: fanslyClient, sessions: sessionStore, gateway: kernelGateway, hub: agencyHubClient,
-  readState: readStorageState, storage: browser.storage.local,
+  readState: readStorageState, storage: browser.storage.local, welcome: welcomeDefinitions,
 }));
 const voiceService = new VoiceService({
   kernelGateway,
@@ -94,6 +101,8 @@ const coordinator = new OperationCoordinator(
   storageCoordinator,
   agencyHubClient,
   acceptanceReporter,
+  undefined,
+  welcomeDefinitions,
 );
 // First paint wins the race against a cold capability probe: tab:init state
 // assembly waits at most VOICE_CAPABILITY_BUDGET_MS and takes the fail-closed

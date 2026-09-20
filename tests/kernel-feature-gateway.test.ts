@@ -2,6 +2,7 @@
 // the wire, frame fan-out, gate-message mapping, fail-closed termination.
 
 import { describe, expect, it, vi } from 'vitest';
+import { routeSchemas } from '@kernel/sdk';
 import { createKernelFeatureGateway } from '../src/background/kernel-feature-gateway.js';
 import { resetHealedBearerMemo } from '../src/background/hub-custody.js';
 import type { KernelFeatureRequest } from '../src/background/kernel-feature-gateway.js';
@@ -216,6 +217,50 @@ describe('kernel feature gateway', () => {
         fanSilenceDays: 12,
       },
     });
+  });
+
+  it('sends the unified Hi contract for hi-greeting and keeps it away from every other feature', async () => {
+    const greeting = {
+      variantCount: 3 as const,
+      fanRef: 'fan-1',
+      clientContext: {
+        transcript: '[10:00] Model: [Automatic / mass message] welcome\n[10:01] Fan: hey',
+        messageCount: 2,
+        fanDisplayName: 'Charles',
+        fanUsername: 'charles77',
+        fanAvatarUrl: 'https://cdn3.fansly.com/a.jpg',
+        personalMessageCount: 1,
+        fanSpendingData: '',
+        fanSubscriptionData: '',
+      },
+    };
+    const bodyFor = async (feature: KernelFeatureRequest['feature']): Promise<Record<string, unknown>> => {
+      const calls: Array<{ init: RequestInit | undefined }> = [];
+      const fetchMock = vi.fn(async (_url: URL | string, init?: RequestInit) => {
+        calls.push({ init });
+        return sseResponse([{ ...META, feature }, { type: 'content_delta', text: 'hey' }, { type: 'done', stopReason: 'end_turn' }]);
+      });
+      const gateway = createKernelFeatureGateway(fetchMock as unknown as typeof fetch);
+      await gateway.streamFeature(settings(), request({ feature, replyTone: undefined, ...greeting }), { onText: () => {} }, new AbortController().signal);
+      return JSON.parse(String(calls[0]!.init?.body)) as Record<string, unknown>;
+    };
+
+    const hi = await bodyFor('hi-greeting');
+    expect(hi).toMatchObject({
+      variantCount: 3,
+      clientContext: { fanUsername: 'charles77', fanAvatarUrl: 'https://cdn3.fansly.com/a.jpg', personalMessageCount: 1, messageCount: 2 },
+    });
+    // The deprecated alias is for released clients only; this one never sends it.
+    expect(hi).not.toHaveProperty('greetingMode');
+    // The vendored Core contract takes exactly this body.
+    expect(routeSchemas.aiFeatureStream.body!.safeParse(hi).success).toBe(true);
+
+    // Core answers 400 to any of the four on another feature.
+    const ping = await bodyFor('ping');
+    expect(ping).not.toHaveProperty('variantCount');
+    for (const field of ['fanUsername', 'fanAvatarUrl', 'personalMessageCount']) {
+      expect(ping.clientContext).not.toHaveProperty(field);
+    }
   });
 
   it('sends summaryMode only for a short recap; a full recap omits it', async () => {

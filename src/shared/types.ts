@@ -748,6 +748,7 @@ export type OperationProfilingStageKey =
   | 'ping-analysis'
   | 'group-lookup'
   | 'account-name-lookup'
+  | 'welcome-definitions'
   | 'earnings'
   | 'subscription-lookup'
   | 'prompt-build'

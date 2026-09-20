@@ -7,7 +7,8 @@ import {
   automationReason, fanslyAvatarUrl, followedAtFromId, isAutomatedMessage, isPersonalMessage,
   normalizeWelcome, type FollowerDisplayMessage, type FollowerMessageEvidence, type FollowerRow, type FollowersSnapshot,
 } from '../shared/followers.js';
-import { AUTOMATED_MESSAGE_LABEL, greetingProfileFields, isAutomatedGreetingMessage } from '../shared/greeting-context.js';
+import { AUTOMATED_MESSAGE_LABEL, buildGreetingContext, countPersonalMessages, isAutomatedGreetingMessage } from '../shared/greeting-context.js';
+import { HI_GREETING_MAX_TRANSCRIPT } from '../shared/constants.js';
 import type { FanslyAccountResponse, FanslyMessage, PersistedState, SessionTemplate } from '../shared/types.js';
 import type { AgencyHubClient } from './agency-hub-client.js';
 import type { FanslyClient } from './fansly-client.js';
@@ -50,6 +51,9 @@ interface Options {
 
 const key = (kind: string, creator: string, fan = '') => `chatgoose:followers:v1:${kind}:${creator}:${fan}`;
 const ready = (row: FollowerRow) => row.status === 'ready' || row.status === 'reply';
+/** Hi is for a conversation that has barely started. Past the limit the fan
+ * needs a real reply with the whole chat in view, not a one-line opener. */
+const NEEDS_REPLY = `В переписке уже больше ${HI_GREETING_MAX_TRANSCRIPT} личных сообщений: это диалог, а не приветствие. Откройте чат и используйте Ответ (Reply).`;
 function errorText(error: unknown): string {
   if (error instanceof Error && ['AbortError', 'TimeoutError'].includes(error.name)) return 'Не успели проверить Fansly. Продолжите проверку или обновите список.';
   return error instanceof ChatGooseError ? toUserError(error).message : error instanceof Error ? error.message : 'Не удалось проверить Fansly.';
@@ -598,6 +602,13 @@ export class FollowersService {
     row.detail = undefined;
   }
 
+  /** The bounded history the chatter can review, with each message's
+   * automation verdict, oldest first. */
+  private greetingWindow(scan: Scan, fanId: string): { history: FanslyMessage[]; window: Array<{ automated: boolean }> } {
+    const history = (scan.histories.get(fanId) ?? []).slice(-30);
+    return { history, window: history.map((message) => ({ automated: isAutomatedGreetingMessage(message, scan.snapshot.creatorId, scan.welcome) })) };
+  }
+
   async generate(tabId: number, scanId: string, fanId: string): Promise<string> {
     const scan = this.get(tabId, scanId);
     return traced(scan.trace, 'generation', (scope) => this.generateDraft(scan, fanId, scope), undefined, fanId);
@@ -613,6 +624,13 @@ export class FollowersService {
       const signal = AbortSignal.any([scan.controller.signal, AbortSignal.timeout(180_000)]);
       await this.check(scan, row, signal, scope, 'before-generation');
       if (!ready(row)) throw new Error('Этому фану уже написали. Список обновлён.');
+      // The same limit as Core's gate_hi_greeting_limit, checked before any
+      // further Fansly or hub read is spent on a row that cannot be greeted.
+      const personalMessages = countPersonalMessages(this.greetingWindow(scan, fanId).window);
+      if (personalMessages > HI_GREETING_MAX_TRANSCRIPT) {
+        scope?.event('generation.refused', { reason: 'too-many-personal-messages', personalMessages, limit: HI_GREETING_MAX_TRANSCRIPT });
+        throw new Error(NEEDS_REPLY);
+      }
       const state = await this.options.readState();
       const personaKey = resolveMappedPersonalityId(state.accountMappings, scan.snapshot.creatorId, scan.session.accountId, state.accountAliases);
       const persona = findActivePersona(state.personaCatalog, personaKey);
@@ -653,13 +671,13 @@ export class FollowersService {
       }
       await assertPersona();
       // The draft uses the same bounded history the chatter can review.
-      const history = (scan.histories.get(fanId) ?? []).slice(-30);
-      scope?.event('generation.context', { messages: history.length, avatar: Boolean(row.avatarUrl), bioChars: row.bio.slice(0, 5000).length, customName: Boolean(row.customName) });
-      const transcript = formatTranscriptForKernel(history.map((message) => ({
+      const { history, window } = this.greetingWindow(scan, fanId);
+      scope?.event('generation.context', { messages: history.length, personalMessages: countPersonalMessages(window), avatar: Boolean(row.avatarUrl), bioChars: row.bio.slice(0, 5000).length, customName: Boolean(row.customName) });
+      const transcript = formatTranscriptForKernel(history.map((message, index) => ({
         id: message.id, createdAt: message.createdAt, senderId: message.senderId,
         senderLabel: message.senderId === scan.snapshot.creatorId ? 'Model' : 'Fan', type: message.type,
         text: message.content || '', labels: [
-          ...(isAutomatedGreetingMessage(message, scan.snapshot.creatorId, scan.welcome) ? [AUTOMATED_MESSAGE_LABEL] : []),
+          ...(window[index]!.automated ? [AUTOMATED_MESSAGE_LABEL] : []),
           ...(message.attachments?.length ? ['[Media: purchase state unknown]'] : []),
         ],
       })));
@@ -667,16 +685,20 @@ export class FollowersService {
       const text = await traced(scope, 'hub.generate', (request) => {
         let firstText = false;
         return this.options.gateway.streamFeature(state.settings, {
-          feature: 'hi-greeting', greetingMode: 'new-follower', clientRequestId,
+          feature: 'hi-greeting', variantCount: 1, clientRequestId,
           pageLabel, conversationRef: fanId, fanRef: fanId, personaKey: persona.key, expectedPersonaDefinitionId: persona.definitionId,
-          clientContext: { ...transcript, ...greetingProfileFields(row), fanSpendingData: '', fanSubscriptionData: '' },
+          clientContext: { ...transcript, ...buildGreetingContext({ profile: row, messages: window, transcript }), fanSpendingData: '', fanSubscriptionData: '' },
         }, {
           onText: () => { if (!firstText) { firstText = true; request?.event('generation.first-text'); } },
           onMeta: (meta) => request?.event('generation.meta', { requestId: meta.requestId, model: meta.model, personaDefinitionId: meta.personaDefinitionId }),
           onUsage: (usage) => request?.event('generation.usage', { ...usage }),
           onStopReason: (reason) => request?.event('generation.stop', { reason }),
         }, signal);
-      }, { clientRequestId, feature: 'hi-greeting', greetingMode: 'new-follower' });
+      }, { clientRequestId, feature: 'hi-greeting', variantCount: 1 }).catch((error: unknown) => {
+        // The kernel gate counts the same thing; the chatter gets one wording.
+        if (error instanceof ChatGooseError && error.key === 'hi_too_many_messages') throw new Error(NEEDS_REPLY);
+        throw error;
+      });
       await assertPersona();
       if (!text.trim() || text.length > 5000 || /\[(VARIANT|NEXT)\]/.test(text)) throw new ChatGooseError('ai_output_unusable');
       scope?.event('generation.result', { textChars: text.trim().length });
