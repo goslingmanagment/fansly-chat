@@ -127,10 +127,16 @@ Important references:
 
 ## Release
 
-Unreleased on `main`: the unified Hi greeting (E136). It needs Core Decision 379
-deployed first (an older kernel answers the new fields with 400), and the
-vendored SDK must be re-vendored from the DEPLOYED core commit before the
-release that carries it.
+Release 2.4.5 unifies the Hi greeting across both surfaces: one `hi-greeting`
+contract (`variantCount`, `personalMessageCount`) replaces the `greetingMode`
+flag, one shared greeting context (`src/shared/greeting-context.ts`) and one
+welcome-definitions service (`src/background/welcome-definitions.ts`) feed the
+chat button and the New Followers window alike. The chat Hi gains the fan's
+avatar, username and saved name and labels automated messages; its gate counts
+personal messages only, so welcome and mass messages no longer lock a fan out,
+while a follower with more than 10 personal messages is refused as a
+conversation, not a greeting (E136, E137). Ships on the SDK re-vendored from the
+deployed Core `82571f3c` (Core Decision 379).
 
 Release 2.4.4 stops the new-followers window from reading an inbox listing or
 search miss as «не писали»: such a row says «Чат не найден», the chat is

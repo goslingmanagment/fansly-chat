@@ -127,6 +127,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E134 | 2026-09-20 | New followers: an inbox listing or search miss is never «не писали»; the chat is resolved by identity (`POST /group`) at an explicit human action, never during a scan; saved fan → chat id; a blocked send is an error the chatter sees; text search demoted to a budgeted background hint |
 | E135 | 2026-09-20 | Release E133 + E134 as 2.4.4 in one release on the owner's word, on the SDK re-vendored in E132; no live measurement yet, trace counters added for every unverified assumption |
 | E136 | 2026-09-20 | Unified Hi greeting: one `hi-greeting` contract (`variantCount`, `personalMessageCount`) for the chat button and the New Followers window, one greeting-context module, one shared welcome-definitions service; the gate counts personal messages; needs Core Decision 379 deployed first; unreleased |
+| E137 | 2026-09-20 | Release E136 as 2.4.5 on the owner's word, after Core Decision 379 (core `82571f3c`) is deployed, on the SDK re-vendored from that deployed commit; no independent review, validation synthetic plus a before/after prompt render |
 
 ## Entries
 
@@ -4761,3 +4762,36 @@ live kernel and the browser were not exercised. Supersedes the "separate mode"
 part of E117. Follow-ups: of-desktop migration to `variantCount`, the
 code-point cap in `kernelFanCustomName`, removal of the alias once no supported
 client sends it.
+
+**E137 (2026-09-20).** The owner authorizes releasing the unified Hi greeting
+(E136) as 2.4.5 on his word. Version 2.4.5, a patch per the owner's numbering
+(E120); package and manifest advance together, both changelogs, the landing
+stamp and the README release note move with them.
+
+Sequencing. The kernel half, Core Decision 379, is merged as core `82571f3c` and
+deployed to production before this release: an older strict kernel answers the
+new fields (`variantCount`, `clientContext.personalMessageCount`) with 400, so
+the client cannot ship first. `vendor/kernel-sdk` is re-vendored from that
+deployed commit, contract hash
+`2620650e66ddf368a8265f062712f37215ae3477fbb934ad6b3555ceb1b2d4bc`, replacing
+the interim vendor E136 took from the core feature branch commit `1c8532c1`.
+The release gate in `scripts/deploy.sh` refuses to publish while the vendored
+hash differs from production's.
+
+Validation. No independent code review was run on this change: the owner
+declined one. What backs the release is the synthetic suite (mock transport,
+fake timers, jsdom) that pins the followers request on the wire against the
+vendored Core schema and covers the chat Hi gate, the automation labels, the
+welcome-definitions fallbacks, the text-only fallback and the no-retry rule,
+plus a before/after render of the kernel prompt. Not verified before the
+release: live Fansly and the browser.
+
+Follow-ups carried over from E136, none of them closed here: of-desktop still
+sends the deprecated `greetingMode` alias and migrates to `variantCount` after
+its own SDK re-vendor; `kernelFanCustomName` still caps by code points for the
+features other than Hi, while Core counts UTF-16 units; the alias is removed in
+core once no supported client sends it. The open owner question also stands: a
+fan whose chat holds 25+ automatic messages no longer fits the one page the chat
+Hi reads, so Hi stays closed for him while the New Followers window (up to 30
+pages) greets him; closing that gap means multi-page reads for Hi, which is
+extra Fansly egress on the chatter's own session.
