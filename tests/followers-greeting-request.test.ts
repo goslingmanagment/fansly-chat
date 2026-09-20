@@ -149,6 +149,24 @@ describe('followers greeting request (wire pin)', () => {
     expect(report.events).toContainEqual(expect.objectContaining({ name: 'generation.refused', data: { reason: 'too-many-personal-messages', personalMessages: 11, limit: 10 } }));
   });
 
+  it('counts the personal messages of the chat resolved by identity, not of the empty history a «Чат не найден» row carries', async () => {
+    // E134 leaves a row whose chat nothing found at «Чат не найден», with no
+    // history at all. E136's gate runs after that chat is resolved (`POST
+    // /group`) and read: counted before, every such fan would pass at zero.
+    const h = harness({ id: '2', username: 'fan', notes: [] }, [
+      ...Array.from({ length: 11 }, (_, index) => msg({ id: String(200 + index), createdAt: 2000 + index, senderId: '2', content: `fan ${index}` })),
+    ], true);
+    h.fansly.listInboxPrefix.mockResolvedValue([]);
+    h.fansly.findFollowerGroup.mockResolvedValue(null);
+    const snapshot = await h.scan();
+    expect(h.service.state(7, snapshot.scanId).rows[0]).toMatchObject({ status: 'ready', evidence: 'unverified' });
+    await expect(h.service.generate(7, snapshot.scanId, '2')).rejects.toThrow('это диалог, а не приветствие');
+    expect(h.fansly.createFollowerGroup).toHaveBeenCalledOnce();
+    expect(h.gateway.streamFeature).not.toHaveBeenCalled();
+    const report = h.service.traces.get(snapshot.debug!.traceId)!.read();
+    expect(report.events).toContainEqual(expect.objectContaining({ name: 'generation.refused', data: { reason: 'too-many-personal-messages', personalMessages: 11, limit: 10 } }));
+  });
+
   it('gives the kernel gate the same wording and never retries the generation', async () => {
     const h = harness({ id: '2', username: 'fan', notes: [] }, [], true);
     h.gateway.streamFeature.mockRejectedValue(new ChatGooseError('hi_too_many_messages'));

@@ -4749,9 +4749,11 @@ Compatibility and rollout. The new fields are unknown keys to an older strict
 kernel (400), so Core Decision 379 must be DEPLOYED before this ships; released
 clients (<= 2.4.3, of-desktop) keep working through the deprecated
 `greetingMode` alias. `vendor/kernel-sdk` is vendored from the core feature
-branch `f0bd5e55` (contract hash `2620650e…`), which is not a release vendor:
-re-vendor from the deployed core commit at release time (expect a `vendor/`
-conflict with PR #114, resolved the same way). No version bump, no changelog:
+branch `1c8532c1` (contract hash `2620650e…`), which is not a release vendor:
+re-vendor from the deployed core commit at release time. Against main's E132
+vendor (Core `301a127a`) it adds the hi-greeting contract only — `variantCount`,
+`clientContext.personalMessageCount` and the refinement that keeps the latter at
+or below `messageCount`. No version bump, no changelog:
 the release is a separate owner step. No AI request is retried anywhere in this
 change, no new Fansly route and no unpaced request are added, and no storage
 migration is needed. Validation is synthetic (mock transport); live Fansly, the
