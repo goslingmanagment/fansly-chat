@@ -366,10 +366,16 @@ describe('Fansly inbox as a positive-only source', () => {
     fetch.mockClear(); fetch.mockImplementation(async () => envelope({ data: page(1000, 100, () => now).data.map((entry) => ({ ...entry, lastMessageId: 'not-a-snowflake' })) }));
     await h.client.listInboxPrefix('1', cutoff, new Set(['1005']), h.session, h.signal);
     expect(offsets(fetch)).toEqual(['0']);
-    // Ten pages at most, however busy the inbox.
+    // Ten pages at most, however busy the inbox, while somebody is still unmatched.
     fetch.mockClear(); fetch.mockImplementation(async (input) => envelope(page(1000 + Number(new URL(String(input)).searchParams.get('offset')), 100, (index) => now - index)));
-    await h.client.listInboxPrefix('1', cutoff, new Set(['1005']), h.session, h.signal);
+    await h.client.listInboxPrefix('1', cutoff, new Set(['1005', '9999999']), h.session, h.signal);
     expect(offsets(fetch)).toEqual(['0', '100', '200', '300', '400', '500', '600', '700', '800', '900', '0']);
+    // Everybody wanted is matched: nothing deeper is read, and nothing can have jumped over them.
+    fetch.mockClear();
+    const early = new FollowersTrace({ id: crypto.randomUUID(), tabId: 7, hours: 48, version: 'test', build: 'test' });
+    expect((await h.client.listInboxPrefix('1', cutoff, new Set(['1005', '1150']), h.session, h.signal, early)).map((chat) => chat.fanId).sort()).toEqual(['1005', '1150']);
+    expect(offsets(fetch)).toEqual(['0', '100']);
+    expect(early.read().events).toContainEqual(expect.objectContaining({ name: 'inbox.stop', data: { pages: 2, reason: 'all-matched' } }));
     // A chat that jumped to the top while the pages were read is caught by the re-read.
     let reads = 0;
     fetch.mockClear(); fetch.mockImplementation(async (input) => {
@@ -428,6 +434,11 @@ describe('Fansly inbox as a positive-only source', () => {
     fetch.mockImplementation(async () => envelope({}));
     await expect(h.client.findFollowerGroup('2', 'fan2', '1', h.session, h.signal)).rejects.toMatchObject({ key: 'fansly_server_error' });
     await expect(h.client.findFollowerGroup('2', '  ', '1', h.session, h.signal)).rejects.toMatchObject({ key: 'fansly_server_error' });
+    // One page, always: a common name («Dan») fills it, and paging twenty
+    // requests for one fan would buy no certainty — a miss proves nothing.
+    fetch.mockClear(); fetch.mockImplementation(async () => envelope({ data: Array.from({ length: 100 }, (_, index) => row(String(5000 + index), now)) }));
+    expect(await h.client.findFollowerGroup('2', 'Dan', '1', h.session, h.signal)).toBeNull();
+    expect(fetch).toHaveBeenCalledOnce();
   });
 
   it('carries the last message of GET /group and POST /group to the caller', async () => {

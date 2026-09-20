@@ -571,7 +571,11 @@ export class FollowersService {
    * is decided on it. */
   private async resolveGroup(scan: Scan, fanId: string, signal: AbortSignal, scope?: TraceScope): Promise<string> {
     this.assertCurrent(scan);
-    const created = await traced(scope, 'group.create', (request) => this.options.fansly.createFollowerGroup(fanId, scan.snapshot.creatorId, scan.session, signal, request));
+    const created = await traced(scope, 'group.create', (request) => this.options.fansly.createFollowerGroup(fanId, scan.snapshot.creatorId, scan.session, signal, request)).catch((error: unknown) => {
+      // Fansly's code is all that is known; what it means is not guessed.
+      const code = error instanceof ChatGooseError && error.key === 'fansly_server_error' ? error.details?.code : undefined;
+      throw code ? new Error(`Fansly отказал в открытии чата (код ${code}). Возможно, у фана закрыты сообщения.`) : error;
+    });
     if (!savedGroupId({ groupId: created.id })) throw new ChatGooseError('fansly_server_error');
     scan.groups.set(fanId, created.id);
     scan.savedLeads.delete(fanId);
@@ -587,6 +591,14 @@ export class FollowersService {
     if (row.status !== 'ready' || row.evidence === 'history') return;
     await this.resolveGroup(scan, row.id, signal, scope);
     await this.check(scan, row, signal, scope, 'after-group-create');
+  }
+
+  /** A cooldown can last minutes (E132). A human action that joined the lane
+   * during one would sit out its own deadline and fail with a bare timeout, so
+   * it is refused at once with the wait, before anything is reserved. */
+  private assertNotCooling(scan: Scan): void {
+    const waitMs = (this.options.fansly.followerReadStatus(scan.session)?.cooldownUntil ?? 0) - Date.now();
+    if (waitMs > 0) throw new ChatGooseError('rate_limited', { details: { status: 429, retryAfterMs: waitMs, retryAtMs: Date.now() + waitMs }, retryAfterMs: waitMs, retryAtMs: Date.now() + waitMs });
   }
 
   /** A human action on a fan takes over from a background hint on the same
@@ -740,7 +752,10 @@ export class FollowersService {
       if (savedGroup !== groupId) await traced(scope, 'group.cache-write', () => this.options.storage.set({ [groupKey]: { groupId, observedAt: Date.now() } }), { groupId });
       // The chat's newest message, as any answer of this scan showed it. By the
       // creator and personal, it is positive proof; it is never negative.
-      const lasts = [group?.lastMessage, shown?.lastMessage].filter((message): message is FanslyMessage => !!message && /^\d{1,24}$/.test(message.id) && message.groupId === groupId && [creator, row.id].includes(message.senderId));
+      // Fansly's key sets drift. A last message without the fields that tell a
+      // mass DM or a welcome from a personal one proves nothing: read the history.
+      const lasts = [group?.lastMessage, shown?.lastMessage].filter((message): message is FanslyMessage => !!message && /^\d{1,24}$/.test(message.id) && message.groupId === groupId && [creator, row.id].includes(message.senderId)
+        && typeof message.type === 'number' && message.correlationId !== undefined && message.inReplyTo !== undefined);
       const lastKnown = Boolean(group?.lastMessage?.id || shown?.lastMessageId);
       if (lasts.some((message) => isPersonalMessage(message, creator, scan.welcome))) await this.ensureFreshWelcome(scan, scope, signal);
       if (scope) for (const message of lasts) this.traceMessage(scope, scan, message, 'last-message');
@@ -828,6 +843,7 @@ export class FollowersService {
       if (this.locks.has(lock)) throw new ChatGooseError('another_operation');
       this.locks.add(lock);
       try {
+        this.assertNotCooling(scan);
         const signal = AbortSignal.any([scan.controller.signal, AbortSignal.timeout(180_000)]);
         await this.takeOver(scan, fanId);
         await this.check(scan, row, signal, scope, 'before-verify');
@@ -849,6 +865,7 @@ export class FollowersService {
     if (this.locks.has(lock)) throw new ChatGooseError('another_operation');
     this.locks.add(lock);
     try {
+      this.assertNotCooling(scan);
       const signal = AbortSignal.any([scan.controller.signal, AbortSignal.timeout(180_000)]);
       await this.takeOver(scan, fanId);
       await this.check(scan, row, signal, scope, 'before-generation');
@@ -959,6 +976,8 @@ export class FollowersService {
     let journal: Record<string, unknown> | undefined;
     const previous = row.status;
     try {
+      // Before anything is reserved: see `assertNotCooling`.
+      this.assertNotCooling(scan);
       const signal = AbortSignal.timeout(60_000);
       await this.takeOver(scan, fanId);
       await this.check(scan, row, signal, scope, 'before-send');

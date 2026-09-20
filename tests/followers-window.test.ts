@@ -138,6 +138,25 @@ describe('followers window human actions', () => {
     expect(h.sendMessage.mock.calls.find(([r]) => r.action === 'send')?.[0]).toMatchObject({ fanId: '2', text: 'edited greeting' });
     h.window.close();
   });
+  it('does not load the chat it has just written to: the chatter typed that message, and the preview costs two reads a send', async () => {
+    const h = harness();
+    // Rows are already proved «не писали», so the composer sends straight away.
+    for (const row of h.snapshot.rows) row.evidence = 'history';
+    await vi.waitFor(() => expect(h.root.querySelector('textarea')).not.toBeNull());
+    h.root.querySelector<HTMLButtonElement>('.all')!.click();
+    const textarea = h.root.querySelector('textarea')!;
+    textarea.value = 'hello there'; textarea.dispatchEvent(new Event('input'));
+    h.root.querySelector<HTMLButtonElement>('.send')!.click();
+    // In «Все» the sent fan stays selected: before, that alone opened the preview.
+    await vi.waitFor(() => expect(h.root.querySelector('[data-fan="2"] .status')?.textContent).toBe('Отправлено'));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(h.root.querySelector('.profile')?.textContent).toContain('Fan 2');
+    expect(h.sendMessage.mock.calls.some(([r]) => r.action === 'conversation')).toBe(false);
+    // An explicit click on the row still opens it.
+    h.root.querySelector<HTMLButtonElement>('[data-fan="2"]')!.click();
+    await vi.waitFor(() => expect(h.sendMessage.mock.calls.filter(([r]) => r.action === 'conversation')).toHaveLength(1));
+    h.window.close();
+  });
   it('shows only the selected excluded conversation, preserves its proof, and reuses it on reselection', async () => {
     const h = harness(); h.window.close();
     h.snapshot.rows.forEach((row) => {

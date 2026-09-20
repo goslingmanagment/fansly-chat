@@ -60,6 +60,8 @@ export class FollowersWindow {
   private filter = 'any';
   private readonly conversationRequests = new Set<string>();
   private readonly conversationOpened = new Set<string>();
+  /** Sent from this window: the chatter knows what is in that chat. */
+  private readonly justSent = new Set<string>();
   private hours = 48;
   private epoch = 0;
   private poll: ReturnType<typeof setTimeout> | null = null;
@@ -143,7 +145,7 @@ export class FollowersWindow {
     if (this.busy.size) { this.showError('Дождитесь текущей генерации или отправки.'); return; }
     const epoch = ++this.epoch;
     if (this.poll) clearTimeout(this.poll);
-    this.snapshot = null; this.detailKey = ''; this.conversationRequests.clear(); this.conversationOpened.clear(); this.showError();
+    this.snapshot = null; this.detailKey = ''; this.conversationRequests.clear(); this.conversationOpened.clear(); this.justSent.clear(); this.showError();
     this.node('.range').textContent = ''; this.node('.cooldown').hidden = true; this.node('.background').hidden = true; this.node('.pause').hidden = true;
     this.renderDebug();
     this.node('.creator').textContent = '';
@@ -268,7 +270,7 @@ export class FollowersWindow {
       ? [snapshot.scanId, row.id, row.status, row.evidence, row.chatKnown, row.messages, row.proof, row.conversation, row.detail, row.bio, row.customName, row.displayName, row.username, row.avatarUrl, this.busy.has(row.id)]
       : [snapshot.scanId, snapshot.scanning, snapshot.error, this.filter, rows.length]);
     if (detailKey !== this.detailKey) { this.detailKey = detailKey; void this.renderDetail(row); }
-    if (row && ['contacted', 'sent'].includes(row.status) && !row.conversation && !this.conversationOpened.has(row.id)) void this.loadConversation(row.id);
+    if (row && ['contacted', 'sent'].includes(row.status) && !row.conversation && !this.conversationOpened.has(row.id) && !this.justSent.has(row.id)) void this.loadConversation(row.id);
   }
 
   private async renderDetail(row?: FollowerRow): Promise<void> {
@@ -372,7 +374,7 @@ export class FollowersWindow {
         if (response.snapshot) {
           this.snapshot = response.snapshot;
           const status = response.snapshot.rows.find((v) => v.id === row.id)?.status;
-          if (status === 'sent') save('');
+          if (status === 'sent') { save(''); this.justSent.add(row.id); }
           // The row leaves the queue on the chatter's own click: say where to,
           // and keep it in view with the conversation that was found.
           if (type === 'verify' && status === 'contacted') { this.pinned = row.id; this.showError(`${row.displayName}: у фана уже есть личная переписка. Строка перенесена в «Уже писали».`); }

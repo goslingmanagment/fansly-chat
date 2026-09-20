@@ -1354,7 +1354,9 @@ describe('E133: a listing or search miss is not absence', () => {
 
   it('lastMessage by the creator is a positive verdict; by the fan or automated it is not', async () => {
     const listed = (lastMessage: FanslyMessage) => { const h = harness(true); h.fansly.listInboxPrefix.mockResolvedValue([chat('2', '3', { verified: true, lastMessageId: lastMessage.id, lastMessage })]); return h; };
-    const personal = listed(msg({ id: '60', createdAt: 1789400000 }));
+    // A real last message carries the fields that tell a mass DM from a personal one.
+    const full = { correlationId: '0', inReplyTo: null };
+    const personal = listed(msg({ id: '60', createdAt: 1789400000, ...full }));
     personal.setMessages([msg({ id: '60' })]);
     const snapshot = await personal.start();
     expect(snapshot.rows[0]).toMatchObject({ status: 'contacted', proof: { source: 'live', message: { id: '60', text: 'personal hello', createdAt: 1789400000000 } } });
@@ -1363,7 +1365,10 @@ describe('E133: a listing or search miss is not absence', () => {
     expect(personal.service.traces.get(snapshot.scanId)!.read().events).toContainEqual(expect.objectContaining({ name: 'message.classify', data: expect.objectContaining({ source: 'last-message', reason: 'personal-dm', personal: true }) }));
 
     // Never negative: whoever wrote last, the history decides.
-    for (const last of [msg({ id: '61', senderId: '2', content: 'hi' }), msg({ id: '61', content: 'auto welcome' }), msg({ id: '61', type: 2 }), msg({ id: '61', correlationId: '9' }), msg({ id: '61', groupId: '999' }), msg({ id: 'not-an-id' })]) {
+    // …and neither is a last message whose classifying fields are missing:
+    // Fansly's key sets drift, and an absent `correlationId` would turn a mass
+    // DM into a «личное» one — a fan falsely shown as already greeted.
+    for (const last of [msg({ id: '61', senderId: '2', content: 'hi', ...full }), msg({ id: '61', content: 'auto welcome', ...full }), msg({ id: '61', type: 2, ...full }), msg({ id: '61', correlationId: '9', inReplyTo: null }), msg({ id: '61', groupId: '999', ...full }), msg({ id: 'not-an-id', ...full }), msg({ id: '61' }), msg({ id: '61', correlationId: '0' }), msg({ id: '61', inReplyTo: null })]) {
       const h = listed(last);
       h.setMessages([msg({ id: '61', senderId: '2', content: 'hi' }), msg({ id: '30', content: 'an older personal message' })]);
       expect((await h.start()).rows[0]).toMatchObject({ status: 'contacted', proof: { message: { id: '30' } } });
@@ -1371,7 +1376,7 @@ describe('E133: a listing or search miss is not absence', () => {
     }
     // The text rule is the history path's own: a welcome added since the last
     // read is refreshed before a text-only proof is believed.
-    const edited = listed(msg({ id: '62', content: 'new welcome' }));
+    const edited = listed(msg({ id: '62', content: 'new welcome', ...full }));
     edited.values['chatgoose:followers:v1:welcome:1:'] = { texts: ['auto welcome'], checkedAt: Date.now() - 1000 };
     edited.fansly.getWelcomeDefinitions.mockResolvedValue([{ messageTemplate: { content: 'new welcome' } }]);
     edited.setMessages([msg({ id: '62', content: 'new welcome' })]);
@@ -1381,9 +1386,44 @@ describe('E133: a listing or search miss is not absence', () => {
     // A lagging history cannot hide what the chat's own object shows.
     const lagging = harness(); const before = await lagging.start();
     lagging.setMessages([msg({ id: '39', content: 'auto welcome' })]);
-    lagging.fansly.getGroup.mockResolvedValue({ users: [{ userId: '1' }, { userId: '2' }], lastMessage: msg({ id: '70' }) });
+    lagging.fansly.getGroup.mockResolvedValue({ users: [{ userId: '1' }, { userId: '2' }], lastMessage: msg({ id: '70', ...full }) });
     await expect(lagging.service.send(7, before.scanId, '2', 'hello')).rejects.toThrow('Сообщение не отправлено: у фана уже есть личная переписка');
     expect(lagging.fansly.sendFollowerMessage).not.toHaveBeenCalled();
+  });
+
+  it('refuses verify, generate and send at once while Fansly has the lane in a cooldown, before anything is reserved', async () => {
+    const h = missed();
+    const scan = await h.start();
+    const until = Date.now() + 187_000;
+    h.fansly.followerReadStatus.mockReturnValue({ cooldownUntil: until, intervalMs: 800 } as never);
+    const reads = () => h.fansly.getGroup.mock.calls.length + h.fansly.getMessagePage.mock.calls.length + h.fansly.findFollowerGroup.mock.calls.length;
+    const before = reads();
+    // A cooldown can last five minutes (E132). Joining the lane would burn the
+    // action's own 60 s / 180 s and end in a bare timeout.
+    for (const action of [() => h.service.verify(7, scan.scanId, '2'), () => h.service.generate(7, scan.scanId, '2'), () => h.service.send(7, scan.scanId, '2', 'hello')]) {
+      const started = Date.now();
+      await expect(action()).rejects.toMatchObject({ key: 'rate_limited', details: { status: 429 } });
+      expect(Date.now() - started).toBeLessThan(500);
+    }
+    expect(reads()).toBe(before);
+    expect(h.fansly.createFollowerGroup).not.toHaveBeenCalled(); expect(h.fansly.sendFollowerMessage).not.toHaveBeenCalled();
+    expect(h.hub.followerOutreachAttempt).not.toHaveBeenCalled(); expect(h.gateway.streamFeature).not.toHaveBeenCalled();
+    expect(h.values[ATTEMPT]).toBeUndefined();
+    // The row is untouched and works again once the cooldown is over.
+    expect(h.service.state(7, scan.scanId).rows[0]).toMatchObject({ status: 'ready', evidence: 'unverified' });
+    h.fansly.followerReadStatus.mockReturnValue(undefined as never);
+    expect((await h.service.verify(7, scan.scanId, '2')).rows[0]).toMatchObject({ status: 'ready', evidence: 'history' });
+  });
+
+  it('says what Fansly answered when it refuses to open the chat, and guesses nothing more', async () => {
+    const h = missed();
+    const scan = await h.start();
+    h.fansly.createFollowerGroup.mockRejectedValue(new ChatGooseError('fansly_server_error', undefined, { status: 400, code: '99' }));
+    await expect(h.service.verify(7, scan.scanId, '2')).rejects.toThrow('Fansly отказал в открытии чата (код 99). Возможно, у фана закрыты сообщения.');
+    expect(h.service.state(7, scan.scanId).rows[0]).toMatchObject({ status: 'ready', evidence: 'unverified' });
+    // Without a code there is nothing truthful to add.
+    h.fansly.createFollowerGroup.mockRejectedValue(new ChatGooseError('fansly_server_error', undefined, { status: 500 }));
+    await expect(h.service.verify(7, scan.scanId, '2')).rejects.toMatchObject({ key: 'fansly_server_error' });
   });
 
   it('background search: displayName term, one request in flight, stops after 20 empty searches, never turns a miss into evidence', async () => {

@@ -603,12 +603,13 @@ export class FanslyClient {
       // An undated last row cannot show that the period continues below it.
       let newer = false;
       try { newer = page.tail !== null && followedAtFromId(page.tail) >= cutoffMs; } catch { /* Not a snowflake. */ }
-      if (page.count < MESSAGING_GROUPS_PAGE_SIZE || !newer) {
-        trace?.event('inbox.stop', { pages, reason: page.count < MESSAGING_GROUPS_PAGE_SIZE ? 'short-page' : 'period-boundary' });
+      const matched = found.size >= fanIds.size;
+      if (matched || page.count < MESSAGING_GROUPS_PAGE_SIZE || !newer) {
+        trace?.event('inbox.stop', { pages, reason: matched ? 'all-matched' : page.count < MESSAGING_GROUPS_PAGE_SIZE ? 'short-page' : 'period-boundary' });
         break;
       }
     }
-    if (pages > 1) await read(0);
+    if (pages > 1 && found.size < fanIds.size) await read(0);
     return [...found.values()];
   }
 
@@ -617,23 +618,15 @@ export class FanslyClient {
    * says nothing about the chat; malformed or bounded results are not a miss. */
   async findFollowerGroup(fanId: string, term: string, creatorId: string, session: SessionTemplate, signal: AbortSignal, trace?: TraceScope): Promise<InboxChat | null> {
     if (!term.trim()) throw new ChatGooseError('fansly_server_error');
-    const seen = new Set<string>();
-    for (let offset = 0; offset < 2000; offset += MESSAGING_GROUPS_PAGE_SIZE) {
-      const response = await this.fetchEnvelope<FanslyMessagingGroupsResponse>(this.inboxUrl(term, offset), session, 'messagingGroups', signal, false, 'default', trace);
-      const page = readInboxPage(response, creatorId);
-      const match = page.chats.find((chat) => chat.fanId === fanId);
-      trace?.event('group.search-page', { offset, count: page.count, groups: page.groups, withUsers: page.withUsers, match: match?.groupId ?? null });
-      if (match) {
-        // The chat exists; an id we cannot use must not read as «not found».
-        if (!/^\d{1,24}$/.test(match.groupId)) throw new ChatGooseError('fansly_server_error');
-        return match;
-      }
-      if (page.count < MESSAGING_GROUPS_PAGE_SIZE) return null;
-      const cursor = response.data!.at(-1)?.groupId;
-      if (!cursor || seen.has(cursor)) break;
-      seen.add(cursor);
-    }
-    throw new ChatGooseError('fansly_server_error');
+    // One page. A miss proves nothing either way, so paging a common name
+    // («Dan») through twenty requests for one fan bought no certainty.
+    const page = readInboxPage(await this.fetchEnvelope<FanslyMessagingGroupsResponse>(this.inboxUrl(term, 0), session, 'messagingGroups', signal, false, 'default', trace), creatorId);
+    const match = page.chats.find((chat) => chat.fanId === fanId);
+    trace?.event('group.search-page', { offset: 0, count: page.count, groups: page.groups, withUsers: page.withUsers, match: match?.groupId ?? null });
+    if (!match) return null;
+    // The chat exists; an id we cannot use must not read as «not found».
+    if (!/^\d{1,24}$/.test(match.groupId)) throw new ChatGooseError('fansly_server_error');
+    return match;
   }
 
   /** Writes never enter fetchEnvelope's read retry loop. Any failure after
