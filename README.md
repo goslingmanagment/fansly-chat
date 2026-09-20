@@ -119,6 +119,15 @@ Important references:
 
 ## Release
 
+Release 2.4.4 stops the new-followers window from reading an inbox listing or
+search miss as «не писали»: such a row says «Чат не найден», the chat is
+resolved by identity (`POST /group`) at «Проверить чат» / «Сгенерировать», a
+blocked send is loud, and the scan reads an inbox prefix instead of one search
+per fan. The pacer gets its safety patch: jitter on the binding deadline, a
+first limit widens the whole lane, a FBuddy-grade cooldown, no upward probing,
+a narrow delayed recheck with a fuse (E133, E134, E135). Ships on the SDK
+re-vendored from Core `301a127a` (E132).
+
 Release 2.4.3 replaces the follower read scheduler with the Fansly pacer
 (`src/background/fansly-pacer/`): a pace policy per route family, a learned
 spacing per key, a 400 ms jittered gap on the creator lane, limits that survive

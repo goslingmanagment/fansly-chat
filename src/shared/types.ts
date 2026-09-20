@@ -572,7 +572,20 @@ export interface FanslySubscribersResponse {
 export interface FanslyMessagingGroupEntry {
   groupId: string;
   partnerAccountId?: string | null;
+  /** `lower(displayName || username)` as of the row's last update: the field
+   * the server-side `search` matches, and a snapshot that can go stale. */
+  partnerUsername?: string | null;
   subscriptionTierId?: string | null;
+  /** Snowflake of the newest message; the listing is ordered by it. */
+  lastMessageId?: string | null;
+}
+
+/** The group object Fansly returns from `GET /group/<id>`, `POST /group` and
+ * inside the inbox listing's `aggregationData.groups[]`. */
+export interface FanslyGroup {
+  id?: string;
+  users?: Array<{ userId: string }>;
+  lastMessage?: FanslyMessage | null;
 }
 
 export interface FanslyMessagingGroupAccount {
@@ -584,6 +597,7 @@ export interface FanslyMessagingGroupsResponse {
   data?: FanslyMessagingGroupEntry[];
   aggregationData?: {
     accounts?: FanslyMessagingGroupAccount[];
+    groups?: FanslyGroup[];
   };
 }
 
@@ -662,6 +676,10 @@ export interface ChatGooseErrorDetails {
   responseSnippet?: string;
   retryAfterMs?: number;
   retryAtMs?: number;
+  /** Fansly refused inside HTTP 2xx (`success: false`). */
+  refused?: boolean;
+  /** Fansly's own error code, when the refused body carried one. */
+  code?: string;
 }
 
 export type UserErrorKey =

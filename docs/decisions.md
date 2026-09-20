@@ -123,6 +123,9 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E130 | 2026-09-20 | Fansly pacer replaces the follower read scheduler: policy per route family, learned spacing per key, 400 ms jittered lane gap, a limit slows its own key first, limits survive the background page; transient 404 rows rechecked once; unreleased until a live trace |
 | E131 | 2026-09-20 | Owner releases E130 as 2.4.3 without the temporary-load trace; the first production scans are the live measurement, the feed is the rollback |
 | E132 | 2026-09-20 | Re-vendor the SDK from Core `301a127a` (Core Decision 376, in-core Workboard v2 removed); merge only once production serves contractHash `42c705b8…` |
+| E133 | 2026-09-20 | Pacer safety patch after two reviews and the first production trace: jitter on the binding deadline, a first limit widens the lane, FBuddy-grade cooldown, success only for a validated envelope, narrow delayed recheck with a fuse, writes refused under a cooldown, upward probing deleted |
+| E134 | 2026-09-20 | New followers: an inbox listing or search miss is never «не писали»; the chat is resolved by identity (`POST /group`) at an explicit human action, never during a scan; saved fan → chat id; a blocked send is an error the chatter sees; text search demoted to a budgeted background hint |
+| E135 | 2026-09-20 | Release E133 + E134 as 2.4.4 in one release on the owner's word, on the SDK re-vendored in E132; no live measurement yet, trace counters added for every unverified assumption |
 
 ## Entries
 
@@ -4413,3 +4416,250 @@ with hash `8e761076…`. Merging earlier would block an extension release in the
 opposite direction, so this change merges only after production's
 `/api/v1/health` reports `42c705b8…`. No version bump: nothing user-visible
 changes, and the refreshed SDK ships with the next release.
+
+**E133 (2026-09-20).** The first production trace of 2.4.3 (148 followers,
+48 h, first 34 s) confirms E130's pace: 55 check-phase reads in 27.6 s, all
+200, no 429, no 404. It also shows what E130 got wrong: back-to-back reads of
+one key started 500-506 ms apart every time. The jitter was added to the lane
+gap only, the key spacing always bound later, so the dominant phase of a scan
+went out as a metronome. Two independent reviews of `0d27c52` (a Fable
+reviewer, then Codex blind) found no ship blocker and agree on the rest below;
+a third pass asked only what could be deleted.
+
+Corrections to E130. "Safer than FBuddy at every moment" was wrong on the
+reaction to a limit. FBuddy's cooldown is `max(5 s x 2^(consecutive-1),
+1.25 s x reads answered since the previous limit, spacing x clamp(answers,
+8..120))` up to 300 s: after forty answered reads it is already 50 s, ours was
+30 s. FBuddy also has one policy for every route, keys without the creator, no
+Retry-After and dead "global" options: there is no per-route tuning to borrow.
+And route independence is evidenced for `/account*` only (E128); for every
+other key it was FBuddy's assumption, not ours to inherit.
+
+Changes. (1) The jitter (0-100 ms) rides on whichever deadline binds, the lane
+gap or the key spacing. (2) A limit on an ordinary key widens the whole lane
+from the first one (400 ms x 2 per unhealed limit, 8 s at most); a policy
+marked `isolated`, today only `/account*`, slows its own key first and the lane
+from its second unhealed limit, as in E130. The lane gap comes back one step
+per forgiven level and every limited key halves toward its floor with it.
+(3) Cooldown = max(Retry-After capped at 6 h, the 30/60/120/240/300 s ladder,
+1.25 s per read answered since the previous limit up to 300 s). An HTTP-date
+from a skewed clock could park a creator for years and was persisted. (4) A
+read counts as answered only after its envelope is validated; `success:false`
+inside HTTP 200 earns nothing and its code is traced (`http.refused`). (5) The
+upward probing of E130 is deleted, not disabled: it earned at most ~3 s a scan,
+most keys never exercised it, and a 34-second clean trace says nothing about a
+faster sustained pace. A key never runs faster than its policy; the controller
+keeps the limit, its 24 h memory and the quarter margin. (6) The 1 s storage
+deadline stays, but an answer that arrives late is merged in (the stricter of
+each field) instead of discarded; a failed restore cannot wedge the lane; an
+idle lane that only keeps a remembered limit no longer writes on every
+acquire; a lane saved by 2.4.3 loads with its old gap rule. (7) Pace families
+match their method. (8) Row recheck (E130) is narrowed: once, only after HTTP
+404 or a network error, not sooner than 3 s (the live 404s came in runs of two
+or three seconds), never after a 5xx (the transport already spent four
+attempts), a refusal inside 200, or a search that gave up after twenty pages
+(which cost forty requests for a short username). Five blips in a row stop the
+pass with «Fansly отвечает ошибками…» and Continue resumes it. (9) Follower
+writes stay one attempt and outside the spacing queue. `POST /group` is refused
+at once with `rate_limited` while the lane is cooling down; `POST /message` is
+never held: by then the hub holds a dispatch, and a wait that outlives the
+send deadline would leave a permanent false «не подтверждено» for a message
+that never left. A write Fansly limits counts against the lane. A refused
+write carries `{status, code}` and a body-shape trace event; its error key
+stays the ambiguous one, so send custody is unchanged. (10) Note batches wait
+out the `/account*` key off the lane, first batch included and whatever a
+limit has made of its spacing (the pacer reports when a key is next free):
+inside the FIFO a batch sitting out its 5 s held every other read, and a send
+made meanwhile took 13.5 s in the audited run.
+
+E133 review follow-up (an independent Fable review of the pull request, no
+ship blocker). A cooldown saved before the six-hour cap existed is cut to it
+on restore. A late storage answer zeroes the heal counter: reads answered
+before the penalty arrived ran at the unpenalised pace and forgive nothing
+(E128). A read that got no HTTP answer at all carries `status: 0`, so a
+network failure on the optional participant read is a blip like any other. A
+run of 5xx trips the fuse too, without rechecks. Our own refusal of
+`POST /group` is traced as `http.write-refused`, so an export cannot read it
+as a 429 Fansly sent. The reviewer also showed that a send or a generation
+started during a cooldown waits inside the lane until its own deadline
+(60 s / 180 s) and fails with a raw timeout, now that a first cooldown can be
+minutes long: the instant refusal at the entry of those actions ships with
+E134, which owns that code. The success-scaled cooldown counts reads in
+memory only, so a background restart starts it over; FBuddy's third cooldown
+term (spacing x clamp(answers)) is not taken.
+
+Not done, on purpose. The two-stage queue that would let ready keys pass a
+waiting key: it is latency work on the ban-safety core, the observed stall has
+the one-line cure above, and it does not remove a generation's own wait on the
+`/account*` key. A clock stepping backwards can still put a lane to sleep for
+the size of the step. A 404 is still not treated as a throttle: the first
+production trace had none, and `http.error-body` has yet to see one.
+Supersedes E130's jitter placement, first-limit rule, 30 s first cooldown,
+`floorMs` and learned acceleration, and its broad recheck. This reverses one
+line of the 2.4.3 changelog («Ограничение замедляет только своё»): it now
+holds for `/account*` only. Validation is synthetic: mock transport, fake
+timers, forty-eight manual mutations of these rules. Ships with E134 in one
+release.
+
+**E134 (2026-09-20).** An audit of a real 148-follower run (run e12f516f,
+@itsaribae, 2.4.3, 48 h; report and raw trace in
+`~/Documents/Codex/Logs/ari-extension-audit-2026-09-20/`)
+shows that the scan called fans «не писали» on no evidence. All 115 inbox
+searches of the run (59 at scan, 56 before send) returned nothing; every
+correct «уже писали» came from the saved proof. `check()` read a search miss
+as `groupId === null`, that as a complete history, and that as `ready` with
+«Личной переписки ещё нет». Two fans with an old personal conversation came out
+that way (KBilly212, colossal_torpedoes). On a creator with a cold cache 38 of
+152 searches missed and most of those fans had a conversation. Why the search
+misses (strong evidence, not needed for the fix): the inbox row carries
+`partnerUsername = lower(displayName || username)` as a snapshot that goes
+stale, the server `search` matches that field, and the scan searched by
+username, so it missed every fan whose display name differs (~18%). One of the
+two chats is absent even from a full enumeration of the inbox and still opens
+by link, and the listing has no total: no listing and no search can prove
+absence. `POST /group` is get-or-create by identity: in 45 of 56 sends it
+answered with a group older than the request. The last line of defence held
+(send resolves the group by `POST /group` and re-checks before the Hub
+reserve), but it held silently: the screen looked exactly like a delivery, a
+refresh brought the false `ready` back because the learned chat id lived for
+one scan, and an `uncertain` row never re-read its history through the chat id
+in its own journal. 10 of 55 history reads ~0.5 s after a send returned an
+empty page with HTTP 200. All 56 messages of the session were typed by hand;
+«Сгенерировать» was never pressed.
+
+Changes. (1) A follower row says what a `ready`/`reply` verdict rests on:
+`evidence: 'history'` (the chat was resolved and read to a confirmed end) or
+`'unverified'` (no chat found, nothing proved; verdict reason `chat-not-found`,
+`native-search-no-group` is retired). An unverified row stays workable, since
+56 of the 59 in the audit were genuine newcomers, but the window says «Чат не
+найден» in amber, not the red «Не писали», explains under the history pane that
+this is not proof, and has its own status filter. «Личной переписки ещё нет» is
+said only over a history read to its end; a chat that is known but unread says
+«Историю прочитать не удалось» and its row is `unknown`, never «чат не найден».
+(2) This amends E117's "No group is created during a scan": a chat may be
+resolved by identity, `POST /group`, one attempt and never retried, at an
+explicit human action before the send decision. The actions are the new
+«Проверить чат» button (`verify`) and «Сгенерировать», where it happens after
+the persona check and before any context is built or AI is spent; the send path
+already did it. The row is then re-checked through the real history. A fan who
+turns out to be contacted costs no generation, a fan who wrote first gets a
+draft over the real transcript. Still forbidden: `POST /group` during a scan,
+a Continue, a row selection (the window selects rows by itself), a preview or
+the background phase; a test runs a scan, a preview, a pause and a Continue
+over the real transport and sees only GETs. Nothing is sent or generated from
+an unverified row: both paths require `evidence === 'history'` after their own
+resolution, whatever the re-check returned. (3) An empty first history page is
+believed only when no answer of this scan named a last message for the chat
+(`GET /group`, the listing entry, the `POST /group` answer); otherwise the read
+is lagging and the row is `unknown`. E117 is not weakened: a negative verdict
+still needs the empty terminal page, the 30-page cap, errors and partial data
+stay `unknown`. (4) The fan → chat id mapping is an operational cache,
+`chatgoose:followers:v1:group:<creator>:<fan>`, written whenever an id passed a
+participant check and read in the row's existing `storage.get`; the personal
+proof carries the id too. Resolution order: this scan (listing, search hit,
+`POST /group`), the saved id, the send journal's id. A saved id is a lead, not
+a fact: every use passes the participant fence, and a mismatch or a 404 forgets
+it while the check fails closed. It outlives a rename and lets the read-only
+preview of an excluded fan open the real chat instead of searching. (5) A
+re-check that takes a row out of a send or a generation throws with explicit
+copy («Сообщение не отправлено: у фана уже есть личная переписка. Строка
+перенесена в «Уже писали».») instead of returning a snapshot. The window shows
+it as a banner that names the fan, keeps that fan on screen with the history
+that was found until the chatter moves on, and leaves the typed draft alone:
+never deleted, never sent, never turned into a continuation. (6) An
+`uncertain` row is read through its journal's chat id. Finding a personal
+message there is positive; not finding one changes nothing, and the retry
+stays blocked. (7) The inbox listing is used for what it already returns. A
+new client read takes the prefix of `/messaging/groups` as deep as the scan's
+period (while the last row's `lastMessageId` snowflake is newer than the
+cutoff, ten pages at most, page 0 once more for chats that jumped up
+meanwhile) and replaces the fixed top 100; malformed `data` throws there. At
+scan time an `aggregationData.groups[]` entry that lists exactly the creator
+and the fan is the participant check and spares `GET /group`; a thin entry
+falls back to it, and every human action still reads `GET /group`. A chat's
+`lastMessage` by the creator that is personal under the history path's own
+rule, with fresh welcome definitions, is a positive verdict without a history
+read at scan time, and at any time it outvotes a history that does not show
+it yet; it is never negative evidence. `inbox.page` and `group.search-page`
+trace `count`, `groups`, `withUsers`. (8) The text search leaves every verdict
+path. After the checks, outside `scanning`, a background phase searches the
+still-unverified rows one request at a time by `displayName || username`,
+accepts a hit only by `partnerAccountId`, and checks it like a listed chat; a
+miss or a failed search changes nothing. It ends after 20 searches without a
+hit (on some creators the search never finds anybody), at 150 per scan, on
+Pause, close, a cooling lane or a rate limit, and gives way at once to a human
+action on the same fan. «Проверено N из N» is shown as soon as the checks are
+done and the hints are reported beside it. A matching search row with an
+unusable chat id throws instead of reading as a miss. (9) The spenders board
+resolves a chat by `displayName || username` too, and its hint says that the
+search returned nothing, not that no conversation exists.
+
+Deliberate deviations from the brief. The blocked-send error is a plain
+`Error`, not a `ChatGooseError`: `followers-runtime` and `errorText` replace a
+`ChatGooseError`'s message with its registry copy, so explicit copy survives
+only on the plain errors this file already uses. A failed re-check of a row
+whose chat has just become known turns the row `unknown` and offers Continue
+(which needs no second `POST /group`), rather than leaving «чат не найден» on a
+chat that was found. The page-0 re-read is skipped when only one page was
+read, because nothing could have jumped over it.
+
+Not verified live: whether `GET /group` and `POST /group` always carry
+`lastMessage` for a chat with messages (an absent field is read as "no last
+message", which is today's behaviour); how often the listing entry is thin;
+whether the inbox order is strictly by `lastMessageId`; how many fans the
+display-name search finds; what Fansly makes of one `POST /group` per
+«Проверить чат». The scan issues far fewer reads than before (one listing in
+place of a search per unlisted fan), so E130's pace figures no longer describe
+it. Validation is synthetic: mocked transport, fake timers, jsdom, and manual
+mutations of each new rule. No settings or schema migration; no version bump.
+
+E134 integration follow-up (2026-09-20). A design audit that ran while this was
+being built asked for a simpler shape; the implementer never received it (the
+amendments reached it inside a tool result and it rightly ignored them), so
+they were weighed against the finished code instead. Kept as built: the
+budgeted background search and the `evidence` field, both already pinned by
+tests and mutations. Changed on the merged branch: the search hint reads one
+page only (a common display name would otherwise page twenty requests for one
+fan, and a miss proves nothing either way); the inbox prefix stops as soon as
+every wanted fan is matched; a listing `lastMessage` is a verdict only when it
+carries `type`, `correlationId` and `inReplyTo` (Fansly's key sets drift, and an
+absent `correlationId` would turn a mass DM into a personal one and hide a fan
+as already greeted); verify, generate and send refuse at once while the lane is
+in a cooldown, before anything is reserved (E133 made a first cooldown minutes
+long, and an action that joined the lane burned its own 60 s / 180 s into a
+bare timeout); a refused `POST /group` shows Fansly's own code («Fansly отказал
+в открытии чата (код N)…») and guesses nothing about its meaning; the window no
+longer loads the chat it has just written to (two reads a send); «Чат не
+найден» is a neutral colour, because on some creators it is the normal state of
+almost every newcomer. Not taken: confirming participants once per send
+operation instead of three times (two fewer reads a send, sends being most of
+a session's Fansly traffic). It is sound on paper and it is the send path, so
+it waits for the owner's decision and a live trace.
+
+**E135 (2026-09-20).** The owner authorizes releasing the pacer safety patch
+(E133) and the chat-identity fix (E134) as 2.4.4, in one release as asked
+(«релизы не дробить»). Production Core moved to contract hash `42c705b8…` the
+same day, so the release rides on the SDK re-vendored from Core `301a127a`
+(E132, merged first; its own condition — production serving that hash — was
+checked against `/api/v1/health` before the merge). That re-vendor took the
+number E132 on main first; this branch's decisions were renumbered to E133 and
+E134 in the log, the code comments and the tests alike. Both changes went
+through one pull request: the pacer branch was merged into the chat-identity
+branch and its own pull request closed as superseded.
+
+Validation is synthetic throughout: mock transport, fake timers, jsdom, and
+about 150 manual mutations across the two changes, all killed but one that is
+unreachable behind a second guard. Nothing here was measured against Fansly.
+The first production scans are that measurement, and the trace now answers
+each open question by itself: `inbox.page` / `group.search-page` count how
+often a listing entry is thin, `group.last-message` whether `POST /group` and
+`GET /group` carry a last message, `background.result` how many chats the
+display-name search finds, `http.cooldown` / `http.refused` / `http.error-body`
+what Fansly objects to and how. This reverses one line of the 2.4.3 changelog
+(«Ограничение замедляет только своё» now holds for profile reads only); the
+2.4.4 changelog says so. Still open and the owner's to decide: confirming
+participants once per send operation instead of three times, and a truthful
+status for fans whose DMs are restricted (needs one real `GET /group` capture
+of such a chat). Rollback is a feed release; neither change migrates storage,
+and the new operational keys (`chatgoose:fansly-pacer:v1:*`,
+`chatgoose:followers:v1:group:*`) are ignored by older builds.

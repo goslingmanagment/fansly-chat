@@ -50,6 +50,7 @@ import type {
   FanslyAccountMediaOrder,
   FanslyAccountResponse,
   FanslyMediaOrderHistoryResponse,
+  FanslyGroup,
   FanslyMessagingGroupsResponse,
   FanslyMessagePageResponse,
   FanslyMessage,
@@ -63,12 +64,15 @@ import type {
   SubscriptionLookupMode,
 } from '../shared/types.js';
 import type { SessionStore } from './session-store.js';
+import { followedAtFromId } from '../shared/followers.js';
 
 const MESSAGING_GROUPS_PAGE_SIZE = 100;
 // Bound the messaging-groups walk so a creator with tens of thousands of
 // conversations can't burn the whole operation budget here before the
 // subscribers fallback runs.
 const MESSAGING_GROUPS_MAX_PAGES = 20;
+// A follower scan reads the inbox only as deep as its own period (E134).
+const INBOX_PREFIX_MAX_PAGES = 10;
 const SUBSCRIBERS_PAGE_SIZE = 100;
 const SUBSCRIPTION_CACHE_TTL_MS = 5 * 60 * 1000;
 const ORDER_TYPE_SINGLE = 1;
@@ -258,6 +262,37 @@ function uniquePurchaseRequests(requests: PpvAttachmentRequest[]): PpvAttachment
   return unique;
 }
 
+/** One fan's chat as an inbox listing or search page showed it. `verified`:
+ * the page's own group entry lists exactly the creator and this fan, the same
+ * participant fence `GET /group` would repeat (E134). */
+export interface InboxChat {
+  fanId: string;
+  groupId: string;
+  verified: boolean;
+  lastMessageId: string | null;
+  lastMessage: FanslyMessage | null;
+}
+
+/** Malformed `data` is an unread page, never an empty inbox. */
+function readInboxPage(response: FanslyMessagingGroupsResponse, creatorId: string): { chats: InboxChat[]; count: number; groups: number; withUsers: number; tail: string | null } {
+  if (!Array.isArray(response.data)) throw new ChatGooseError('fansly_server_error');
+  const groups = (Array.isArray(response.aggregationData?.groups) ? response.aggregationData.groups : []).filter((group) => typeof group?.id === 'string');
+  const byId = new Map(groups.map((group): [string, FanslyGroup] => [group.id!, group]));
+  const chats: InboxChat[] = [];
+  const fans = new Set<string>();
+  for (const entry of response.data) {
+    const fanId = entry?.partnerAccountId;
+    if (!fanId || fans.has(fanId)) continue;
+    fans.add(fanId);
+    const group = byId.get(entry.groupId);
+    // A thin entry (one user, a stranger, none) leaves the check to `GET /group`.
+    const users = Array.isArray(group?.users) ? group.users.map((user) => user?.userId) : [];
+    const verified = fanId !== creatorId && users.length === 2 && users.includes(creatorId) && users.includes(fanId);
+    chats.push({ fanId, groupId: entry.groupId, verified, lastMessageId: entry.lastMessageId || group?.lastMessage?.id || null, lastMessage: group?.lastMessage ?? null });
+  }
+  return { chats, count: response.data.length, groups: groups.length, withUsers: chats.filter((chat) => chat.verified).length, tail: response.data.at(-1)?.lastMessageId ?? null };
+}
+
 function normalizeSubscriberSubscription(
   record: FanslySubscriberSubscriptionRecord,
   source: FanSubscriptionSource,
@@ -305,6 +340,11 @@ export class FanslyClient {
 
   followerReadStatus(session: SessionTemplate): { cooldownUntil: number; intervalMs: number } | undefined {
     return this.followerReads.status(session.resolvedAccountId ?? session.accountId);
+  }
+
+  /** When the pace key of this read is next free (0 = now). */
+  followerReadReadyAt(session: SessionTemplate, pathname: string): number {
+    return this.followerReads.readyAt(session.resolvedAccountId ?? session.accountId, 'GET', pathname);
   }
 
   constructor(private readonly sessionStore: SessionStore, pacerStorage?: PacerStorage) {
@@ -422,7 +462,6 @@ export class FanslyClient {
           credentials: 'omit',
         });
         attemptTrace?.event('http.response', { status: response.status });
-        if (response.ok) permit?.served();
 
         if (response.status === 401 || response.status === 403) {
           this.sessionStore.markDisconnected(session.accountId);
@@ -471,14 +510,21 @@ export class FanslyClient {
           throw new ChatGooseError('fansly_server_error', undefined, details);
         }
 
-        const data = (await response.json()) as { success: boolean; response?: T; error?: string };
+        const data = (await response.json()) as { success: boolean; response?: T; error?: unknown };
         if (!data.success || data.response === undefined) {
+          // A refusal inside HTTP 200 is not an answer: it earns the lane
+          // nothing, and its code is the only clue to what Fansly objected to.
+          const code = (data.error as { code?: unknown } | null | undefined)?.code;
+          attemptTrace?.event('http.refused', { status: response.status, code: typeof code === 'number' || typeof code === 'string' ? String(code).slice(0, 40) : null });
+          const details = { status: response.status, refused: true };
           if (optional) {
-            throw new ChatGooseError('unknown_error');
+            throw new ChatGooseError('unknown_error', undefined, details);
           }
-          throw new ChatGooseError('fansly_server_error');
+          throw new ChatGooseError('fansly_server_error', undefined, details);
         }
 
+        // Only a validated envelope counts as Fansly answering this read (E133).
+        permit?.served();
         attemptTrace?.end({ status: response.status, outcome: 'success' });
         return data.response;
       } catch (error) {
@@ -489,7 +535,9 @@ export class FanslyClient {
         if (error instanceof DOMException && error.name === 'AbortError') {
           throw error;
         }
-        throw new ChatGooseError(optional ? 'unknown_error' : 'network_error');
+        // `status: 0` = no HTTP answer at all: an optional read keeps its own
+        // error key, and the row recheck still knows it was the network.
+        throw optional ? new ChatGooseError('unknown_error', undefined, { status: 0 }) : new ChatGooseError('network_error');
       } finally {
         clearTimeout(timeout);
         permit?.release();
@@ -502,8 +550,8 @@ export class FanslyClient {
     session: SessionTemplate,
     signal: AbortSignal,
     trace?: TraceScope,
-  ): Promise<{ users?: Array<{ userId: string }> }> {
-    return this.fetchEnvelope<{ users?: Array<{ userId: string }> }>(
+  ): Promise<FanslyGroup> {
+    return this.fetchEnvelope<FanslyGroup>(
       new URL(`https://apiv3.fansly.com/api/v1/group/${groupId}/`),
       session,
       'group',
@@ -529,24 +577,56 @@ export class FanslyClient {
     return this.fetchEnvelope<unknown>(new URL('https://apiv3.fansly.com/api/v1/message/automated'), session, 'message', signal, false, 'default', trace);
   }
 
-  /** Complete native inbox search; malformed or bounded results are not absence. */
-  async findFollowerGroup(fanId: string, username: string, session: SessionTemplate, signal: AbortSignal, trace?: TraceScope): Promise<string | null> {
-    if (!username.trim()) throw new ChatGooseError('fansly_server_error');
-    const seen = new Set<string>();
-    for (let offset = 0; offset < 2000; offset += 100) {
-      const url = new URL('https://apiv3.fansly.com/api/v1/messaging/groups');
-      for (const [key, value] of Object.entries({ sortOrder: '1', flags: '0', subscriptionTierId: '', listIds: '', search: username, limit: '100', offset: String(offset) })) url.searchParams.set(key, value);
-      const response = await this.fetchEnvelope<FanslyMessagingGroupsResponse>(url, session, 'messagingGroups', signal, false, 'default', trace);
-      if (!Array.isArray(response.data)) throw new ChatGooseError('fansly_server_error');
-      const match = response.data.find((entry) => entry.partnerAccountId === fanId);
-      trace?.event('group.search-page', { offset, count: response.data.length, match: match?.groupId ?? null });
-      if (match?.groupId && /^\d{1,24}$/.test(match.groupId)) return match.groupId;
-      if (response.data.length < 100) return null;
-      const cursor = response.data.at(-1)?.groupId;
-      if (!cursor || seen.has(cursor)) break;
-      seen.add(cursor);
+  private inboxUrl(search: string, offset: number): URL {
+    const url = new URL('https://apiv3.fansly.com/api/v1/messaging/groups');
+    for (const [key, value] of Object.entries({ sortOrder: '1', flags: '0', subscriptionTierId: '', listIds: '', search, limit: String(MESSAGING_GROUPS_PAGE_SIZE), offset: String(offset) })) url.searchParams.set(key, value);
+    return url;
+  }
+
+  /** The inbox as deep as a follower scan's period (E134): pages ordered by
+   * last activity, read while the last row is still newer than the cutoff, then
+   * page 0 once more for chats that jumped to the top meanwhile. Only the
+   * wanted fans come back. The listing has no total and hides some chats, so
+   * absence from this prefix proves nothing. */
+  async listInboxPrefix(creatorId: string, cutoffMs: number, fanIds: ReadonlySet<string>, session: SessionTemplate, signal: AbortSignal, trace?: TraceScope): Promise<InboxChat[]> {
+    const found = new Map<string, InboxChat>();
+    const read = async (offset: number) => {
+      const page = readInboxPage(await this.fetchEnvelope<FanslyMessagingGroupsResponse>(this.inboxUrl('', offset), session, 'messagingGroups', signal, false, 'default', trace), creatorId);
+      trace?.event('inbox.page', { offset, count: page.count, groups: page.groups, withUsers: page.withUsers });
+      for (const chat of page.chats) if (fanIds.has(chat.fanId) && /^\d{1,24}$/.test(chat.groupId)) found.set(chat.fanId, chat);
+      return page;
+    };
+    let pages = 0;
+    while (pages < INBOX_PREFIX_MAX_PAGES) {
+      const page = await read(pages * MESSAGING_GROUPS_PAGE_SIZE);
+      pages += 1;
+      // An undated last row cannot show that the period continues below it.
+      let newer = false;
+      try { newer = page.tail !== null && followedAtFromId(page.tail) >= cutoffMs; } catch { /* Not a snowflake. */ }
+      const matched = found.size >= fanIds.size;
+      if (matched || page.count < MESSAGING_GROUPS_PAGE_SIZE || !newer) {
+        trace?.event('inbox.stop', { pages, reason: matched ? 'all-matched' : page.count < MESSAGING_GROUPS_PAGE_SIZE ? 'short-page' : 'period-boundary' });
+        break;
+      }
     }
-    throw new ChatGooseError('fansly_server_error');
+    if (pages > 1 && found.size < fanIds.size) await read(0);
+    return [...found.values()];
+  }
+
+  /** Inbox text search: a positive-only hint (E134). The server matches the
+   * row's `partnerUsername` snapshot of `displayName || username`, so a miss
+   * says nothing about the chat; malformed or bounded results are not a miss. */
+  async findFollowerGroup(fanId: string, term: string, creatorId: string, session: SessionTemplate, signal: AbortSignal, trace?: TraceScope): Promise<InboxChat | null> {
+    if (!term.trim()) throw new ChatGooseError('fansly_server_error');
+    // One page. A miss proves nothing either way, so paging a common name
+    // («Dan») through twenty requests for one fan bought no certainty.
+    const page = readInboxPage(await this.fetchEnvelope<FanslyMessagingGroupsResponse>(this.inboxUrl(term, 0), session, 'messagingGroups', signal, false, 'default', trace), creatorId);
+    const match = page.chats.find((chat) => chat.fanId === fanId);
+    trace?.event('group.search-page', { offset: 0, count: page.count, groups: page.groups, withUsers: page.withUsers, match: match?.groupId ?? null });
+    if (!match) return null;
+    // The chat exists; an id we cannot use must not read as «not found».
+    if (!/^\d{1,24}$/.test(match.groupId)) throw new ChatGooseError('fansly_server_error');
+    return match;
   }
 
   /** Writes never enter fetchEnvelope's read retry loop. Any failure after
@@ -562,6 +642,17 @@ export class FanslyClient {
     const check = session.routeChecks[path] ?? session.latestCheck;
     if (check) headers.set('fansly-client-check', check);
     const requestUrl = withNgswBypass(new URL(`https://apiv3.fansly.com/api/v1/${path}`));
+    // A write stays one attempt and outside the read spacing. Opening a chat
+    // is refused at once while Fansly has the creator's lane in a cooldown;
+    // a message is never held here: by then the hub holds a dispatch, and a
+    // wait that outlives the send deadline would leave a false «не
+    // подтверждено» for a message that never left (E133).
+    const creatorId = session.resolvedAccountId ?? session.accountId;
+    const paced = this.followerSessions.has(session);
+    const coolingMs = paced && path === 'group' ? (this.followerReads.status(creatorId)?.cooldownUntil ?? 0) - Date.now() : 0;
+    // Traced as our own refusal: in an export it must not read as a 429 Fansly sent.
+    if (coolingMs > 0) trace?.event('http.write-refused', { method: 'POST', path: requestUrl.pathname, reason: 'lane-cooling-down', coolingMs });
+    if (coolingMs > 0) throw new ChatGooseError('rate_limited', { details: { status: 429, retryAfterMs: coolingMs, retryAtMs: Date.now() + coolingMs }, retryAfterMs: coolingMs, retryAtMs: Date.now() + coolingMs });
     const attemptTrace = trace?.start('http', { method: 'POST', path: requestUrl.pathname, query: requestUrl.search, attempt: 1, retry: false, timeoutMs: FANSLY_REQUEST_TIMEOUT_MS });
     try {
       const response = await fetch(requestUrl, {
@@ -569,21 +660,36 @@ export class FanslyClient {
         signal: AbortSignal.any([signal, AbortSignal.timeout(FANSLY_REQUEST_TIMEOUT_MS)]),
       });
       attemptTrace?.event('http.response', { status: response.status });
-      if (!response.ok) throw new ChatGooseError('fansly_server_error');
-      const envelope = await response.json() as { success?: boolean; response?: T };
-      if (envelope.success !== true || !envelope.response) throw new ChatGooseError('fansly_server_error');
+      if (!response.ok) {
+        if (paced && response.status === 429) this.followerReads.refused(creatorId, 'POST', requestUrl.pathname, parseRetryAfterMs(response.headers.get('retry-after')), trace);
+        // What the refusal is, never what it says; the error key stays the
+        // ambiguous one so send custody keeps treating it as unconfirmed.
+        const shape = bodyShape(response, await readResponseSnippet(response));
+        attemptTrace?.event('http.error-body', shape);
+        throw new ChatGooseError('fansly_server_error', undefined, { status: response.status, ...(typeof shape.code === 'string' ? { code: shape.code } : {}) });
+      }
+      const envelope = await response.json() as { success?: boolean; response?: T; error?: unknown };
+      if (envelope.success !== true || !envelope.response) {
+        const code = (envelope.error as { code?: unknown } | null | undefined)?.code;
+        const known = typeof code === 'number' || typeof code === 'string' ? String(code).slice(0, 40) : undefined;
+        attemptTrace?.event('http.refused', { status: response.status, code: known ?? null });
+        throw new ChatGooseError('fansly_server_error', undefined, { status: response.status, refused: true, ...(known ? { code: known } : {}) });
+      }
       attemptTrace?.end({ status: response.status, outcome: 'success' });
       return envelope.response;
     } catch (error) { attemptTrace?.fail(error); throw error; }
   }
 
-  async createFollowerGroup(fanId: string, creatorId: string, session: SessionTemplate, signal: AbortSignal, trace?: TraceScope): Promise<string> {
-    const group = await this.postOnce<{ id?: string; users?: Array<{ userId: string }> }>('group', {
+  /** `POST /group` is get-or-create by identity: it answers with the fan's
+   * existing chat, however old, and only otherwise with a new empty one. */
+  async createFollowerGroup(fanId: string, creatorId: string, session: SessionTemplate, signal: AbortSignal, trace?: TraceScope): Promise<{ id: string; lastMessage: FanslyMessage | null }> {
+    const group = await this.postOnce<FanslyGroup>('group', {
       users: [{ userId: fanId, permissionFlags: 0 }, { userId: creatorId, permissionFlags: 0 }],
       recipients: [], lastMessage: null, userSettings: null, type: 1,
     }, session, signal, trace);
     if (!group.id || !/^\d{1,24}$/.test(group.id) || group.users?.length !== 2 || !group.users.some((v) => v.userId === fanId) || !group.users.some((v) => v.userId === creatorId)) throw new ChatGooseError('fansly_server_error');
-    return group.id;
+    trace?.event('group.create-result', { groupId: group.id, lastMessageId: group.lastMessage?.id ?? null });
+    return { id: group.id, lastMessage: group.lastMessage ?? null };
   }
 
   async sendFollowerMessage(groupId: string, text: string, creatorId: string, session: SessionTemplate, signal: AbortSignal, trace?: TraceScope): Promise<string> {
@@ -914,7 +1020,9 @@ export class FanslyClient {
    * most-recent conversations: ONE bounded inbox-search request — the same
    * /messaging/groups endpoint (and its `search` param) the page's own inbox
    * search box issues, so no new Fansly egress class (E23) — matched by
-   * partnerAccountId. Null = the search returned no conversation for the fan.
+   * partnerAccountId. The server matches the row's `partnerUsername` snapshot
+   * of `displayName || username`, so callers search by that term (E134). Null =
+   * the search returned no row for the fan; the conversation may still exist.
    */
   async findGroupIdForFan(
     fanAccountId: string,

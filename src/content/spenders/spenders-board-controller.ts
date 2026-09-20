@@ -128,7 +128,7 @@ function entryName(entry: SpenderListEntry): string {
 
 /** Whether the lazy inbox search has anything to search BY. Mirrors the term
  * the resolver builds in `runtime-api.ts` (`resolveFanChat`:
- * `username?.trim() || displayName?.trim()`) so the board's decision to search
+ * `displayName?.trim() || username?.trim()`) so the board's decision to search
  * and the resolver's ability to search cannot drift apart. `customName` is
  * deliberately not part of it: the chatter's private label never travels to the
  * platform (E25), and the request carries only these two fields. */
@@ -1062,8 +1062,9 @@ export class SpendersBoardController {
         this.setChatState(
           entry.fanAccountId,
           'not found',
+          // A miss of the text search, not proof that no chat exists (E134).
           response.ok
-            ? 'The inbox search found no conversation with this fan.'
+            ? 'The inbox search returned nothing for this fan. A conversation may still exist: open it from Fansly.'
             : formatUserErrorPlainText(response.error),
         );
       })

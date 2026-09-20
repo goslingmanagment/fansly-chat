@@ -2280,6 +2280,27 @@ describe('runtime-api resolveFanChat', () => {
     );
   });
 
+  it('searches by the display name when the fan has one: that is what the inbox row is matched on (E134)', async () => {
+    const fanslyClient = {
+      getAuthenticatedAccount: vi.fn(async () => undefined),
+      findGroupIdForFan: vi.fn(async () => 'group-42'),
+    };
+    const { sessionStore } = await installRuntimeApiHarness(fanslyClient);
+    sessionStore.registerCapture(7, makeCapture('creator-1'));
+
+    await onMessageListener?.(
+      { type: 'resolveFanChat', fanAccountId: 'fan-9', username: 'ghost', displayName: ' Ghost Fan ' },
+      { tab: { id: 7 } },
+    );
+
+    expect(fanslyClient.findGroupIdForFan).toHaveBeenCalledWith(
+      'fan-9',
+      'Ghost Fan',
+      expect.anything(),
+      expect.any(AbortSignal),
+    );
+  });
+
   it('falls back to the display name and reports an honest not-found', async () => {
     const fanslyClient = {
       getAuthenticatedAccount: vi.fn(async () => undefined),
