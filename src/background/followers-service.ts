@@ -35,7 +35,7 @@ interface Scan {
   savedLeads: Set<string>;
   /** What an inbox page or `POST /group` showed for a fan's chat in this scan. */
   seen: Map<string, InboxChat>;
-  /** E133 background hints: the budget is per scan, across Continue passes. */
+  /** E134 background hints: the budget is per scan, across Continue passes. */
   search: { done: number; hits: number; tried: Set<string>; run?: Promise<void>; row?: { fanId: string; abort: () => void; done: Promise<void> } };
   completeHistories: Set<string>;
   welcome: Set<string>;
@@ -62,12 +62,12 @@ function savedGroupId(value: unknown): string | undefined {
   const id = (value as { groupId?: unknown } | null | undefined)?.groupId;
   return typeof id === 'string' && /^\d{1,24}$/.test(id) ? id : undefined;
 }
-// E133: the inbox text search is a budgeted hint. On some creators it never
+// E134: the inbox text search is a budgeted hint. On some creators it never
 // finds anybody, so twenty empty answers end it; 150 bounds any scan.
 const SEARCH_PROBE = 20;
 const SEARCH_CAP = 150;
 /** A re-check that takes a row out of the queue has to say so: a send that
- * stops silently looks exactly like a send that went through (E133). */
+ * stops silently looks exactly like a send that went through (E134). */
 function blockedText(row: FollowerRow, action: 'send' | 'generate'): string {
   const lead = action === 'send' ? 'Сообщение не отправлено' : 'Черновик не создан';
   if (row.status === 'contacted') return `${lead}: у фана уже есть личная переписка. Строка перенесена в «Уже писали».`;
@@ -325,7 +325,7 @@ export class FollowersService {
     // Most new followers with a welcome sit in the inbox prefix of the scan's
     // own period: one listing resolves them together. It is positive only.
     // Absence from it is NEVER evidence of an empty history; a fan it misses
-    // is resolved by identity at a human action (E133).
+    // is resolved by identity at a human action (E134).
     if (scan.snapshot.rows.length) {
       try {
         const chats = await traced(scan.trace, 'inbox.index', (scope) => this.options.fansly.listInboxPrefix(scan.snapshot.creatorId, cutoff, fans, scan.session, signal, scope));
@@ -407,7 +407,7 @@ export class FollowersService {
     // Fansly answers some reads 404 for a second or two on routes that work
     // (live trace, E130). Such a row goes to the back of the queue once,
     // through the same paced lane, before it is left for a human Continue.
-    // Only a blip is asked again (E132): a 5xx already spent the transport's
+    // Only a blip is asked again (E133): a 5xx already spent the transport's
     // own retries, and a search that gave up after twenty pages will give up
     // again. A run of blips is an incident, not bad luck: the pass stops.
     const retryAt = new Map<string, number>();
@@ -486,7 +486,7 @@ export class FollowersService {
       const batch = pending.slice(offset, offset + 100);
       // The lane is one FIFO: a batch sitting out the /account gap inside it
       // held every other read, and a send made meanwhile took 13 s (live
-      // trace, E132). The gap, whatever a limit has made of it, is waited out
+      // trace, E133). The gap, whatever a limit has made of it, is waited out
       // here, off the lane.
       const gapMs = this.options.fansly.followerReadReadyAt(scan.session, '/api/v1/account') - Date.now();
       if (gapMs > 0) {
@@ -566,7 +566,7 @@ export class FollowersService {
     return group;
   }
 
-  /** `POST /group` answers with the fan's existing chat, however old (E133).
+  /** `POST /group` answers with the fan's existing chat, however old (E134).
    * One attempt, never retried. The caller re-checks the row before anything
    * is decided on it. */
   private async resolveGroup(scan: Scan, fanId: string, signal: AbortSignal, scope?: TraceScope): Promise<string> {
@@ -585,7 +585,7 @@ export class FollowersService {
     return created.id;
   }
 
-  /** E133: a row nobody found a chat for is resolved by identity, only at an
+  /** E134: a row nobody found a chat for is resolved by identity, only at an
    * explicit human action (verify or generate) and never during a scan. */
   private async resolveByIdentity(scan: Scan, row: FollowerRow, signal: AbortSignal, scope?: TraceScope): Promise<void> {
     if (row.status !== 'ready' || row.evidence === 'history') return;
@@ -593,7 +593,7 @@ export class FollowersService {
     await this.check(scan, row, signal, scope, 'after-group-create');
   }
 
-  /** A cooldown can last minutes (E132). A human action that joined the lane
+  /** A cooldown can last minutes (E133). A human action that joined the lane
    * during one would sit out its own deadline and fail with a bare timeout, so
    * it is refused at once with the wait, before anything is reserved. */
   private assertNotCooling(scan: Scan): void {
@@ -655,7 +655,7 @@ export class FollowersService {
         scope?.event('conversation.reuse', { count: messages.length, hasMore });
       } else {
         const signal = scan.controller.signal;
-        // The check left the saved chat id here. A proof older than E133 has
+        // The check left the saved chat id here. A proof older than E134 has
         // none, and only then does the preview fall back to the text search.
         const groupId = scan.groups.get(fanId) ?? (await traced(scope, 'group.search', (request) => this.options.fansly.findFollowerGroup(fanId, this.searchTerm(scan, row), scan.snapshot.creatorId, scan.session, signal, request)))?.groupId ?? null;
         this.assertCurrent(scan);
@@ -698,7 +698,7 @@ export class FollowersService {
     const attempt = saved[attemptKey] as { state?: string } | undefined;
     const savedGroup = savedGroupId(saved[groupKey]);
     // A chat id from storage is a lead, never a fact: it outlives a rename and
-    // a search miss, and every use passes the participant fence again (E133).
+    // a search miss, and every use passes the participant fence again (E134).
     const lead = (id: string | undefined) => { if (id && !scan.groups.has(row.id)) { scan.groups.set(row.id, id); scan.savedLeads.add(row.id); } };
     scope?.event('custody.local-read', { state: attempt?.state ?? 'absent' });
     if (attempt?.state === 'sent') { lead(savedGroup ?? savedGroupId(attempt)); verdict('sent', 'confirmed-local-send'); return; }
@@ -719,7 +719,7 @@ export class FollowersService {
       scan.completeHistories.delete(row.id);
       row.proof = undefined; row.conversation = undefined;
     }
-    // Resolution order (E133): this scan's listing, search hit or POST /group,
+    // Resolution order (E134): this scan's listing, search hit or POST /group,
     // then the saved mapping, then the send journal. No text search: a miss
     // there was never absence, and a verdict must not wait on one.
     const source = scan.groups.has(row.id) ? (scan.savedLeads.has(row.id) ? 'saved' : 'scan') : savedGroup ? 'saved' : savedGroupId(attempt) ? 'journal' : 'none';
@@ -819,7 +819,7 @@ export class FollowersService {
     row.messages = displayMessages;
     if (personalFound) { verdict('contacted', 'live-personal-proof'); return; }
     if (attempt && attempt.state !== 'aborted') { verdict('uncertain', 'unconfirmed-local-custody'); row.detail = 'Результат прошлой отправки не подтверждён. Повтор заблокирован; обновление проверит историю.'; return; }
-    // No chat found proves nothing (E133): the listing hides some chats and
+    // No chat found proves nothing (E134): the listing hides some chats and
     // has no total. The row stays workable, and says what it rests on.
     if (!groupId) { verdict('ready', 'chat-not-found', 'unverified'); row.detail = undefined; return; }
     if (!complete) {
@@ -831,7 +831,7 @@ export class FollowersService {
     row.detail = undefined;
   }
 
-  /** «Проверить чат» (E133): the explicit human action that resolves an
+  /** «Проверить чат» (E134): the explicit human action that resolves an
    * unverified row by identity. It spends no generation and sends nothing. */
   async verify(tabId: number, scanId: string, fanId: string): Promise<FollowersSnapshot> {
     const scan = this.get(tabId, scanId);
@@ -875,7 +875,7 @@ export class FollowersService {
       const persona = findActivePersona(state.personaCatalog, personaKey);
       scope?.event('generation.persona', { mapped: Boolean(persona), personaKey: persona?.key, definitionId: persona?.definitionId });
       if (!persona) throw new ChatGooseError('no_mapping');
-      // E133: a draft is never written over a chat nobody looked for. The row
+      // E134: a draft is never written over a chat nobody looked for. The row
       // is resolved by identity before any context is built or AI is spent; an
       // old conversation stops here, a fan's own message becomes the transcript.
       await this.resolveByIdentity(scan, row, signal, scope);
@@ -981,7 +981,7 @@ export class FollowersService {
       const signal = AbortSignal.timeout(60_000);
       await this.takeOver(scan, fanId);
       await this.check(scan, row, signal, scope, 'before-send');
-      // A re-check that ends the send is an error the chatter sees (E133), not
+      // A re-check that ends the send is an error the chatter sees (E134), not
       // a snapshot that looks like a delivery. The draft stays where it is.
       if (!ready(row)) throw new Error(blockedText(row, 'send'));
       assertReviewed();
@@ -1065,7 +1065,7 @@ export class FollowersService {
     } finally { this.locks.delete(lock); this.offerContinue(scan); }
   }
 
-  /** E133: the inbox text search is an optional, budgeted, positive-only hint.
+  /** E134: the inbox text search is an optional, budgeted, positive-only hint.
    * It follows the verdicts and never reopens them: a hit is checked like any
    * listed chat, a miss changes nothing. One request at a time, each awaited,
    * so a human click never queues behind more than one of them. */

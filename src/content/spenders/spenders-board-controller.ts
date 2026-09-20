@@ -1062,7 +1062,7 @@ export class SpendersBoardController {
         this.setChatState(
           entry.fanAccountId,
           'not found',
-          // A miss of the text search, not proof that no chat exists (E133).
+          // A miss of the text search, not proof that no chat exists (E134).
           response.ok
             ? 'The inbox search returned nothing for this fan. A conversation may still exist: open it from Fansly.'
             : formatUserErrorPlainText(response.error),

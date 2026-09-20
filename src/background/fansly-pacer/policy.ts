@@ -7,7 +7,7 @@ export interface PacePolicy {
   /** Spacing never grows past this, however often the key is limited. */
   ceilMs: number;
   /** Measured to be limited on its own: its first limit slows only this key,
-   * not the lane. Without that evidence one limit slows everything (E132). */
+   * not the lane. Without that evidence one limit slows everything (E133). */
   isolated?: boolean;
 }
 

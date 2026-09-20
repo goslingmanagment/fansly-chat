@@ -322,7 +322,7 @@ describe('followers scan and one-attempt send', () => {
     expect(naming.rows).toHaveLength(146);
     expect(naming.rows.every((row) => row.displayName === `fan${row.id}`)).toBe(true);
     expect(times.some((entry) => entry.ids)).toBe(false);
-    // Without a search per row the scan is over within the minute (E133).
+    // Without a search per row the scan is over within the minute (E134).
     await vi.advanceTimersByTimeAsync(60_000);
     const final = h.service.state(7, first.scanId);
     expect(final.scanning).toBe(false); expect(final.canContinue).toBe(false); expect(final.error).toBeUndefined();
@@ -332,14 +332,14 @@ describe('followers scan and one-attempt send', () => {
     const pages = times.filter((entry) => entry.path.endsWith('/followersnew'));
     expect(pages[1]!.at - pages[0]!.at).toBeGreaterThanOrEqual(5000);
     // One limit, on the isolated /account family: the lane gap stays at its
-    // base (E130). The cooldown is FBuddy-grade (E132): 1.25 s for every read
+    // base (E130). The cooldown is FBuddy-grade (E133): 1.25 s for every read
     // Fansly answered since the previous limit, here well past the 30 s step.
     const answered = times.filter((entry) => entry.status === 200).length;
     expect(final.pacing).toEqual({ cooldownUntil: times.at(-1)!.at + Math.max(30_000, Math.min(300_000, answered * 1250)), intervalMs: 400 });
     const report = h.service.traces.get(first.scanId)!.read();
     expect(report.events).toContainEqual(expect.objectContaining({ name: 'notes.skipped', data: { reason: 'rate_limited', remaining: 146 } }));
     expect(report.events).toContainEqual(expect.objectContaining({ name: 'http.cooldown', data: expect.objectContaining({ route: 'GET /account*', spacingMs: 10_000, intervalMs: 400 }) }));
-    // E133: no verdict waits on a text search any more. The scan read the
+    // E134: no verdict waits on a text search any more. The scan read the
     // inbox once, nobody was listed, and every row says so instead of «не писали».
     expect(final.rows.every((row) => row.evidence === 'unverified')).toBe(true);
     expect(times.filter((entry) => entry.path.endsWith('/messaging/groups'))).toHaveLength(1);
@@ -466,9 +466,9 @@ describe('followers scan and one-attempt send', () => {
     const history = times.filter((entry) => entry.path === '/api/v1/message');
     expect(history[2]!.at - history[1]!.at).toBeGreaterThanOrEqual(1000);
     for (let i = 1; i < history.length; i++) expect(history[i]!.at - history[i - 1]!.at).toBeGreaterThanOrEqual(625);
-    // The limit was on an ordinary key, so the whole lane widened with it (E132).
+    // The limit was on an ordinary key, so the whole lane widened with it (E133).
     expect(times[limitIndex + 2]!.at - times[limitIndex + 1]!.at).toBeGreaterThanOrEqual(800);
-    // One listing, then a background hint per fan it missed (E133). Hints that
+    // One listing, then a background hint per fan it missed (E134). Hints that
     // alternate with chat reads never ran at their own spacing and prove
     // nothing, and the 38 back-to-back misses are short of the forty a step takes.
     const searches = times.filter((entry) => entry.path.endsWith('/messaging/groups'));
@@ -969,10 +969,10 @@ describe('followers scan and one-attempt send', () => {
   });
 });
 
-// The 148-follower audit of 2026-09-20 (E133): every search of that run missed,
+// The 148-follower audit of 2026-09-20 (E134): every search of that run missed,
 // two fans with an old personal conversation came out «не писали», and the
 // send-time defence that did stop them stopped them silently.
-describe('E133: a listing or search miss is not absence', () => {
+describe('E134: a listing or search miss is not absence', () => {
   afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); vi.unstubAllGlobals(); });
   const PERSONAL = 'chatgoose:followers:v1:personal:1:2', ATTEMPT = 'chatgoose:followers:v1:attempt:1:2', GROUP = 'chatgoose:followers:v1:group:1:2';
   const pages = (list: FanslyMessage[]) => async (_group: string, before: string | null) => ({ messages: before ? [] : list, accountMedia: [], accountMediaBundles: [] });
@@ -1050,7 +1050,7 @@ describe('E133: a listing or search miss is not absence', () => {
     expect(h.fansly.findFollowerGroup).not.toHaveBeenCalled();
     expect(h.fansly.createFollowerGroup).toHaveBeenCalledOnce();
 
-    // A proof saved before E133 carries no chat id: only then does the preview
+    // A proof saved before E134 carries no chat id: only then does the preview
     // search, by the display name the inbox row is matched on.
     const legacy = missed();
     legacy.values[PERSONAL] = { observedAt: 1, message: msg() };
@@ -1280,7 +1280,7 @@ describe('E133: a listing or search miss is not absence', () => {
     const gone = missed();
     gone.values[GROUP] = { groupId: '88', observedAt: 1 };
     gone.fansly.getGroup.mockRejectedValue(new ChatGooseError('unknown_error', undefined, { status: 404 }));
-    // A 404 is a blip to the pass (E132): the row is asked again three seconds
+    // A 404 is a blip to the pass (E133): the row is asked again three seconds
     // later, and by then the forgotten id is no longer followed.
     vi.useFakeTimers();
     const vanished = await gone.service.start(7, 48);
@@ -1398,7 +1398,7 @@ describe('E133: a listing or search miss is not absence', () => {
     h.fansly.followerReadStatus.mockReturnValue({ cooldownUntil: until, intervalMs: 800 } as never);
     const reads = () => h.fansly.getGroup.mock.calls.length + h.fansly.getMessagePage.mock.calls.length + h.fansly.findFollowerGroup.mock.calls.length;
     const before = reads();
-    // A cooldown can last five minutes (E132). Joining the lane would burn the
+    // A cooldown can last five minutes (E133). Joining the lane would burn the
     // action's own 60 s / 180 s and end in a bare timeout.
     for (const action of [() => h.service.verify(7, scan.scanId, '2'), () => h.service.generate(7, scan.scanId, '2'), () => h.service.send(7, scan.scanId, '2', 'hello')]) {
       const started = Date.now();

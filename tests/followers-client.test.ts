@@ -325,7 +325,7 @@ describe('Fansly browser-session outreach transport', () => {
   });
 });
 
-// E133. The page shape is Fansly's own (the hub's verbatim fixture): `data[]`
+// E134. The page shape is Fansly's own (the hub's verbatim fixture): `data[]`
 // rows beside `aggregationData.groups[]` with `users[]` and a full `lastMessage`.
 describe('Fansly inbox as a positive-only source', () => {
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });

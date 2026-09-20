@@ -21,7 +21,7 @@ export interface FollowerRow {
   avatarUrl: string | null;
   bio: string;
   status: FollowerStatus;
-  /** What a `ready`/`reply` verdict rests on (E133). `history`: the chat was
+  /** What a `ready`/`reply` verdict rests on (E134). `history`: the chat was
    * resolved and read to a confirmed end. `unverified`: no chat was found yet,
    * which proves nothing; an inbox listing or search miss is never absence. */
   evidence?: 'history' | 'unverified';
@@ -44,7 +44,7 @@ export interface FollowersSnapshot {
   cutoff?: number;
   startedAt?: number;
   pacing?: { cooldownUntil: number; intervalMs: number };
-  /** The optional inbox-search hints that follow the checks (E133). They are
+  /** The optional inbox-search hints that follow the checks (E134). They are
    * not part of the verification and never hold `scanning` open. */
   background?: { active: boolean; searched: number; total: number };
   rows: FollowerRow[];

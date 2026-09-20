@@ -71,7 +71,7 @@ const MESSAGING_GROUPS_PAGE_SIZE = 100;
 // conversations can't burn the whole operation budget here before the
 // subscribers fallback runs.
 const MESSAGING_GROUPS_MAX_PAGES = 20;
-// A follower scan reads the inbox only as deep as its own period (E133).
+// A follower scan reads the inbox only as deep as its own period (E134).
 const INBOX_PREFIX_MAX_PAGES = 10;
 const SUBSCRIBERS_PAGE_SIZE = 100;
 const SUBSCRIPTION_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -264,7 +264,7 @@ function uniquePurchaseRequests(requests: PpvAttachmentRequest[]): PpvAttachment
 
 /** One fan's chat as an inbox listing or search page showed it. `verified`:
  * the page's own group entry lists exactly the creator and this fan, the same
- * participant fence `GET /group` would repeat (E133). */
+ * participant fence `GET /group` would repeat (E134). */
 export interface InboxChat {
   fanId: string;
   groupId: string;
@@ -523,7 +523,7 @@ export class FanslyClient {
           throw new ChatGooseError('fansly_server_error', undefined, details);
         }
 
-        // Only a validated envelope counts as Fansly answering this read (E132).
+        // Only a validated envelope counts as Fansly answering this read (E133).
         permit?.served();
         attemptTrace?.end({ status: response.status, outcome: 'success' });
         return data.response;
@@ -583,7 +583,7 @@ export class FanslyClient {
     return url;
   }
 
-  /** The inbox as deep as a follower scan's period (E133): pages ordered by
+  /** The inbox as deep as a follower scan's period (E134): pages ordered by
    * last activity, read while the last row is still newer than the cutoff, then
    * page 0 once more for chats that jumped to the top meanwhile. Only the
    * wanted fans come back. The listing has no total and hides some chats, so
@@ -613,7 +613,7 @@ export class FanslyClient {
     return [...found.values()];
   }
 
-  /** Inbox text search: a positive-only hint (E133). The server matches the
+  /** Inbox text search: a positive-only hint (E134). The server matches the
    * row's `partnerUsername` snapshot of `displayName || username`, so a miss
    * says nothing about the chat; malformed or bounded results are not a miss. */
   async findFollowerGroup(fanId: string, term: string, creatorId: string, session: SessionTemplate, signal: AbortSignal, trace?: TraceScope): Promise<InboxChat | null> {
@@ -646,7 +646,7 @@ export class FanslyClient {
     // is refused at once while Fansly has the creator's lane in a cooldown;
     // a message is never held here: by then the hub holds a dispatch, and a
     // wait that outlives the send deadline would leave a false «не
-    // подтверждено» for a message that never left (E132).
+    // подтверждено» for a message that never left (E133).
     const creatorId = session.resolvedAccountId ?? session.accountId;
     const paced = this.followerSessions.has(session);
     const coolingMs = paced && path === 'group' ? (this.followerReads.status(creatorId)?.cooldownUntil ?? 0) - Date.now() : 0;
@@ -1021,7 +1021,7 @@ export class FanslyClient {
    * /messaging/groups endpoint (and its `search` param) the page's own inbox
    * search box issues, so no new Fansly egress class (E23) — matched by
    * partnerAccountId. The server matches the row's `partnerUsername` snapshot
-   * of `displayName || username`, so callers search by that term (E133). Null =
+   * of `displayName || username`, so callers search by that term (E134). Null =
    * the search returned no row for the fan; the conversation may still exist.
    */
   async findGroupIdForFan(

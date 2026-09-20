@@ -71,7 +71,7 @@ export declare const creatableUserRoles: readonly ["owner", "team_lead", "chatte
 export type CreatableUserRole = (typeof creatableUserRoles)[number];
 export declare const fanFlagTypes: readonly ["whale", "vip", "risky"];
 export type FanFlagType = (typeof fanFlagTypes)[number];
-export declare const aiUsageFeatures: readonly ["fast-reply", "improve-draft", "help-me", "fan-summary", "chat-review", "scan", "ping", "hi-greeting", "workboard-closing", "coach-chat", "voice-script"];
+export declare const aiUsageFeatures: readonly ["fast-reply", "improve-draft", "help-me", "fan-summary", "chat-review", "scan", "ping", "hi-greeting", "coach-chat", "voice-script"];
 export type AiUsageFeature = (typeof aiUsageFeatures)[number];
 export declare const FANSLY_CLIENT_CHECK_ROUTES: readonly ["message", "group", "account", "earnings", "messagingGroups", "subscribers", "media"];
 export type FanslyClientCheckRoute = (typeof FANSLY_CLIENT_CHECK_ROUTES)[number];

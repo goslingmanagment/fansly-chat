@@ -2280,7 +2280,7 @@ describe('runtime-api resolveFanChat', () => {
     );
   });
 
-  it('searches by the display name when the fan has one: that is what the inbox row is matched on (E133)', async () => {
+  it('searches by the display name when the fan has one: that is what the inbox row is matched on (E134)', async () => {
     const fanslyClient = {
       getAuthenticatedAccount: vi.fn(async () => undefined),
       findGroupIdForFan: vi.fn(async () => 'group-42'),

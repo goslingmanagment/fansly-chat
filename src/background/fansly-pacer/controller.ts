@@ -3,7 +3,7 @@ import type { PacePolicy } from './policy.js';
 /** One pace key's spacing. Pure data and pure transitions: no timers, no IO,
  * so every rule below is testable on its own (E130). A key never runs faster
  * than its policy: the learned upward probing of 2.4.3 earned a few seconds a
- * scan on evidence too thin to trust and was removed (E132). */
+ * scan on evidence too thin to trust and was removed (E133). */
 export interface RouteState {
   spacingMs: number;
   lastStartAt: number;

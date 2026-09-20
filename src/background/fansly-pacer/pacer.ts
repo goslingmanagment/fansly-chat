@@ -16,7 +16,7 @@ const SAVE_EVERY_MS = 60_000;
  * clock must not park a creator for days, and the value is persisted. */
 const RETRY_AFTER_MAX_MS = 6 * 3600_000;
 /** FBuddy's cooldown grows with the reads answered since the previous limit
- * (1.25 s each, 300 s at most); ours takes the same term (E132). The count
+ * (1.25 s each, 300 s at most); ours takes the same term (E133). The count
  * lives in memory: a background restart or a rest starts it over. */
 const COOLDOWN_PER_ANSWER_MS = 1250;
 const COOLDOWN_MAX_MS = 300_000;
@@ -127,7 +127,7 @@ export class FanslyPacer {
       const routeAt = route.lastStartAt ? route.lastStartAt + route.spacingMs : 0;
       // The jitter rides on whichever deadline binds. Added to the lane gap
       // alone it vanished behind the key spacing, and a run of one key went
-      // out as a 500 ms metronome (live trace, E132).
+      // out as a 500 ms metronome (live trace, E133).
       const base = Math.max(current.nextAt, routeAt);
       const jitterMs = base > Date.now() ? Math.floor(this.random() * (LANE_JITTER_MS + 1)) : 0;
       const until = Math.max(current.cooldownUntil, base + jitterMs);

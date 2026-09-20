@@ -7,7 +7,7 @@ const LABEL: Record<FollowerStatus, string> = {
 };
 const dateLabel = (value: number) => new Date(value).toLocaleString('ru-RU', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 const canCompose = (row: FollowerRow) => row.status === 'ready' || row.status === 'reply';
-// E133: «не писали» is said only over a chat read to its end. A row that
+// E134: «не писали» is said only over a chat read to its end. A row that
 // merely has no chat found yet says so; anything short of proof reads as that.
 const unverified = (row: FollowerRow) => row.status === 'ready' && row.evidence !== 'history';
 const label = (row: FollowerRow) => unverified(row) ? 'Чат не найден' : LABEL[row.status];
@@ -347,7 +347,7 @@ export class FollowersWindow {
     const controls = element('div', 'controls');
     const generate = element('button', 'generate', this.busy.has(row.id) ? 'Подождите…' : 'Сгенерировать');
     const send = element('button', 'send', 'Отправить →');
-    // Offered only while nothing is proved about this fan's chat (E133).
+    // Offered only while nothing is proved about this fan's chat (E134).
     const verify = unverified(row) ? element('button', 'verify', 'Проверить чат') : null;
     generate.type = send.type = 'button'; if (verify) verify.type = 'button';
     const updateButtons = () => { generate.disabled = this.busy.has(row.id); if (verify) verify.disabled = this.busy.has(row.id); send.disabled = this.busy.has(row.id) || !textarea.value.trim(); textarea.disabled = this.busy.has(row.id); };

@@ -1308,7 +1308,7 @@ export function registerRuntimeApi({
         displayName: string | null;
       };
       // The inbox search matches the row's snapshot of `displayName ||
-      // username`, so a username finds nobody who set a display name (E133).
+      // username`, so a username finds nobody who set a display name (E134).
       const searchTerm = record.displayName?.trim() || record.username?.trim() || '';
       if (!searchTerm) {
         // Nothing to search by — an honest "not found", not an error.

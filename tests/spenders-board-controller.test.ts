@@ -353,7 +353,7 @@ describe('SpendersBoardController', () => {
         'not found',
       ),
     );
-    // A search miss, said as one: it is not proof that no conversation exists (E133).
+    // A search miss, said as one: it is not proof that no conversation exists (E134).
     const hint = rows()[0]!.querySelector<HTMLElement>('.chatgoose-board-row-chatstate')!.title;
     expect(hint).toContain('The inbox search returned nothing');
     expect(hint).toContain('may still exist');

@@ -25,7 +25,7 @@ export class PacerStore {
   /** Best effort both ways: a lane without storage still paces from memory,
    * and a storage call that never answers must not hold every read (E124).
    * An answer that comes after the deadline is not thrown away: `late` gets
-   * it, so a saved cooldown is applied as soon as it is known (E132). */
+   * it, so a saved cooldown is applied as soon as it is known (E133). */
   async load(creatorId: string, late?: (saved: SavedLane) => void): Promise<SavedLane | undefined> {
     try {
       let timer: ReturnType<typeof setTimeout> | undefined;
