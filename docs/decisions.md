@@ -121,6 +121,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E128 | 2026-09-19 | Follower scan: saved-name reads leave the critical path, rate-limit penalty decays per five quiet minutes followed by twenty answered reads, `/account` reads 5 s apart; patch 2.4.2 |
 | E129 | 2026-09-19 | Re-vendor the SDK from deployed Core `b1d3bb81` before publishing 2.4.2; the release gate stopped the first attempt before signing |
 | E130 | 2026-09-20 | Fansly pacer replaces the follower read scheduler: policy per route family, learned spacing per key, 400 ms jittered lane gap, a limit slows its own key first, limits survive the background page; transient 404 rows rechecked once; unreleased until a live trace |
+| E131 | 2026-09-20 | Owner releases E130 as 2.4.3 without the temporary-load trace; the first production scans are the live measurement, the feed is the rollback |
 
 ## Entries
 
@@ -4366,3 +4367,20 @@ test. Supersedes E121's single lane interval and E128's lane-wide spacing
 penalty and `ROUTE_SPACING_MS`; keeps their cooldowns, decay and `/account`
 gap. No version bump: the owner loads the build as a temporary add-on, runs a
 large scan and exports the trace; release follows that trace.
+
+**E131 (2026-09-20).** The owner reads the E130 pull request and authorizes
+releasing it as 2.4.3, then merging and cleaning up, without the temporary
+add-on load that E130 planned as the first live measurement. The first
+production scans therefore are that measurement. What bounds the risk is
+unchanged from E130: one request in flight, a 400 ms lane gap that is FBuddy's
+starting spacing per route, E121's cooldowns with Retry-After, a first limit
+that returns its key to today's pace or slower, and a lane gap that doubles
+from the second unhealed level. If Fansly objects, the next «Отладка ↗» export
+names the key (`http.cooldown`, `http.pace`) and the fix is a row in
+`policy.ts`; `http.error-body` answers what the passing 404 is. Rollback is a
+feed release that restores the previous constants: the saved pacer key holds
+only stricter state and needs no migration either way. Version 2.4.3, a patch
+per the owner's numbering (E120); package and manifest advance together, both
+changelogs, the landing stamp and the README move with them. The vendored SDK
+already carries production's contract hash `8e761076…` (checked against
+`/api/v1/health` before the bump), so no re-vendor is needed.
