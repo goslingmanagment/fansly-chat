@@ -45,7 +45,7 @@ from prose when checking what is installed or live; verify the signed update fee
   from one shared, cached, paced service
   (`src/background/welcome-definitions.ts`). The chat reads one Fansly page; a
   conversation that does not fit it is Reply or Ping territory (E136).
-- **Новые фоловеры** (E138, unreleased) — a fast pass shows the followers and
+- **Новые фоловеры** (2.4.6, E138) — a fast pass shows the followers and
   confirmed results, then one automatic queue resolves only the remaining fans
   by their account IDs and reads their chats. Confirmed rows are usable while
   the queue runs; selecting a pending fan makes them next. Pause/continue keeps
@@ -89,7 +89,7 @@ provider credentials into the extension — it holds none.
 
 ## Development
 
-### Two-phase follower verification (E138, unreleased)
+### Two-phase follower verification (2.4.6, E138)
 
 `FollowersService` keeps one scan with two phases. Discovery and the first
 checks reuse positive proofs, inbox matches, and saved creator/fan chat IDs.
@@ -160,6 +160,15 @@ Important references:
 
 ## Release
 
+Release 2.4.6 adds the two-phase New Followers check (E138, E139): a fast
+positive-proof pass followed by one automatic identity/history queue for the
+unresolved remainder. Confirmed rows stay usable, selecting a pending fan makes
+them next, and pause/continue preserves drafts and verified chat IDs. Pending
+rows require confirmed history before generation or sending. Empty technical
+chats can be created during verification; messages remain explicit human actions.
+The queue shares the creator pacing lane and stops on a rate limit or a series
+of transport errors. SDK and Core contracts are unchanged from 2.4.5.
+
 Release 2.4.5 unifies the Hi greeting across both surfaces: one `hi-greeting`
 contract (`variantCount`, `personalMessageCount`) replaces the `greetingMode`
 flag, one shared greeting context (`src/shared/greeting-context.ts`) and one
@@ -222,6 +231,8 @@ Releases ship from `main`. Keep `package.json` and `manifest.json` versions equa
 update `CHANGELOG.md` and `changelog.html`, run `pnpm check`, then use
 `scripts/deploy.sh`. The deploy script signs the extension, updates the
 self-hosted feed, and verifies served version consistency.
+Use `SKIP_ANNOUNCE=1 scripts/deploy.sh` to publish without a Telegram announcement;
+the local changelog validation still runs before signing.
 
 The public pages ship together: `install.html` becomes the versionless product
 landing at `index.html`; `start.html` is the shared onboarding page for both

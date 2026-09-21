@@ -129,6 +129,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E136 | 2026-09-20 | Unified Hi greeting: one `hi-greeting` contract (`variantCount`, `personalMessageCount`) for the chat button and the New Followers window, one greeting-context module, one shared welcome-definitions service; the gate counts personal messages; needs Core Decision 379 deployed first; unreleased |
 | E137 | 2026-09-20 | Release E136 as 2.4.5 on the owner's word, after Core Decision 379 (core `82571f3c`) is deployed, on the SDK re-vendored from that deployed commit; no independent review, validation synthetic plus a before/after prompt render |
 | E138 | 2026-09-22 | New followers: fast positive-proof pass followed by one automatic identity/history queue for unresolved rows; group POST joins the creator lane, soft pause preserves an in-flight result, selected fan is next; no unverified sends, no release |
+| E139 | 2026-09-22 | Owner authorizes release 2.4.6 for E138 after independent code review; package, manifest and release pages advance together; no Telegram announcement; live Fansly performance remains unmeasured |
 
 ## Entries
 
@@ -4870,3 +4871,25 @@ at 1280 and 430 px verified the ready/pending controls, remaining-only Continue
 and actual textarea identity, focus, selection and draft preservation.
 Live Fansly timing, request totals and rate-limit behavior of the new version
 remain unmeasured; this decision makes no speed or deployment claim.
+
+**E139 (2026-09-22).** After reviewing the E138 implementation, the owner asks
+for a release ("вроде все, надо релиз"). Prepare 2.4.6, the next patch after
+both freshly fetched `origin/main` (`6a76227`) and the published feed's 2.4.5.
+Package and manifest advance together; both changelogs, the landing stamp and
+README describe the two-phase verification. E138 remains the historical record
+of implementation authorization before this separate release request.
+
+The coordinating agent independently reviewed the queue, transport regressions
+and local UI screenshots without finding a release blocker. Validation covers
+the full `pnpm check` gate, mocked HTTP through the real pacer, jsdom and an
+isolated Playwright preview. Live Fansly timing, request totals and rate-limit
+behavior remain unmeasured. No Fansly messages are sent as part of validation.
+No SDK or Core contract change is part of this patch.
+
+Publication follows review and CI on the final release commit, through the
+existing `scripts/deploy.sh` gates on clean, pushed `main`. This entry records
+the authorization and prepared version, not a completed deployment; the signed
+tag and served update feed remain release evidence. Use `SKIP_ANNOUNCE=1`:
+the owner did not authorize messaging the Telegram channel. This suppresses
+the send and its credential requirement while keeping the local changelog
+preflight before signing.
