@@ -2,16 +2,17 @@ import styles from './followers.css';
 import { FOLLOWER_HOURS, type FollowerRow, type FollowersRequest, type FollowersResponse, type FollowersSnapshot, type FollowerStatus } from '../../shared/followers.js';
 
 const LABEL: Record<FollowerStatus, string> = {
-  checking: 'Проверяем…', ready: 'Не писали', reply: 'Ждёт ответа', contacted: 'Уже писали',
+  checking: 'Проверяем…', pending: 'В очереди', ready: 'Не писали', reply: 'Ждёт ответа', contacted: 'Уже писали',
   unknown: 'Не проверен', sending: 'Отправляем…', uncertain: 'Нужно проверить', sent: 'Отправлено',
 };
 const dateLabel = (value: number) => new Date(value).toLocaleString('ru-RU', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-const canCompose = (row: FollowerRow) => row.status === 'ready' || row.status === 'reply';
-// E134: «не писали» is said only over a chat read to its end. A row that
-// merely has no chat found yet says so; anything short of proof reads as that.
-const unverified = (row: FollowerRow) => row.status === 'ready' && row.evidence !== 'history';
-const label = (row: FollowerRow) => unverified(row) ? 'Чат не найден' : LABEL[row.status];
-const UNVERIFIED_NOTICE = 'Fansly не показал чат с этим фаном. Это ещё не доказательство: нажмите «Проверить чат» или «Сгенерировать» — проверим по аккаунту фана.';
+const canSend = (row: FollowerRow) => (row.status === 'ready' || row.status === 'reply') && row.evidence === 'history';
+const canCompose = (row: FollowerRow) => canSend(row) || ['pending', 'checking'].includes(row.status);
+// A queue entry is not an empty-history verdict, even if an older background
+// returns a ready row without evidence. Generation and sending fail closed.
+const unverified = (row: FollowerRow) => ['pending', 'checking'].includes(row.status) || (['ready', 'reply'].includes(row.status) && row.evidence !== 'history');
+const label = (row: FollowerRow) => ['ready', 'reply'].includes(row.status) && row.evidence !== 'history' ? 'Переписка не проверена' : LABEL[row.status];
+const UNVERIFIED_NOTICE = 'Переписка ещё не проверена. Строка ожидает проверки по аккаунту фана.';
 const draftKey = (creator: string, fan: string) => `chatgoose:followers:draft:v1:${creator}:${fan}`;
 
 class FollowersRequestError extends Error {
@@ -53,8 +54,8 @@ export class FollowersWindow {
   private readonly dialog: HTMLDialogElement;
   private snapshot: FollowersSnapshot | null = null;
   private selected: string | null = null;
-  /** A fan whose send or check took them out of the queue stays on screen
-   * until the chatter moves on: a refusal must not look like a delivery. */
+  /** A fan the chatter is checking stays on screen when verification excludes
+   * them, so the proof is visible rather than a silent jump to another draft. */
   private pinned: string | null = null;
   private all = false;
   private filter = 'any';
@@ -80,7 +81,7 @@ export class FollowersWindow {
     // Static skeleton only; every platform/model string is assigned via textContent/value.
     this.dialog.innerHTML = `<header><div><h1>Новые фоловеры</h1><span class="creator"></span></div><button class="close icon" aria-label="Закрыть">×</button></header>
       <div class="toolbar"><label>За <select aria-label="Период"></select></label><button class="debug" hidden>Отладка ↗</button><span class="progress" role="status"></span><button class="pause" hidden>Пауза</button><button class="refresh icon" aria-label="Обновить список">↻</button></div>
-      <div class="scan-info"><span class="range"></span><span class="background" hidden></span><span class="cooldown" role="status" hidden></span></div><div class="error" role="alert" hidden></div><main><aside><nav><button class="pending active">К обработке</button><button class="all">Все</button></nav><select class="filter" aria-label="Статус фана"><option value="any">Все статусы</option><option value="ready">Не писали</option><option value="unverified">Чат не найден</option><option value="reply">Ждёт ответа</option><option value="unchecked">Не проверены</option><option value="contacted">Уже писали</option></select><div class="list" aria-label="Фоловеры"></div></aside><section class="detail"></section></main>`;
+      <div class="scan-info"><span class="range"></span><span class="verification" hidden></span><span class="cooldown" role="status" hidden></span></div><div class="error" role="alert" hidden></div><main><aside><nav><button class="pending active">К обработке</button><button class="all">Все</button></nav><select class="filter" aria-label="Статус фана"><option value="any">Все статусы</option><option value="ready">Не писали</option><option value="pending">В очереди</option><option value="reply">Ждёт ответа</option><option value="unchecked">Не проверены</option><option value="contacted">Уже писали</option></select><div class="list" aria-label="Фоловеры"></div></aside><section class="detail"></section></main>`;
     this.dialog.setAttribute('aria-label', 'Новые фоловеры');
     this.shadow.append(this.dialog);
     this.host.id = 'chatgoose-followers';
@@ -146,7 +147,7 @@ export class FollowersWindow {
     const epoch = ++this.epoch;
     if (this.poll) clearTimeout(this.poll);
     this.snapshot = null; this.detailKey = ''; this.conversationRequests.clear(); this.conversationOpened.clear(); this.justSent.clear(); this.showError();
-    this.node('.range').textContent = ''; this.node('.cooldown').hidden = true; this.node('.background').hidden = true; this.node('.pause').hidden = true;
+    this.node('.range').textContent = ''; this.node('.cooldown').hidden = true; this.node('.verification').hidden = true; this.node('.pause').hidden = true;
     this.renderDebug();
     this.node('.creator').textContent = '';
     this.node('.progress').textContent = 'Подключаемся к Fansly…';
@@ -163,7 +164,7 @@ export class FollowersWindow {
   }
 
   private async resume(): Promise<void> {
-    if (!this.snapshot || this.snapshot.scanning || this.busy.size) return;
+    if (!this.snapshot || this.snapshot.scanning || this.snapshot.verification?.active || this.busy.size) return;
     const epoch = this.epoch;
     const operation = crypto.randomUUID();
     this.busy.set('resume', operation);
@@ -198,9 +199,19 @@ export class FollowersWindow {
     finally { if (epoch === this.epoch) this.conversationRequests.delete(fanId); }
   }
 
+  private async prioritize(fanId: string): Promise<void> {
+    if (!this.snapshot) return;
+    const epoch = this.epoch;
+    try {
+      const response = await request({ type: 'followers', action: 'prioritize', scanId: this.snapshot.scanId, fanId });
+      if (epoch !== this.epoch) return;
+      this.snapshot = response.snapshot!; this.render(); this.schedulePoll(epoch);
+    } catch (error) { if (epoch === this.epoch) this.showError((error as Error).message); }
+  }
+
   private schedulePoll(epoch: number): void {
     if (this.poll) clearTimeout(this.poll);
-    if ((!this.snapshot?.scanning && !this.snapshot?.background?.active && !this.snapshot?.rows.some((row) => row.conversation?.loading) && (this.snapshot?.pacing?.cooldownUntil ?? 0) <= Date.now()) || epoch !== this.epoch) return;
+    if ((!this.snapshot?.scanning && !this.snapshot?.verification?.active && !this.snapshot?.rows.some((row) => row.conversation?.loading) && (this.snapshot?.pacing?.cooldownUntil ?? 0) <= Date.now()) || epoch !== this.epoch) return;
     this.poll = setTimeout(() => { void (async () => {
       try {
         const response = await request({ type: 'followers', action: 'state', scanId: this.snapshot!.scanId });
@@ -217,34 +228,35 @@ export class FollowersWindow {
     const queued = (row: FollowerRow) => !['contacted', 'sent'].includes(row.status);
     const pending = snapshot.rows.filter(queued);
     const candidates = this.all ? snapshot.rows : snapshot.rows.filter((row) => queued(row) || row.id === this.pinned);
-    const rows = candidates.filter((row) => this.filter === 'any' || (this.filter === 'unchecked' ? ['checking', 'unknown', 'uncertain'].includes(row.status) : this.filter === 'contacted' ? ['contacted', 'sent'].includes(row.status) : this.filter === 'unverified' ? unverified(row) : row.status === this.filter && !unverified(row)));
+    const rows = candidates.filter((row) => this.filter === 'any' || (this.filter === 'unchecked' ? ['checking', 'pending', 'unknown', 'uncertain'].includes(row.status) : this.filter === 'contacted' ? ['contacted', 'sent'].includes(row.status) : this.filter === 'ready' || this.filter === 'reply' ? row.status === this.filter && canSend(row) : row.status === this.filter));
     this.node<HTMLSelectElement>('.filter').value = this.filter;
     this.node('.creator').textContent = `@${snapshot.creatorName}`;
     this.node('.pending').textContent = `К обработке ${pending.length}`;
     this.node('.all').textContent = `Все ${snapshot.rows.length}`;
     this.node('.pending').classList.toggle('active', !this.all);
     this.node('.all').classList.toggle('active', this.all);
-    const unchecked = snapshot.rows.filter((r) => ['checking', 'unknown'].includes(r.status)).length;
-    const phases = { welcome: 'Читаем welcome-сообщения…', followers: 'Загружаем фоловеров…', profiles: 'Загружаем профили…', checking: `Проверено ${snapshot.rows.length - unchecked} из ${snapshot.rows.length}`, notes: 'Загружаем сохранённые имена…' };
-    this.node('.progress').textContent = snapshot.scanning ? phases[snapshot.phase ?? 'checking'] : snapshot.canContinue ? `На паузе · осталось ${unchecked}` : snapshot.rows.length ? `Проверено ${snapshot.rows.length - unchecked} из ${snapshot.rows.length}` : 'Новых фоловеров нет';
-    // The hints that follow the checks are reported beside the finished
-    // verification, never as part of it; Pause ends them too.
-    const hints = snapshot.background;
-    this.node('.pause').hidden = !hints?.active && (!snapshot.scanning || !['profiles', 'checking', 'notes'].includes(snapshot.phase ?? ''));
-    this.node('.background').hidden = !hints?.active;
-    this.node('.background').textContent = hints?.active ? `Фоном ищем чаты по имени: ${hints.searched} из ${hints.total}` : '';
+    const remaining = snapshot.rows.filter((row) => ['checking', 'pending', 'unknown'].includes(row.status)).length;
+    const checked = snapshot.rows.filter((row) => canSend(row) || ['contacted', 'sent', 'sending'].includes(row.status)).length;
+    const progress = `Проверено ${checked} из ${snapshot.rows.length}`;
+    const phases = { welcome: 'Читаем welcome-сообщения…', followers: 'Загружаем фоловеров…', profiles: 'Загружаем профили…', checking: progress, notes: progress };
+    this.node('.progress').textContent = snapshot.scanning ? phases[snapshot.phase ?? 'checking'] : snapshot.rows.length ? progress : 'Новых фоловеров нет';
+    const verification = snapshot.verification;
+    this.node('.pause').hidden = !verification?.active && (!snapshot.scanning || !['profiles', 'checking', 'notes'].includes(snapshot.phase ?? ''));
+    this.node('.verification').hidden = !verification?.active && !snapshot.canContinue;
+    const stop = verification?.stopped === 'cooldown' ? 'Fansly ограничил запросы' : verification?.stopped === 'errors' ? 'Fansly отвечает ошибками' : verification?.stopped === 'paused' ? 'Проверка на паузе' : 'Проверка завершена не полностью';
+    this.node('.verification').textContent = verification?.active ? verification.stopped === 'paused' ? `Пауза: завершаем текущий запрос · осталось ${remaining}` : `Уточняем переписку: осталось ${remaining}` : snapshot.canContinue ? `${stop} · осталось ${remaining}` : '';
     this.node('.range').textContent = snapshot.cutoff && snapshot.startedAt ? `${dateLabel(snapshot.cutoff)} — ${dateLabel(snapshot.startedAt)} · местное время` : '';
     const cooldown = this.node('.cooldown');
     const seconds = Math.max(0, Math.ceil(((snapshot.pacing?.cooldownUntil ?? 0) - Date.now()) / 1000));
     cooldown.hidden = !seconds;
     cooldown.textContent = seconds ? `Fansly ограничил частоту запросов. Пауза ${seconds} с. ${snapshot.scanning ? 'Проверка продолжится автоматически.' : snapshot.rows.some((row) => row.conversation?.loading) ? 'Переписка загрузится после паузы.' : 'Новые запросы подождут до окончания паузы.'}` : '';
     const refresh = this.node<HTMLButtonElement>('.refresh');
-    refresh.textContent = snapshot.canContinue ? 'Продолжить' : '↻';
+    refresh.textContent = snapshot.canContinue ? `Проверить оставшихся: ${remaining}` : '↻';
     refresh.classList.toggle('resume', Boolean(snapshot.canContinue));
     refresh.setAttribute('aria-label', snapshot.canContinue ? 'Продолжить проверку' : 'Обновить список');
-    refresh.disabled = snapshot.scanning;
+    refresh.disabled = snapshot.scanning || Boolean(snapshot.verification?.active);
     if (snapshot.error) this.showError(snapshot.error);
-    if (!rows.some((row) => row.id === this.selected)) this.selected = rows.find(canCompose)?.id ?? rows[0]?.id ?? null;
+    if (!rows.some((row) => row.id === this.selected)) this.selected = rows.find(canSend)?.id ?? rows[0]?.id ?? null;
     const list = this.node('.list');
     const focused = (this.shadow.activeElement as HTMLElement | null)?.dataset.fan;
     list.replaceChildren(...rows.map((row) => {
@@ -255,8 +267,9 @@ export class FollowersWindow {
       copy.append(element('strong', 'name', `${row.displayName}${row.customName ? ` (${row.customName})` : ''}`), element('span', 'meta', `@${row.username || row.id} · ${hoursAgo(row.followedAt)}`), element('span', `status ${row.status}${unverified(row) ? ' unverified' : ''}`, label(row)));
       button.append(avatar(row), copy);
       button.addEventListener('click', () => {
-        if (row.id !== this.pinned) this.pinned = null;
+        if (row.id !== this.pinned) this.pinned = unverified(row) ? row.id : null;
         this.selected = row.id; this.render();
+        if (unverified(row)) void this.prioritize(row.id);
         if (['contacted', 'sent'].includes(row.status) && !row.conversation) void this.loadConversation(row.id);
       });
       return button;
@@ -267,7 +280,7 @@ export class FollowersWindow {
     // Only changes to the selected fan may rebuild their composer. Queue
     // progress and completion must preserve the chatter's focus and caret.
     const detailKey = JSON.stringify(row
-      ? [snapshot.scanId, row.id, row.status, row.evidence, row.chatKnown, row.messages, row.proof, row.conversation, row.detail, row.bio, row.customName, row.displayName, row.username, row.avatarUrl, this.busy.has(row.id)]
+      ? [snapshot.scanId, row.id, row.status, row.evidence, row.chatKnown, row.groupId, row.messages, row.proof, row.conversation, row.detail, row.bio, row.customName, row.displayName, row.username, row.avatarUrl, this.busy.has(row.id), unverified(row) && snapshot.verification?.active]
       : [snapshot.scanId, snapshot.scanning, snapshot.error, this.filter, rows.length]);
     if (detailKey !== this.detailKey) { this.detailKey = detailKey; void this.renderDetail(row); }
     if (row && ['contacted', 'sent'].includes(row.status) && !row.conversation && !this.conversationOpened.has(row.id) && !this.justSent.has(row.id)) void this.loadConversation(row.id);
@@ -300,16 +313,17 @@ export class FollowersWindow {
       proof.append(element('summary', '', `Уже писали${row.proof.message.createdAt ? ` · ${dateLabel(row.proof.message.createdAt)}` : ''}`));
       proof.append(element('div', 'meta', row.proof.source === 'cache' ? 'Сохранённое доказательство личной переписки' : 'Личное сообщение найдено в этой проверке'), element('blockquote', '', row.proof.message.text));
       detail.append(proof);
-    } else if (!canCompose(row) && row.status !== 'checking') detail.append(element('div', 'decision', LABEL[row.status]));
+    } else if (!canCompose(row) && row.status !== 'checking') detail.append(element('div', 'decision', label(row)));
     const history = element('div', 'history');
     const conversation = row.conversation;
     if (!conversation && ['contacted', 'sent'].includes(row.status)) {
       const load = element('button', 'load-history', 'Загрузить переписку');
       load.addEventListener('click', () => { void this.loadConversation(row.id); }); history.append(load);
     }
-    if (conversation?.groupId) {
+    const groupId = conversation?.groupId ?? row.groupId;
+    if (groupId) {
       const link = element('a', 'open-chat', 'Открыть в Fansly ↗');
-      link.href = `https://fansly.com/messages/${conversation.groupId}`; link.target = '_blank'; link.rel = 'noopener noreferrer';
+      link.href = `https://fansly.com/messages/${groupId}`; link.target = '_blank'; link.rel = 'noopener noreferrer';
       detail.append(link);
     }
     const messages = conversation?.messages.length ? conversation.messages : row.messages.length ? row.messages : row.proof ? [row.proof.message] : [];
@@ -343,14 +357,15 @@ export class FollowersWindow {
     if (!canCompose(row)) { if (row.detail) detail.append(element('div', 'notice', row.detail)); return; }
     const composer = element('div', 'composer');
     const textarea = element('textarea', 'draft');
-    textarea.maxLength = 5000; textarea.rows = 3; textarea.placeholder = 'Напишите сами или нажмите «Сгенерировать»'; textarea.setAttribute('aria-label', 'Личное сообщение');
+    textarea.maxLength = 5000; textarea.rows = 3; textarea.placeholder = canSend(row) ? 'Напишите сами или нажмите «Сгенерировать»' : 'Черновик можно набрать сейчас. Отправка после проверки.'; textarea.setAttribute('aria-label', 'Личное сообщение');
     const controls = element('div', 'controls');
     const generate = element('button', 'generate', this.busy.has(row.id) ? 'Подождите…' : 'Сгенерировать');
     const send = element('button', 'send', 'Отправить →');
     // Offered only while nothing is proved about this fan's chat (E134).
-    const verify = unverified(row) ? element('button', 'verify', 'Проверить чат') : null;
+    const verifying = Boolean(this.snapshot.verification?.active);
+    const verify = unverified(row) ? element('button', 'verify', verifying ? 'Проверить следующим' : 'Проверить чат') : null;
     generate.type = send.type = 'button'; if (verify) verify.type = 'button';
-    const updateButtons = () => { generate.disabled = this.busy.has(row.id); if (verify) verify.disabled = this.busy.has(row.id); send.disabled = this.busy.has(row.id) || !textarea.value.trim(); textarea.disabled = this.busy.has(row.id); };
+    const updateButtons = () => { generate.disabled = this.busy.has(row.id) || !canSend(row); if (verify) verify.disabled = this.busy.has(row.id) || row.status === 'checking'; send.disabled = this.busy.has(row.id) || !canSend(row) || !textarea.value.trim(); textarea.disabled = this.busy.has(row.id); };
     textarea.value = this.drafts.get(storageKey) ?? '';
     updateButtons();
     const save = (text: string) => {
@@ -360,7 +375,7 @@ export class FollowersWindow {
       this.writes.set(storageKey, write);
       void write.catch(() => this.showError('Черновик не удалось сохранить. Он остаётся в этом окне.'));
     };
-    textarea.addEventListener('input', () => { save(textarea.value); updateButtons(); });
+    textarea.addEventListener('input', () => { if (unverified(row)) this.pinned = row.id; save(textarea.value); updateButtons(); });
     const action = async (type: 'verify' | 'generate' | 'send') => {
       if (this.busy.has(row.id) || !this.snapshot) return;
       const scanId = this.snapshot.scanId;
@@ -374,7 +389,7 @@ export class FollowersWindow {
         if (response.snapshot) {
           this.snapshot = response.snapshot;
           const status = response.snapshot.rows.find((v) => v.id === row.id)?.status;
-          if (status === 'sent') { save(''); this.justSent.add(row.id); }
+          if (status === 'sent') { save(''); this.justSent.add(row.id); if (this.pinned === row.id) this.pinned = null; }
           // The row leaves the queue on the chatter's own click: say where to,
           // and keep it in view with the conversation that was found.
           if (type === 'verify' && status === 'contacted') { this.pinned = row.id; this.showError(`${row.displayName}: у фана уже есть личная переписка. Строка перенесена в «Уже писали».`); }
@@ -400,7 +415,7 @@ export class FollowersWindow {
     };
     generate.addEventListener('click', () => { void action('generate'); });
     send.addEventListener('click', () => { void action('send'); });
-    verify?.addEventListener('click', () => { void action('verify'); });
+    verify?.addEventListener('click', () => { if (verifying) void this.prioritize(row.id); else void action('verify'); });
     const drafting = element('div', 'drafting');
     drafting.append(...(verify ? [verify] : []), generate);
     controls.append(drafting, send); composer.append(textarea, controls); detail.append(composer);

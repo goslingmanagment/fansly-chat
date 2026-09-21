@@ -584,7 +584,8 @@ export interface FanslyMessagingGroupEntry {
  * inside the inbox listing's `aggregationData.groups[]`. */
 export interface FanslyGroup {
   id?: string;
-  users?: Array<{ userId: string }>;
+  users?: Array<{ userId: string; userSettings?: { hidden?: number } | null }>;
+  userSettings?: { hidden?: number } | null;
   lastMessage?: FanslyMessage | null;
 }
 

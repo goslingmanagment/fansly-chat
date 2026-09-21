@@ -38,8 +38,7 @@ interface Scan {
   savedLeads: Set<string>;
   /** What an inbox page or `POST /group` showed for a fan's chat in this scan. */
   seen: Map<string, InboxChat>;
-  /** E134 background hints: the budget is per scan, across Continue passes. */
-  search: { done: number; hits: number; tried: Set<string>; run?: Promise<void>; row?: { fanId: string; abort: () => void; done: Promise<void> } };
+  verification: { queue: string[]; preferred?: string; row?: { fanId: string; done: Promise<void> } };
   completeHistories: Set<string>;
   welcome: Set<string>;
   startedAt: number;
@@ -59,6 +58,8 @@ interface Options {
 
 const key = (kind: string, creator: string, fan = '') => `chatgoose:followers:v1:${kind}:${creator}:${fan}`;
 const ready = (row: FollowerRow) => row.status === 'ready' || row.status === 'reply';
+const needsVerification = (row: FollowerRow) => row.status === 'pending' || row.status === 'unknown';
+const workable = (row: FollowerRow) => ready(row) || row.status === 'pending';
 /** Hi is for a conversation that has barely started. Past the limit the fan
  * needs a real reply with the whole chat in view, not a one-line opener. */
 const NEEDS_REPLY = `В переписке уже больше ${HI_GREETING_MAX_TRANSCRIPT} личных сообщений: это диалог, а не приветствие. Откройте чат и используйте Ответ (Reply).`;
@@ -69,10 +70,6 @@ function savedGroupId(value: unknown): string | undefined {
   const id = (value as { groupId?: unknown } | null | undefined)?.groupId;
   return typeof id === 'string' && /^\d{1,24}$/.test(id) ? id : undefined;
 }
-// E134: the inbox text search is a budgeted hint. On some creators it never
-// finds anybody, so twenty empty answers end it; 150 bounds any scan.
-const SEARCH_PROBE = 20;
-const SEARCH_CAP = 150;
 /** A re-check that takes a row out of the queue has to say so: a send that
  * stops silently looks exactly like a send that went through (E134). */
 function blockedText(row: FollowerRow, action: 'send' | 'generate'): string {
@@ -87,6 +84,7 @@ const RECHECK_DELAY_MS = 3000;
 /** This many blips in a row stop the pass instead of doubling the load on a failing Fansly. */
 const RECHECK_FUSE = 5;
 const FUSED_TEXT = 'Fansly отвечает ошибками. Проверка остановлена — нажмите «Продолжить» позже.';
+const ROW_BUSY_TEXT = 'Проверка этого фана уже выполняется. Продолжите позже.';
 function pause(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     const abort = () => { clearTimeout(timer); reject(signal.reason); };
@@ -182,7 +180,7 @@ export class FollowersService {
       const scan: Scan = {
         trace,
         tabId, session: this.options.fansly.followerSession(session, () => this.assertCurrent(scan)), controller: new AbortController(), passController: new AbortController(), conversationCursors: new Map(),
-        profiles: new Map(), hydrated: new Set(), histories: new Map(), groups: new Map(), savedLeads: new Set(), seen: new Map(), search: { done: 0, hits: 0, tried: new Set() }, completeHistories: new Set(), welcome: new Set(),
+        profiles: new Map(), hydrated: new Set(), histories: new Map(), groups: new Map(), savedLeads: new Set(), seen: new Map(), verification: { queue: [] }, completeHistories: new Set(), welcome: new Set(),
         startedAt, welcomeCheckedAt: 0,
         snapshot: { scanId, creatorId: creator.id, creatorName: creator.username || creator.displayName || creator.id, hours, scanning: true, phase: 'welcome', startedAt, rows: [], ...(trace ? { debug: { traceId: scanId } } : {}) },
       };
@@ -206,19 +204,18 @@ export class FollowersService {
     }
   }
 
-  /** Rows that a human action or a background hint left unread are offered to
+  /** Rows that a human action or verification left unread are offered to
    * Continue like any other unknown row. A running pass settles this itself. */
   private offerContinue(scan: Scan): void {
-    if (!scan.snapshot.scanning) scan.snapshot.canContinue = scan.snapshot.rows.some((row) => row.status === 'unknown');
+    scan.snapshot.canContinue = !scan.snapshot.scanning && !scan.snapshot.verification?.active && scan.snapshot.rows.some(needsVerification);
   }
 
   private finishPass(scan: Scan, pass?: TraceSpan): void {
     scan.snapshot.scanning = false;
-    this.offerContinue(scan);
     pass?.end();
+    this.startVerification(scan);
+    this.offerContinue(scan);
     this.finishTrace(scan);
-    // The verdicts are final here; the hints that follow never reopen them.
-    this.searchInBackground(scan);
   }
 
   private finishTrace(scan: Scan): void {
@@ -226,7 +223,7 @@ export class FollowersService {
     const counts: Record<string, number> = {};
     for (const row of scan.snapshot.rows) counts[row.status] = (counts[row.status] ?? 0) + 1;
     scan.trace.event('scan.result', { ...counts, rows: scan.snapshot.rows.length, canContinue: Boolean(scan.snapshot.canContinue), incompleteList: Boolean(scan.snapshot.error) });
-    if (!scan.controller.signal.aborted) scan.trace.update({ state: scan.snapshot.canContinue ? 'paused' : scan.snapshot.error ? 'error' : 'completed' });
+    if (!scan.controller.signal.aborted) scan.trace.update({ state: scan.snapshot.verification?.active ? 'scanning' : scan.snapshot.canContinue ? 'paused' : scan.snapshot.error ? 'error' : 'completed' });
   }
 
   private loadWelcome(scan: Scan, fresh = false, parent: TraceScope | undefined = scan.trace): Promise<WelcomeDefinitions> {
@@ -298,7 +295,7 @@ export class FollowersService {
     // Most new followers with a welcome sit in the inbox prefix of the scan's
     // own period: one listing resolves them together. It is positive only.
     // Absence from it is NEVER evidence of an empty history; a fan it misses
-    // is resolved by identity at a human action (E134).
+    // is resolved by identity in the second phase of this explicit run.
     if (scan.snapshot.rows.length) {
       try {
         const chats = await traced(scan.trace, 'inbox.index', (scope) => this.options.fansly.listInboxPrefix(scan.snapshot.creatorId, cutoff, fans, scan.session, signal, scope));
@@ -317,8 +314,8 @@ export class FollowersService {
 
   resume(tabId: number, scanId: string): FollowersSnapshot {
     const scan = this.get(tabId, scanId);
-    if (scan.snapshot.scanning || !scan.snapshot.canContinue) return structuredClone(scan.snapshot);
-    // Background hints give way to the checks a human asked for.
+    if (scan.snapshot.scanning || scan.snapshot.verification?.active || !scan.snapshot.canContinue) return structuredClone(scan.snapshot);
+    // Resume only unresolved rows; proved rows and their drafts stay untouched.
     scan.passController.abort();
     scan.passController = new AbortController();
     scan.snapshot.scanning = true;
@@ -334,24 +331,32 @@ export class FollowersService {
 
   pause(tabId: number, scanId: string): FollowersSnapshot {
     const scan = this.get(tabId, scanId);
-    if ((scan.snapshot.scanning && ['profiles', 'checking', 'notes'].includes(scan.snapshot.phase ?? '')) || scan.snapshot.background?.active) {
+    if ((scan.snapshot.scanning && ['profiles', 'checking', 'notes'].includes(scan.snapshot.phase ?? '')) || scan.snapshot.verification?.active) {
       scan.trace?.event('scan.pause', { reason: 'human-action' });
+      if (scan.snapshot.verification) scan.snapshot.verification.stopped = 'paused';
       scan.passController.abort();
     }
     return this.state(tabId, scanId);
   }
 
   private async checkRows(scan: Scan): Promise<void> {
-    const rows = scan.snapshot.rows.filter((row) => ['checking', 'unknown'].includes(row.status));
+    const rows = scan.snapshot.rows.filter((row) => {
+      if (!['checking', 'pending', 'unknown'].includes(row.status)) return false;
+      if (!this.locks.has(key('row', scan.snapshot.creatorId, row.id))) return true;
+      // A different window may already be opening this identity. Do not
+      // strand the second run in checking, or race it with another POST.
+      row.status = 'unknown'; row.evidence = undefined; row.detail = ROW_BUSY_TEXT;
+      return false;
+    });
     scan.snapshot.phase = 'profiles';
     scan.trace?.event('rows.queue', { count: rows.length, workers: 3, requestPacing: 'creator-fifo', pause: 'human-action' });
     // Queue spacing/cooldowns are not failed checks. Each actual HTTP attempt
     // still has its own timeout; pagination is bounded, and the user can pause.
     const signal = AbortSignal.any([scan.controller.signal, scan.passController.signal]);
     const skipped = new Set<string>();
-    for (const row of rows) { row.status = 'checking'; row.detail = undefined; }
+    for (const row of rows) { row.status = 'checking'; row.evidence = undefined; row.detail = undefined; }
     // Only a missing username blocks a check: the card, the draft and the
-    // background search term need it. One failed batch must not strand the
+    // draft context need it. One failed batch must not strand the
     // whole queue in a permanent checking state. Creator-only notes are read
     // after the checks (hydrateNotes).
     const missing = rows.filter((row) => !scan.profiles.get(row.id)?.username);
@@ -488,16 +493,16 @@ export class FollowersService {
     }
   }
 
-  private async check(scan: Scan, row: FollowerRow, signal: AbortSignal, parent: TraceScope | undefined = scan.trace, reason = 'scan'): Promise<void> {
+  private async check(scan: Scan, row: FollowerRow, signal: AbortSignal, parent: TraceScope | undefined = scan.trace, reason = 'scan', retry: 'default' | 'none' = 'default'): Promise<void> {
     const scope = parent?.start('row.check', { reason, username: row.username, previousStatus: row.status }, row.id);
     try {
-      await this.checkRow(scan, row, signal, scope, reason);
+      await this.checkRow(scan, row, signal, scope, reason, retry);
       scope?.end({ status: row.status, displayedMessages: row.messages.length, historyRevision: row.historyRevision });
     } catch (error) {
       row.chatKnown = scan.groups.has(row.id);
       // «Чат не найден» stops describing a row once its chat is known; a chat
       // nobody has read to its end is not eligible for sending (E117).
-      if (row.status === 'ready' && row.evidence !== 'history' && row.chatKnown) {
+      if (row.status === 'pending' && row.chatKnown) {
         row.status = 'unknown'; row.evidence = undefined; row.detail = errorText(error);
         scope?.event('row.verdict', { status: 'unknown', reason: 'known-chat-unread' });
       }
@@ -514,7 +519,7 @@ export class FollowersService {
   /** Participants are the custody fence for a chat id, whatever its source. A
    * lead from storage that fails it, or is gone, is forgotten; the check still
    * fails closed. */
-  private async confirmGroup(scan: Scan, fanId: string, groupId: string, signal: AbortSignal, scope?: TraceScope): Promise<FanslyGroup> {
+  private async confirmGroup(scan: Scan, fanId: string, groupId: string, signal: AbortSignal, scope?: TraceScope, retry: 'default' | 'none' = 'default'): Promise<FanslyGroup> {
     const creator = scan.snapshot.creatorId;
     const forget = async (reason: string) => {
       if (!scan.savedLeads.delete(fanId)) return;
@@ -523,7 +528,7 @@ export class FollowersService {
       await traced(scope, 'group.cache-drop', () => this.options.storage.set({ [key('group', creator, fanId)]: null }));
     };
     let group: FanslyGroup;
-    try { group = await traced(scope, 'group.verify', (request) => this.options.fansly.getGroup(groupId, scan.session, signal, request)); }
+    try { group = await traced(scope, 'group.verify', (request) => this.options.fansly.getGroup(groupId, scan.session, signal, request, retry)); }
     catch (error) {
       if (error instanceof ChatGooseError && error.details?.status === 404) await forget('not-found');
       throw error;
@@ -535,6 +540,8 @@ export class FollowersService {
       await forget('participants');
       throw new Error('Не удалось подтвердить участников чата.');
     }
+    const hidden = group.userSettings?.hidden ?? group.users?.find((user) => user.userId === creator)?.userSettings?.hidden;
+    scope?.event('group.visibility', { groupId, creatorId: creator, hidden: hidden === 0 || hidden === 1 ? hidden : null, lastMessagePresent: Object.hasOwn(group, 'lastMessage') });
     scan.savedLeads.delete(fanId);
     return group;
   }
@@ -542,28 +549,37 @@ export class FollowersService {
   /** `POST /group` answers with the fan's existing chat, however old (E134).
    * One attempt, never retried. The caller re-checks the row before anything
    * is decided on it. */
-  private async resolveGroup(scan: Scan, fanId: string, signal: AbortSignal, scope?: TraceScope): Promise<string> {
+  private async resolveGroup(scan: Scan, fanId: string, signal: AbortSignal, scope?: TraceScope, admissionSignal = signal): Promise<string> {
     this.assertCurrent(scan);
-    const created = await traced(scope, 'group.create', (request) => this.options.fansly.createFollowerGroup(fanId, scan.snapshot.creatorId, scan.session, signal, request)).catch((error: unknown) => {
+    const created = await traced(scope, 'group.create', (request) => this.options.fansly.createFollowerGroup(fanId, scan.snapshot.creatorId, scan.session, signal, request, admissionSignal)).catch((error: unknown) => {
       // Fansly's code is all that is known; what it means is not guessed.
       const code = error instanceof ChatGooseError && error.key === 'fansly_server_error' ? error.details?.code : undefined;
-      throw code ? new Error(`Fansly отказал в открытии чата (код ${code}). Возможно, у фана закрыты сообщения.`) : error;
+      throw code ? new Error(`Fansly отказал в открытии чата (код ${code}). Возможно, у фана закрыты сообщения.`, { cause: error }) : error;
     });
+    this.assertCurrent(scan);
     if (!savedGroupId({ groupId: created.id })) throw new ChatGooseError('fansly_server_error');
     scan.groups.set(fanId, created.id);
     scan.savedLeads.delete(fanId);
     // The answer listed exactly this pair, and may already name a last message.
     scan.seen.set(fanId, { fanId, groupId: created.id, verified: true, lastMessageId: created.lastMessage?.id ?? null, lastMessage: created.lastMessage });
     scan.completeHistories.delete(fanId);
+    // Save the verified identity before any history read or pause can fail.
+    await traced(scope, 'group.cache-write', () => this.options.storage.set({ [key('group', scan.snapshot.creatorId, fanId)]: { groupId: created.id, observedAt: Date.now() } }), { groupId: created.id });
     return created.id;
   }
 
-  /** E134: a row nobody found a chat for is resolved by identity, only at an
-   * explicit human action (verify or generate) and never during a scan. */
-  private async resolveByIdentity(scan: Scan, row: FollowerRow, signal: AbortSignal, scope?: TraceScope): Promise<void> {
-    if (row.status !== 'ready' || row.evidence === 'history') return;
-    await this.resolveGroup(scan, row.id, signal, scope);
-    await this.check(scan, row, signal, scope, 'after-group-create');
+  /** Only a user-started verification run or an explicit action may create a
+   * technical chat. A soft Pause lets an in-flight POST finish and save its ID;
+   * it stops before the next read. Closing/changing the session still aborts. */
+  private async resolveByIdentity(scan: Scan, row: FollowerRow, signal: AbortSignal, scope?: TraceScope, finishOpening = false): Promise<void> {
+    if (row.status !== 'pending') return;
+    signal.throwIfAborted();
+    if (!scan.groups.has(row.id)) {
+      row.groupId = await this.resolveGroup(scan, row.id, finishOpening ? scan.controller.signal : signal, scope, signal);
+      row.chatKnown = true;
+    }
+    signal.throwIfAborted();
+    await this.check(scan, row, signal, scope, 'after-group-create', finishOpening ? 'none' : 'default');
   }
 
   /** A cooldown can last minutes (E133). A human action that joined the lane
@@ -574,13 +590,22 @@ export class FollowersService {
     if (waitMs > 0) throw new ChatGooseError('rate_limited', { details: { status: 429, retryAfterMs: waitMs, retryAtMs: Date.now() + waitMs }, retryAfterMs: waitMs, retryAtMs: Date.now() + waitMs });
   }
 
-  /** A human action on a fan takes over from a background hint on the same
-   * fan: the hint is cancelled and has fully unwound before the action reads. */
+  /** A human joins an in-flight verification instead of aborting and
+   * repeating its POST. All mutating row actions share one creator/fan lock. */
   private async takeOver(scan: Scan, fanId: string): Promise<void> {
-    const hint = scan.search.row;
-    if (hint?.fanId !== fanId) return;
-    hint.abort();
-    await hint.done;
+    const row = scan.verification.row;
+    if (row?.fanId === fanId) await row.done;
+    this.assertCurrent(scan);
+  }
+
+  prioritize(tabId: number, scanId: string, fanId: string): FollowersSnapshot {
+    const scan = this.get(tabId, scanId);
+    if (scan.snapshot.rows.some((row) => row.id === fanId && (needsVerification(row) || row.status === 'checking'))) {
+      scan.verification.preferred = fanId;
+      scan.trace?.event('verification.prioritize', { fanId });
+    }
+    // Selection only reorders an already authorised run; it never starts one.
+    return this.state(tabId, scanId);
   }
 
   private traceMessage(scope: TraceScope, scan: Scan, message: FollowerMessageEvidence, source: string): void {
@@ -657,7 +682,7 @@ export class FollowersService {
     return this.state(tabId, scanId);
   }
 
-  private async checkRow(scan: Scan, row: FollowerRow, signal: AbortSignal, scope: TraceScope | undefined, reason: string): Promise<void> {
+  private async checkRow(scan: Scan, row: FollowerRow, signal: AbortSignal, scope: TraceScope | undefined, reason: string, retry: 'default' | 'none'): Promise<void> {
     const verdict = (status: FollowerRow['status'], why: string, evidence?: FollowerRow['evidence']) => {
       row.status = status; row.evidence = evidence;
       scope?.event('row.verdict', { status, reason: why, ...(evidence ? { evidence } : {}) });
@@ -718,10 +743,11 @@ export class FollowersService {
       // exactly this pair already is the participant check. A human action
       // always reads GET /group.
       const shown = scan.seen.get(row.id)?.groupId === groupId ? scan.seen.get(row.id) : undefined;
-      const scanTime = reason === 'scan' || reason === 'background-search';
-      const group = scanTime && shown?.verified ? undefined : await this.confirmGroup(scan, row.id, groupId, signal, scope);
+      const scanTime = reason === 'scan';
+      const group = scanTime && shown?.verified ? undefined : await this.confirmGroup(scan, row.id, groupId, signal, scope, retry);
       if (!group) scope?.event('group.participants', { source: 'listing', count: 2, creatorPresent: true, fanPresent: true });
       scan.savedLeads.delete(row.id);
+      row.groupId = groupId;
       if (savedGroup !== groupId) await traced(scope, 'group.cache-write', () => this.options.storage.set({ [groupKey]: { groupId, observedAt: Date.now() } }), { groupId });
       // The chat's newest message, as any answer of this scan showed it. By the
       // creator and personal, it is positive proof; it is never negative.
@@ -737,7 +763,7 @@ export class FollowersService {
       let before: string | null = null;
       const seen = new Set<string>();
       for (let pageIndex = 0; pageIndex < 30 && !(scanTime && lastPersonal); pageIndex += 1) {
-        const page: Awaited<ReturnType<FanslyClient['getMessagePage']>> = await traced(scope, 'history.page', (request) => this.options.fansly.getMessagePage(groupId, before, scan.session, signal, request), { page: pageIndex + 1, before });
+        const page: Awaited<ReturnType<FanslyClient['getMessagePage']>> = await traced(scope, 'history.page', (request) => this.options.fansly.getMessagePage(groupId, before, scan.session, signal, request, retry), { page: pageIndex + 1, before });
         this.assertCurrent(scan);
         if (!Array.isArray(page.messages)) {
           scope?.event('history.invalid', { reason: 'missing-messages-array', page: pageIndex + 1 });
@@ -794,7 +820,7 @@ export class FollowersService {
     if (attempt && attempt.state !== 'aborted') { verdict('uncertain', 'unconfirmed-local-custody'); row.detail = 'Результат прошлой отправки не подтверждён. Повтор заблокирован; обновление проверит историю.'; return; }
     // No chat found proves nothing (E134): the listing hides some chats and
     // has no total. The row stays workable, and says what it rests on.
-    if (!groupId) { verdict('ready', 'chat-not-found', 'unverified'); row.detail = undefined; return; }
+    if (!groupId) { verdict('pending', 'identity-unresolved'); row.detail = undefined; return; }
     if (!complete) {
       verdict('unknown', lagging ? 'empty-page-with-last-message' : 'incomplete-history');
       throw new Error(lagging ? 'Fansly вернул пустую историю, хотя в чате есть сообщения. Отправка пока недоступна.' : 'История не дочитана. Отправка пока недоступна.');
@@ -811,21 +837,21 @@ export class FollowersService {
     return { history, window: history.map((message) => ({ automated: isAutomatedGreetingMessage(message, scan.snapshot.creatorId, scan.welcome) })) };
   }
 
-  /** «Проверить чат» (E134): the explicit human action that resolves an
-   * unverified row by identity. It spends no generation and sends nothing. */
+  /** Explicit verification uses the same checker as the automatic tail.
+   * It spends no generation and sends nothing. */
   async verify(tabId: number, scanId: string, fanId: string): Promise<FollowersSnapshot> {
     const scan = this.get(tabId, scanId);
     return traced(scan.trace, 'verify', async (scope) => {
+      await this.takeOver(scan, fanId);
       const row = scan.snapshot.rows.find((v) => v.id === fanId);
-      if (!row || !ready(row)) throw new Error('Сначала дождитесь проверки фоловера.');
+      if (!row || !(workable(row) || row.status === 'unknown')) throw new Error('Сначала дождитесь проверки фоловера.');
       // One lock with generation: both may resolve the same chat.
-      const lock = key('generation', scan.snapshot.creatorId, fanId);
+      const lock = key('row', scan.snapshot.creatorId, fanId);
       if (this.locks.has(lock)) throw new ChatGooseError('another_operation');
       this.locks.add(lock);
       try {
         this.assertNotCooling(scan);
         const signal = AbortSignal.any([scan.controller.signal, AbortSignal.timeout(180_000)]);
-        await this.takeOver(scan, fanId);
         await this.check(scan, row, signal, scope, 'before-verify');
         await this.resolveByIdentity(scan, row, signal, scope);
         return structuredClone(scan.snapshot);
@@ -839,17 +865,17 @@ export class FollowersService {
   }
 
   private async generateDraft(scan: Scan, fanId: string, scope?: TraceScope): Promise<string> {
+    await this.takeOver(scan, fanId);
     const row = scan.snapshot.rows.find((v) => v.id === fanId);
-    if (!row || !ready(row)) throw new Error('Сначала дождитесь проверки фоловера.');
-    const lock = key('generation', scan.snapshot.creatorId, fanId);
+    if (!row || !workable(row)) throw new Error('Сначала дождитесь проверки фоловера.');
+    const lock = key('row', scan.snapshot.creatorId, fanId);
     if (this.locks.has(lock)) throw new ChatGooseError('another_operation');
     this.locks.add(lock);
     try {
       this.assertNotCooling(scan);
       const signal = AbortSignal.any([scan.controller.signal, AbortSignal.timeout(180_000)]);
-      await this.takeOver(scan, fanId);
       await this.check(scan, row, signal, scope, 'before-generation');
-      if (!ready(row)) throw new Error(blockedText(row, 'generate'));
+      if (!ready(row) && row.status !== 'pending') throw new Error(blockedText(row, 'generate'));
       const state = await this.options.readState();
       const personaKey = resolveMappedPersonalityId(state.accountMappings, scan.snapshot.creatorId, scan.session.accountId, state.accountAliases);
       const persona = findActivePersona(state.personaCatalog, personaKey);
@@ -944,8 +970,9 @@ export class FollowersService {
   }
 
   private async sendDraft(scan: Scan, fanId: string, text: string, historyRevision?: string, scope?: TraceScope): Promise<FollowersSnapshot> {
+    await this.takeOver(scan, fanId);
     const row = scan.snapshot.rows.find((v) => v.id === fanId);
-    if (!row || !ready(row)) throw new Error('Отправка этому фоловеру сейчас недоступна.');
+    if (!row || !workable(row)) throw new Error('Отправка этому фоловеру сейчас недоступна.');
     const reviewedRevision = historyRevision ?? row.historyRevision;
     const assertReviewed = () => {
       scope?.event('send.review-check', { reviewed: reviewedRevision, current: row.historyRevision, matches: row.historyRevision === reviewedRevision });
@@ -953,7 +980,7 @@ export class FollowersService {
     };
     assertReviewed();
     const creator = scan.snapshot.creatorId;
-    const lock = key('send', creator, fanId);
+    const lock = key('row', creator, fanId);
     if (this.locks.has(lock)) throw new ChatGooseError('another_operation');
     this.locks.add(lock);
     let dispatched = false;
@@ -967,11 +994,10 @@ export class FollowersService {
       // Before anything is reserved: see `assertNotCooling`.
       this.assertNotCooling(scan);
       const signal = AbortSignal.timeout(60_000);
-      await this.takeOver(scan, fanId);
       await this.check(scan, row, signal, scope, 'before-send');
       // A re-check that ends the send is an error the chatter sees (E134), not
       // a snapshot that looks like a delivery. The draft stays where it is.
-      if (!ready(row)) throw new Error(blockedText(row, 'send'));
+      if (!ready(row) && row.status !== 'pending') throw new Error(blockedText(row, 'send'));
       assertReviewed();
       let groupId = scan.groups.get(fanId);
       if (!groupId) {
@@ -979,7 +1005,7 @@ export class FollowersService {
         // POST /group can resolve an OLD existing conversation. Recheck it
         // before sending, even when nothing else found the chat.
         await this.check(scan, row, signal, scope, 'after-group-create');
-        if (!ready(row)) throw new Error(blockedText(row, 'send'));
+        if (!ready(row) && row.status !== 'pending') throw new Error(blockedText(row, 'send'));
         assertReviewed();
       }
       // Nothing is ever sent from «чат не найден»: by now the chat is resolved
@@ -1053,53 +1079,78 @@ export class FollowersService {
     } finally { this.locks.delete(lock); this.offerContinue(scan); }
   }
 
-  /** E134: the inbox text search is an optional, budgeted, positive-only hint.
-   * It follows the verdicts and never reopens them: a hit is checked like any
-   * listed chat, a miss changes nothing. One request at a time, each awaited,
-   * so a human click never queues behind more than one of them. */
-  private searchInBackground(scan: Scan): void {
-    const budget = scan.search;
-    const creator = scan.snapshot.creatorId;
+  /** Phase two: one unresolved fan at a time, through the same checker and
+   * paced transport as explicit verification. No text search or AI dispatch. */
+  private startVerification(scan: Scan): void {
+    if (scan.controller.signal.aborted || scan.passController.signal.aborted || scan.snapshot.verification?.active) return;
+    const queue = scan.verification;
+    queue.queue = scan.snapshot.rows.filter((row) => row.status === 'pending').map((row) => row.id);
+    if (!queue.queue.length) {
+      if (scan.snapshot.verification) scan.snapshot.verification.remaining = scan.snapshot.rows.filter(needsVerification).length;
+      return;
+    }
+    const view: NonNullable<FollowersSnapshot['verification']> = { active: true, total: queue.queue.length, remaining: queue.queue.length };
+    scan.snapshot.verification = view;
     const signal = AbortSignal.any([scan.controller.signal, scan.passController.signal]);
-    const open = (row: FollowerRow) => row.status === 'ready' && row.evidence === 'unverified' && !scan.groups.has(row.id) && !budget.tried.has(row.id) && Boolean(this.searchTerm(scan, row).trim());
-    const spent = () => budget.done >= SEARCH_CAP ? 'cap' : budget.done >= SEARCH_PROBE && !budget.hits ? 'no-hits' : null;
-    const rows = scan.snapshot.rows.filter(open);
-    if (signal.aborted || !rows.length || spent()) return;
-    // Visible in the very snapshot that stops `scanning`, so the window keeps
-    // polling; it is reported beside the finished verification, not inside it.
-    const view: NonNullable<FollowersSnapshot['background']> = { active: true, searched: budget.done, total: budget.done + rows.length };
-    scan.snapshot.background = view;
     const work = async () => {
-      scan.trace?.event('background.plan', { rows: rows.length, searched: budget.done, hits: budget.hits, probe: SEARCH_PROBE, cap: SEARCH_CAP });
-      let reason = 'done';
-      for (const row of rows) {
-        const stop = signal.aborted ? 'stopped' : spent() ?? ((this.options.fansly.followerReadStatus(scan.session)?.cooldownUntil ?? 0) > Date.now() ? 'lane-cooling-down' : null);
-        if (stop) { reason = stop; break; }
-        // A human is on this fan, or has resolved the chat since the plan.
-        if (!open(row) || this.locks.has(key('generation', creator, row.id)) || this.locks.has(key('send', creator, row.id))) continue;
-        budget.tried.add(row.id); budget.done += 1; view.searched = budget.done;
-        const own = new AbortController();
-        const rowSignal = AbortSignal.any([signal, own.signal]);
-        const search = traced(scan.trace, 'background.search', async (scope) => {
-          const hit = await this.options.fansly.findFollowerGroup(row.id, this.searchTerm(scan, row), creator, scan.session, rowSignal, scope);
-          this.assertCurrent(scan);
-          rowSignal.throwIfAborted();
-          scope?.event('background.search-result', { hit: hit?.groupId ?? null, withUsers: hit?.verified ?? false });
-          if (!hit) return;
-          budget.hits += 1;
-          if (scan.groups.has(row.id) || row.status !== 'ready' || row.evidence !== 'unverified') return;
-          scan.groups.set(row.id, hit.groupId); scan.seen.set(row.id, hit);
-          await this.check(scan, row, rowSignal, scope, 'background-search');
-        }, undefined, row.id);
-        budget.row = { fanId: row.id, abort: () => own.abort(), done: search.then(() => {}, () => {}) };
-        try { await search; }
-        catch (error) {
-          // A failed hint is no evidence either way; a limit ends the phase.
-          if (error instanceof ChatGooseError && error.key === 'rate_limited') { reason = 'rate-limited'; break; }
-        } finally { budget.row = undefined; }
+      scan.trace?.event('verification.plan', { count: queue.queue.length });
+      let failures = 0;
+      while (queue.queue.length && !signal.aborted) {
+        this.assertCurrent(scan);
+        if ((this.options.fansly.followerReadStatus(scan.session)?.cooldownUntil ?? 0) > Date.now()) { view.stopped = 'cooldown'; break; }
+        const preferred = queue.preferred ? queue.queue.indexOf(queue.preferred) : -1;
+        const fanId = queue.queue.splice(preferred >= 0 ? preferred : 0, 1)[0]!;
+        queue.preferred = undefined;
+        const row = scan.snapshot.rows.find((candidate) => candidate.id === fanId)!;
+        const lock = key('row', scan.snapshot.creatorId, fanId);
+        if (row.status !== 'pending') continue;
+        if (this.locks.has(lock)) {
+          row.status = 'unknown'; row.detail = ROW_BUSY_TEXT;
+          continue;
+        }
+        this.locks.add(lock);
+        view.fanId = fanId;
+        row.status = 'checking'; row.detail = undefined;
+        const done = Promise.resolve().then(async () => {
+          try {
+            await traced(scan.trace, 'verification.row', async (scope) => {
+              await this.check(scan, row, signal, scope, 'before-verification', 'none');
+              await this.resolveByIdentity(scan, row, signal, scope, true);
+            }, undefined, fanId);
+            failures = 0;
+          } catch (error) {
+            // Never retry a POST within a pass, including timeout or Pause.
+            // Successfully resolved IDs already survived in storage.
+            row.status = signal.aborted ? 'pending' : 'unknown'; row.evidence = undefined;
+            row.detail = signal.aborted ? 'Проверка на паузе. Продолжите проверку оставшихся.' : errorText(error);
+            scan.trace?.event('verification.failed', { fanId, paused: signal.aborted, reason: error instanceof ChatGooseError ? error.key : 'check-failed' });
+            const cause = error instanceof Error && error.cause instanceof ChatGooseError ? error.cause : error;
+            const status = cause instanceof ChatGooseError ? cause.details?.status : undefined;
+            const failing = !signal.aborted && (cause instanceof TypeError || cause instanceof Error && ['TimeoutError', 'AbortError'].includes(cause.name) || cause instanceof ChatGooseError && (cause.key === 'network_error' || status === 0 || status === 404 || typeof status === 'number' && status >= 500));
+            failures = failing ? failures + 1 : 0;
+            if (status === 429 || (cause instanceof ChatGooseError && cause.key === 'rate_limited')) { view.stopped = 'cooldown'; scan.passController.abort(); }
+            else if (failures >= RECHECK_FUSE) {
+              row.detail = FUSED_TEXT;
+              view.stopped = 'errors';
+              scan.trace?.event('verification.fuse', { failures });
+              scan.passController.abort();
+            }
+          } finally {
+            this.locks.delete(lock);
+          }
+        });
+        queue.row = { fanId, done };
+        await done;
+        queue.row = undefined; view.fanId = undefined;
+        view.remaining = scan.snapshot.rows.filter(needsVerification).length;
       }
-      scan.trace?.event('background.result', { reason, searched: budget.done, hits: budget.hits });
     };
-    budget.run = (budget.run ?? Promise.resolve()).then(work).catch(() => {}).finally(() => { view.active = false; this.offerContinue(scan); });
+    void Promise.resolve().then(work).catch((error: unknown) => {
+      if (!scan.controller.signal.aborted) scan.snapshot.error = errorText(error);
+    }).finally(() => {
+      view.active = false; view.fanId = undefined; queue.row = undefined;
+      view.remaining = scan.snapshot.rows.filter(needsVerification).length;
+      this.offerContinue(scan); this.finishTrace(scan);
+    });
   }
 }

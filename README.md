@@ -45,6 +45,13 @@ from prose when checking what is installed or live; verify the signed update fee
   from one shared, cached, paced service
   (`src/background/welcome-definitions.ts`). The chat reads one Fansly page; a
   conversation that does not fit it is Reply or Ping territory (E136).
+- **Новые фоловеры** (E138, unreleased) — a fast pass shows the followers and
+  confirmed results, then one automatic queue resolves only the remaining fans
+  by their account IDs and reads their chats. Confirmed rows are usable while
+  the queue runs; selecting a pending fan makes them next. Pause/continue keeps
+  results and drafts and checks only the remainder. A run may create empty
+  technical chats. Generation and sending still require a human click and
+  confirmed history; a listing/search miss never means «Не писали».
 - **Spenders** — kernel-backed ranking with data freshness and deleted-account labels.
 - **Vault uploader** — on `/creator/vault`, a folder of media goes into the open
   album one file at a time through Fansly's own upload form, each confirmed by
@@ -81,6 +88,32 @@ for access to that origin. Do not create or paste Anthropic, OpenRouter, or othe
 provider credentials into the extension — it holds none.
 
 ## Development
+
+### Two-phase follower verification (E138, unreleased)
+
+`FollowersService` keeps one scan with two phases. Discovery and the first
+checks reuse positive proofs, inbox matches, and saved creator/fan chat IDs.
+Unresolved identities become `pending`, never `ready`. The sequential tail
+uses a single `POST /group` attempt, validates both participants, saves the ID,
+and reads `GET /group` plus paginated history through the existing checker.
+A missing `lastMessage` field in the POST response proves nothing about history.
+Only an exhausted history proves `ready`/`reply`; a personal outgoing message
+proves `contacted`. `hidden` is diagnostic data with no inferred cause.
+
+Follower GETs and chat-resolution POSTs share one creator lane. Phase-two
+identity/history requests are not automatically retried: the first 429 stops
+the tail; five consecutive network, timeout, 404 or 5xx failures stop an outage
+run. Local refusals remain visible per fan. A soft pause cancels a POST still
+waiting for admission, but lets an already dispatched POST finish and save the
+ID before stopping. Closing the window or changing the session aborts the work.
+Continue rechecks only unfinished rows and reuses saved IDs. Selecting a row
+only changes the next item of an existing run.
+
+Verify/generate/send share the queue's creator/fan lock. Sending retains the
+live-history and reviewed-revision checks, Hub reservation/dispatch and durable
+attempt journal. `POST /message` never enters the read FIFO after Hub dispatch,
+and an uncertain delivery is never retried. Text search remains only a read-only
+preview fallback for old positive proofs that carry no saved chat ID.
 
 ### New-follower diagnostics
 

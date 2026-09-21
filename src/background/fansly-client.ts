@@ -331,7 +331,8 @@ export class FanslyClient {
   private readonly followerSessions = new WeakMap<SessionTemplate, (() => void) | undefined>();
 
   /** An isolated identity snapshot explicitly opts this feature's reads into
-   * pacing; ordinary chat clients and all write paths keep their own policy. */
+   * pacing; resolving a follower chat shares that lane. Message dispatch keeps
+   * its one-attempt policy and never waits after Hub custody. */
   followerSession(session: SessionTemplate, validate?: () => void): SessionTemplate {
     const copy = structuredClone(session);
     this.followerSessions.set(copy, validate);
@@ -550,6 +551,7 @@ export class FanslyClient {
     session: SessionTemplate,
     signal: AbortSignal,
     trace?: TraceScope,
+    retry: 'default' | 'none' = 'default',
   ): Promise<FanslyGroup> {
     return this.fetchEnvelope<FanslyGroup>(
       new URL(`https://apiv3.fansly.com/api/v1/group/${groupId}/`),
@@ -557,7 +559,7 @@ export class FanslyClient {
       'group',
       signal,
       true,
-      'default',
+      retry,
       trace,
     );
   }
@@ -631,7 +633,7 @@ export class FanslyClient {
 
   /** Writes never enter fetchEnvelope's read retry loop. Any failure after
    * dispatch is ambiguous to the caller and must remain in its durable journal. */
-  private async postOnce<T>(path: 'group' | 'message', body: unknown, session: SessionTemplate, signal: AbortSignal, trace?: TraceScope): Promise<T> {
+  private async postOnce<T>(path: 'group' | 'message', body: unknown, session: SessionTemplate, signal: AbortSignal, trace?: TraceScope, admissionSignal = signal): Promise<T> {
     const headers = new Headers({
       authorization: session.authorization,
       'fansly-client-id': session.fanslyClientId,
@@ -642,19 +644,29 @@ export class FanslyClient {
     const check = session.routeChecks[path] ?? session.latestCheck;
     if (check) headers.set('fansly-client-check', check);
     const requestUrl = withNgswBypass(new URL(`https://apiv3.fansly.com/api/v1/${path}`));
-    // A write stays one attempt and outside the read spacing. Opening a chat
-    // is refused at once while Fansly has the creator's lane in a cooldown;
-    // a message is never held here: by then the hub holds a dispatch, and a
-    // wait that outlives the send deadline would leave a false «не
-    // подтверждено» for a message that never left (E133).
+    // Chat resolution is paced like a read, but remains a single POST attempt.
+    // Message dispatch never waits here after the Hub has granted custody.
     const creatorId = session.resolvedAccountId ?? session.accountId;
     const paced = this.followerSessions.has(session);
     const coolingMs = paced && path === 'group' ? (this.followerReads.status(creatorId)?.cooldownUntil ?? 0) - Date.now() : 0;
     // Traced as our own refusal: in an export it must not read as a 429 Fansly sent.
     if (coolingMs > 0) trace?.event('http.write-refused', { method: 'POST', path: requestUrl.pathname, reason: 'lane-cooling-down', coolingMs });
     if (coolingMs > 0) throw new ChatGooseError('rate_limited', { details: { status: 429, retryAfterMs: coolingMs, retryAtMs: Date.now() + coolingMs }, retryAfterMs: coolingMs, retryAtMs: Date.now() + coolingMs });
-    const attemptTrace = trace?.start('http', { method: 'POST', path: requestUrl.pathname, query: requestUrl.search, attempt: 1, retry: false, timeoutMs: FANSLY_REQUEST_TIMEOUT_MS });
+    // Pause cancels a queued opening, but an already dispatched opening may
+    // finish so its verified ID can be saved. Close/session change abort both.
+    const queuedSignal = admissionSignal === signal ? signal : AbortSignal.any([signal, admissionSignal]);
+    const permit = paced && path === 'group'
+      ? await this.followerReads.acquire(creatorId, 'POST', requestUrl.pathname, queuedSignal, trace) : undefined;
+    let attemptTrace: ReturnType<TraceScope['start']> | undefined;
     try {
+      queuedSignal.throwIfAborted();
+      if (paced) {
+        this.followerSessions.get(session)?.();
+        const live = this.sessionStore.getSessionByAccount(session.accountId);
+        if (!live?.connected || live.authorization !== session.authorization || live.fanslySessionId !== session.fanslySessionId || live.resolvedAccountId !== session.resolvedAccountId) throw new ChatGooseError('chat_changed');
+      }
+      headers.set('fansly-client-ts', String(Date.now()));
+      attemptTrace = trace?.start('http', { method: 'POST', path: requestUrl.pathname, query: requestUrl.search, attempt: 1, retry: false, timeoutMs: FANSLY_REQUEST_TIMEOUT_MS });
       const response = await fetch(requestUrl, {
         method: 'POST', headers, body: JSON.stringify(body), credentials: 'omit',
         signal: AbortSignal.any([signal, AbortSignal.timeout(FANSLY_REQUEST_TIMEOUT_MS)]),
@@ -678,17 +690,19 @@ export class FanslyClient {
       attemptTrace?.end({ status: response.status, outcome: 'success' });
       return envelope.response;
     } catch (error) { attemptTrace?.fail(error); throw error; }
+    finally { permit?.release(); }
   }
 
   /** `POST /group` is get-or-create by identity: it answers with the fan's
    * existing chat, however old, and only otherwise with a new empty one. */
-  async createFollowerGroup(fanId: string, creatorId: string, session: SessionTemplate, signal: AbortSignal, trace?: TraceScope): Promise<{ id: string; lastMessage: FanslyMessage | null }> {
+  async createFollowerGroup(fanId: string, creatorId: string, session: SessionTemplate, signal: AbortSignal, trace?: TraceScope, admissionSignal = signal): Promise<{ id: string; lastMessage: FanslyMessage | null }> {
     const group = await this.postOnce<FanslyGroup>('group', {
       users: [{ userId: fanId, permissionFlags: 0 }, { userId: creatorId, permissionFlags: 0 }],
       recipients: [], lastMessage: null, userSettings: null, type: 1,
-    }, session, signal, trace);
+    }, session, signal, trace, admissionSignal);
     if (!group.id || !/^\d{1,24}$/.test(group.id) || group.users?.length !== 2 || !group.users.some((v) => v.userId === fanId) || !group.users.some((v) => v.userId === creatorId)) throw new ChatGooseError('fansly_server_error');
-    trace?.event('group.create-result', { groupId: group.id, lastMessageId: group.lastMessage?.id ?? null });
+    const hidden = group.users.find((user) => user.userId === creatorId)?.userSettings?.hidden;
+    trace?.event('group.create-result', { groupId: group.id, lastMessageId: group.lastMessage?.id ?? null, lastMessagePresent: Object.hasOwn(group, 'lastMessage'), creatorId, hidden: hidden === 0 || hidden === 1 ? hidden : null });
     return { id: group.id, lastMessage: group.lastMessage ?? null };
   }
 
@@ -763,6 +777,7 @@ export class FanslyClient {
     session: SessionTemplate,
     signal: AbortSignal,
     trace?: TraceScope,
+    retry: 'default' | 'none' = 'default',
   ): Promise<FanslyMessagePageResponse> {
     const url = new URL('https://apiv3.fansly.com/api/v1/message');
     url.searchParams.set('groupId', groupId);
@@ -770,7 +785,7 @@ export class FanslyClient {
     if (before) {
       url.searchParams.set('before', before);
     }
-    return this.fetchEnvelope<FanslyMessagePageResponse>(url, session, 'message', signal, false, 'default', trace);
+    return this.fetchEnvelope<FanslyMessagePageResponse>(url, session, 'message', signal, false, retry, trace);
   }
 
   private async getMediaOrderHistory(

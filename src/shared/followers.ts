@@ -2,7 +2,7 @@ import type { FanslyAccountResponse, FanslyMessage } from './types.js';
 
 export const FOLLOWER_HOURS = [1, 3, 6, 12, 24, 48, 72, 168, 336, 720] as const;
 export type { FollowersRequest } from './followers-protocol.js';
-export type FollowerStatus = 'checking' | 'ready' | 'reply' | 'contacted' | 'unknown' | 'sending' | 'uncertain' | 'sent';
+export type FollowerStatus = 'checking' | 'pending' | 'ready' | 'reply' | 'contacted' | 'unknown' | 'sending' | 'uncertain' | 'sent';
 export interface FollowerDisplayMessage { id: string; own: boolean; automated: boolean; text: string; createdAt?: number }
 export interface FollowerConversation {
   groupId?: string;
@@ -21,12 +21,13 @@ export interface FollowerRow {
   avatarUrl: string | null;
   bio: string;
   status: FollowerStatus;
-  /** What a `ready`/`reply` verdict rests on (E134). `history`: the chat was
-   * resolved and read to a confirmed end. `unverified`: no chat was found yet,
-   * which proves nothing; an inbox listing or search miss is never absence. */
-  evidence?: 'history' | 'unverified';
+  /** Only history read to a confirmed end makes a ready/reply row eligible.
+   * A listing miss remains pending, never a negative history verdict. */
+  evidence?: 'history';
   /** A chat with this fan is known, whether or not its history could be read. */
   chatKnown?: boolean;
+  /** Published only after this run has confirmed the two participants. */
+  groupId?: string;
   historyRevision: string;
   detail?: string;
   messages: FollowerDisplayMessage[];
@@ -44,9 +45,9 @@ export interface FollowersSnapshot {
   cutoff?: number;
   startedAt?: number;
   pacing?: { cooldownUntil: number; intervalMs: number };
-  /** The optional inbox-search hints that follow the checks (E134). They are
-   * not part of the verification and never hold `scanning` open. */
-  background?: { active: boolean; searched: number; total: number };
+  /** The second phase resolves only the rows the fast pass could not prove.
+   * Ready rows remain usable while this bounded queue runs. */
+  verification?: { active: boolean; remaining: number; total: number; fanId?: string; stopped?: 'paused' | 'cooldown' | 'errors' };
   rows: FollowerRow[];
   error?: string;
   debug?: { traceId: string };

@@ -7,7 +7,7 @@ function harness() {
   document.body.replaceChildren();
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value() { this.setAttribute('open', ''); } });
   Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value() { this.removeAttribute('open'); } });
-  const snapshot: FollowersSnapshot = { scanId: '11111111-1111-4111-8111-111111111111', creatorId: '1', creatorName: 'creator', hours: 48, scanning: false, rows: ['2', '3'].map((id) => ({ id, followedAt: Date.now() - 7200_000, username: `fan${id}`, displayName: `Fan ${id}`, customName: id === '2' ? 'Alex' : null, avatarUrl: null, bio: '', status: 'ready', historyRevision: '22222222-2222-4222-8222-222222222222', messages: [] })) };
+  const snapshot: FollowersSnapshot = { scanId: '11111111-1111-4111-8111-111111111111', creatorId: '1', creatorName: 'creator', hours: 48, scanning: false, rows: ['2', '3'].map((id) => ({ id, followedAt: Date.now() - 7200_000, username: `fan${id}`, displayName: `Fan ${id}`, customName: id === '2' ? 'Alex' : null, avatarUrl: null, bio: '', status: 'ready', evidence: 'history', historyRevision: '22222222-2222-4222-8222-222222222222', messages: [] })) };
   const values: Record<string, unknown> = {};
   const sendMessage = vi.fn(async (request: FollowersRequest): Promise<FollowersResponse> => {
     if (request.action === 'generate') return { ok: true, text: 'hey alex, what was your best run this week?' };
@@ -47,7 +47,7 @@ describe('followers window human actions', () => {
     h.snapshot.scanning = true; h.snapshot.phase = 'notes'; h.snapshot.rows[0]!.customName = null;
     h.window.open();
     await vi.waitFor(() => expect(h.root.querySelector('textarea')).not.toBeNull());
-    expect(h.root.querySelector('.progress')?.textContent).toBe('Загружаем сохранённые имена…');
+    expect(h.root.querySelector('.progress')?.textContent).toBe('Проверено 2 из 2');
     expect(h.root.querySelector<HTMLButtonElement>('.pause')?.hidden).toBe(false);
     const original = h.root.querySelector('textarea')!;
     original.value = 'hello there'; original.dispatchEvent(new Event('input')); original.focus(); original.setSelectionRange(4, 7);
@@ -110,11 +110,11 @@ describe('followers window human actions', () => {
   });
   it('continues the existing scan without regenerating or losing an edited draft', async () => {
     const h = harness();
-    h.snapshot.canContinue = true;
+    h.snapshot.canContinue = true; h.snapshot.rows[1]!.status = 'unknown'; h.snapshot.rows[1]!.evidence = undefined;
     await vi.waitFor(() => expect(h.root.querySelector('textarea')).not.toBeNull());
     // Refresh once to pick up the paused snapshot returned by the transport.
     h.root.querySelector<HTMLButtonElement>('.refresh')!.click();
-    await vi.waitFor(() => expect(h.root.querySelector('.refresh')?.textContent).toBe('Продолжить'));
+    await vi.waitFor(() => expect(h.root.querySelector('.refresh')?.textContent).toBe('Проверить оставшихся: 1'));
     const textarea = h.root.querySelector('textarea')!;
     textarea.value = 'saved draft'; textarea.dispatchEvent(new Event('input'));
     h.root.querySelector<HTMLButtonElement>('.refresh')!.click();
@@ -199,16 +199,19 @@ describe('followers window human actions', () => {
     expect(h.sendMessage.mock.calls.at(-1)?.[0]).toMatchObject({ action: 'pause', scanId: h.snapshot.scanId });
     h.window.close();
   });
-  it('shows «Чат не найден» and the unverified notice', async () => {
+  it('shows a pending row separately from confirmed empty history and blocks generate/send', async () => {
     const h = harness(); h.window.close();
-    h.snapshot.rows[0]!.evidence = 'unverified'; h.snapshot.rows[1]!.evidence = 'history';
+    h.snapshot.rows[0]!.status = 'pending'; h.snapshot.rows[0]!.evidence = undefined;
     h.window.open();
     await vi.waitFor(() => expect(h.root.querySelector('textarea')).not.toBeNull());
     const chip = (fan: string) => h.root.querySelector<HTMLElement>(`[data-fan="${fan}"] .status`)!;
     // Amber, not the red «Не писали»: that one is said only over a read history.
-    expect(chip('2').textContent).toBe('Чат не найден'); expect(chip('2').classList.contains('unverified')).toBe(true);
+    expect(chip('2').textContent).toBe('В очереди'); expect(chip('2').classList.contains('unverified')).toBe(true);
     expect(chip('3').textContent).toBe('Не писали'); expect(chip('3').classList.contains('unverified')).toBe(false);
-    expect(h.root.querySelector('.history')?.textContent).toBe('Fansly не показал чат с этим фаном. Это ещё не доказательство: нажмите «Проверить чат» или «Сгенерировать» — проверим по аккаунту фана.');
+    h.root.querySelector<HTMLButtonElement>('[data-fan="2"]')!.click();
+    expect(h.root.querySelector('.history')?.textContent).toBe('Переписка ещё не проверена. Строка ожидает проверки по аккаунту фана.');
+    expect(h.root.querySelector<HTMLButtonElement>('.generate')?.disabled).toBe(true);
+    expect(h.root.querySelector<HTMLButtonElement>('.send')?.disabled).toBe(true);
     expect(h.root.querySelector('.history')?.textContent).not.toContain('Личной переписки ещё нет');
     expect(h.root.querySelector('.verify')?.textContent).toBe('Проверить чат');
     // The row stays workable and stays counted.
@@ -219,8 +222,8 @@ describe('followers window human actions', () => {
     expect(h.root.querySelector('.verify')).toBeNull();
     // Its own filter, and «Не писали» no longer includes it.
     const filter = h.root.querySelector<HTMLSelectElement>('.filter')!;
-    expect([...filter.options].map((option) => [option.value, option.textContent])).toContainEqual(['unverified', 'Чат не найден']);
-    filter.value = 'unverified'; filter.dispatchEvent(new Event('change'));
+    expect([...filter.options].map((option) => [option.value, option.textContent])).toContainEqual(['pending', 'В очереди']);
+    filter.value = 'pending'; filter.dispatchEvent(new Event('change'));
     expect([...h.root.querySelectorAll<HTMLElement>('.row')].map((node) => node.dataset.fan)).toEqual(['2']);
     filter.value = 'ready'; filter.dispatchEvent(new Event('change'));
     expect([...h.root.querySelectorAll<HTMLElement>('.row')].map((node) => node.dataset.fan)).toEqual(['3']);
@@ -241,10 +244,42 @@ describe('followers window human actions', () => {
     expect(h.root.querySelector('.history')?.textContent).toBe('Сообщения не загружены.');
     expect(h.root.textContent).not.toContain('Личной переписки ещё нет');
     // A snapshot that does not say what a ready row rests on is read as unproved.
-    h.window.close(); h.snapshot.rows[1]!.status = 'ready'; h.window.open();
-    await vi.waitFor(() => expect(h.root.querySelector('[data-fan="3"] .status')?.textContent).toBe('Чат не найден'));
+    h.window.close(); h.snapshot.rows[1]!.status = 'ready'; h.snapshot.rows[1]!.evidence = undefined; h.window.open();
+    await vi.waitFor(() => expect(h.root.querySelector('[data-fan="3"] .status')?.textContent).toBe('Переписка не проверена'));
     h.window.close();
   });
+  it.each(['ready', 'reply'] as const)('fails closed when an older %s snapshot carries no history evidence', async (status) => {
+    const h = harness(); h.window.close();
+    h.snapshot.rows = [{ ...h.snapshot.rows[0]!, status, evidence: undefined }];
+    h.window.open();
+    await vi.waitFor(() => expect(h.root.querySelector('.decision')?.textContent).toBe('Переписка не проверена'));
+    expect(h.root.querySelector('.generate')).toBeNull(); expect(h.root.querySelector('.send')).toBeNull();
+    expect(h.root.querySelector('.history')?.textContent).not.toContain('Личной переписки ещё нет');
+    const filter = h.root.querySelector<HTMLSelectElement>('.filter')!;
+    filter.value = status; filter.dispatchEvent(new Event('change'));
+    expect(h.root.querySelector('.row')).toBeNull();
+    h.window.close();
+  });
+
+  it('keeps the selected pending fan and saved draft in view when automatic verification finds an old conversation', async () => {
+    const h = harness(); h.window.close();
+    h.snapshot.rows[1]!.status = 'pending'; h.snapshot.rows[1]!.evidence = undefined;
+    h.snapshot.verification = { active: true, remaining: 1, total: 1 };
+    h.window.open();
+    await vi.waitFor(() => expect(h.root.querySelector('textarea')).not.toBeNull());
+    h.root.querySelector<HTMLButtonElement>('[data-fan="3"]')!.click();
+    const textarea = h.root.querySelector('textarea')!;
+    textarea.value = 'draft waiting for history'; textarea.dispatchEvent(new Event('input'));
+    Object.assign(h.snapshot.rows[1]!, { status: 'contacted', proof: { source: 'live', message: { id: '45', own: true, automated: false, text: 'earlier personal DM' } } });
+    h.snapshot.verification = { active: false, remaining: 0, total: 1 };
+    await vi.waitFor(() => expect(h.root.querySelector('.proof')?.textContent).toContain('earlier personal DM'), { timeout: 1500 });
+    expect(h.root.querySelector('.profile')?.textContent).toContain('Fan 3');
+    expect(h.root.querySelector('.pending')?.textContent).toBe('К обработке 1');
+    expect(h.values['chatgoose:followers:draft:v1:1:3']).toBe('draft waiting for history');
+    expect(h.sendMessage.mock.calls.some(([r]) => r.action === 'send' || r.action === 'generate')).toBe(false);
+    h.window.close();
+  });
+
   it('a blocked send shows a banner and is distinguishable from sent', async () => {
     const h = harness(); h.window.close();
     h.snapshot.rows.forEach((row) => { row.evidence = 'history'; });
@@ -312,11 +347,11 @@ describe('followers window human actions', () => {
   });
   it('«Проверить чат» resolves the row', async () => {
     const h = harness(); h.window.close();
-    h.snapshot.rows.forEach((row) => { row.evidence = 'unverified'; });
+    h.snapshot.rows.forEach((row) => { row.status = 'pending'; row.evidence = undefined; });
     h.sendMessage.mockImplementation(async (request) => {
       if (request.action === 'verify') {
         const row = h.snapshot.rows.find((value) => value.id === request.fanId)!;
-        if (row.id === '2') Object.assign(row, { evidence: 'history', chatKnown: true });
+        if (row.id === '2') Object.assign(row, { status: 'ready', evidence: 'history', chatKnown: true });
         else Object.assign(row, { status: 'contacted', evidence: undefined, messages: [{ id: '45', own: true, automated: false, text: 'an old personal message' }], proof: { source: 'live', message: { id: '45', own: true, automated: false, text: 'an old personal message' } } });
       }
       if (request.action === 'conversation') h.snapshot.rows.find((row) => row.id === request.fanId)!.conversation = { messages: [], loading: false, hasMore: false };
@@ -344,22 +379,45 @@ describe('followers window human actions', () => {
     expect(h.sendMessage.mock.calls.filter(([r]) => r.action === 'generate' || r.action === 'send')).toHaveLength(0);
     h.window.close();
   });
-  it('reports the background search beside a finished verification and lets Pause end it', async () => {
+  it('shows the remaining queue, prioritizes only a human selection, and preserves a draft across pause/resume', async () => {
     const h = harness(); h.window.close();
-    h.snapshot.rows.forEach((row) => { row.evidence = 'unverified'; });
-    h.snapshot.background = { active: true, searched: 1, total: 2 };
+    h.snapshot.rows[1]!.status = 'pending'; h.snapshot.rows[1]!.evidence = undefined;
+    h.snapshot.verification = { active: true, remaining: 1, total: 1 };
     h.window.open();
-    await vi.waitFor(() => expect(h.root.querySelector('.progress')?.textContent).toBe('Проверено 2 из 2'));
-    expect(h.root.querySelector<HTMLElement>('.background')?.hidden).toBe(false);
-    expect(h.root.querySelector('.background')?.textContent).toBe('Фоном ищем чаты по имени: 1 из 2');
-    expect(h.root.querySelector<HTMLButtonElement>('.refresh')?.disabled).toBe(false);
-    expect(h.root.querySelector<HTMLButtonElement>('.pause')?.hidden).toBe(false);
+    await vi.waitFor(() => expect(h.root.querySelector('.progress')?.textContent).toBe('Проверено 1 из 2'));
+    expect(h.sendMessage.mock.calls.some(([r]) => r.action === 'prioritize')).toBe(false);
+    expect(h.root.querySelector('.verification')?.textContent).toBe('Уточняем переписку: осталось 1');
+    expect(h.root.querySelector<HTMLButtonElement>('.generate')?.disabled).toBe(false);
+    const textarea = h.root.querySelector('textarea')!;
+    textarea.value = 'saved draft'; textarea.dispatchEvent(new Event('input')); textarea.focus(); textarea.setSelectionRange(2, 5);
+    h.sendMessage.mockImplementation(async (request) => {
+      if (request.action === 'pause') {
+        h.snapshot.verification = { active: false, remaining: 1, total: 1, stopped: 'paused' };
+        h.snapshot.canContinue = true;
+      }
+      if (request.action === 'resume') {
+        h.snapshot.verification = { active: true, remaining: 1, total: 1 };
+        h.snapshot.canContinue = false;
+      }
+      return { ok: true, snapshot: structuredClone(h.snapshot) };
+    });
     h.root.querySelector<HTMLButtonElement>('.pause')!.click();
-    expect(h.sendMessage.mock.calls.at(-1)?.[0]).toMatchObject({ action: 'pause' });
-    // The window keeps polling while the hints run, and stops showing them after.
-    h.snapshot.background = { active: false, searched: 2, total: 2 };
-    await vi.waitFor(() => expect(h.root.querySelector<HTMLElement>('.background')?.hidden).toBe(true), { timeout: 1500 });
-    expect(h.root.querySelector<HTMLButtonElement>('.pause')?.hidden).toBe(true);
+    await vi.waitFor(() => expect(h.root.querySelector('.refresh')?.textContent).toBe('Проверить оставшихся: 1'));
+    expect(h.root.querySelector('.verification')?.textContent).toBe('Проверка на паузе · осталось 1');
+    expect(h.root.querySelector('textarea')).toBe(textarea);
+    expect(h.root.activeElement).toBe(textarea);
+    expect([textarea.selectionStart, textarea.selectionEnd]).toEqual([2, 5]);
+    h.root.querySelector<HTMLButtonElement>('.refresh')!.click();
+    await vi.waitFor(() => expect(h.root.querySelector<HTMLButtonElement>('.refresh')?.disabled).toBe(true));
+    expect(h.root.querySelector('textarea')).toBe(textarea);
+    expect(textarea.value).toBe('saved draft');
+    h.root.querySelector<HTMLButtonElement>('[data-fan="3"]')!.click();
+    await vi.waitFor(() => expect(h.sendMessage.mock.calls.filter(([r]) => r.action === 'prioritize')).toHaveLength(1));
+    expect(h.sendMessage.mock.calls.find(([r]) => r.action === 'prioritize')?.[0]).toMatchObject({ fanId: '3' });
+    expect(h.root.querySelector('.verify')?.textContent).toBe('Проверить следующим');
+    expect(h.root.querySelector<HTMLButtonElement>('.generate')?.disabled).toBe(true);
+    expect(h.root.querySelector<HTMLButtonElement>('.send')?.disabled).toBe(true);
+    expect(h.sendMessage.mock.calls.filter(([r]) => r.action === 'generate' || r.action === 'send')).toHaveLength(0);
     h.window.close();
   });
   it('drops a late generation after close/reopen instead of replacing a new draft', async () => {
