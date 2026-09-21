@@ -113,10 +113,12 @@ describe('Fansly browser-session outreach transport', () => {
     // A refused write says what it was (status, Fansly's code), never what it said,
     // and a limited one opens the lane cooldown like a limited read.
     groupStatus = 403;
-    await expect(h.client.createFollowerGroup('2', '1', session, h.signal, trace)).rejects.toMatchObject({ key: 'fansly_server_error', details: { status: 403, code: '99' } });
+    const refused = expect(h.client.createFollowerGroup('2', '1', session, h.signal, trace)).rejects.toMatchObject({ key: 'fansly_server_error', details: { status: 403, code: '99' } });
+    await vi.advanceTimersByTimeAsync(500); await refused;
     groupStatus = 429; const limitedAt = Date.now();
-    await expect(h.client.createFollowerGroup('2', '1', session, h.signal, trace)).rejects.toMatchObject({ key: 'fansly_server_error', details: { status: 429 } });
-    expect(h.client.followerReadStatus(session)).toEqual({ cooldownUntil: limitedAt + 60_000, intervalMs: 800 });
+    const limited = expect(h.client.createFollowerGroup('2', '1', session, h.signal, trace)).rejects.toMatchObject({ key: 'fansly_server_error', details: { status: 429 } });
+    await vi.advanceTimersByTimeAsync(500); await limited;
+    expect(h.client.followerReadStatus(session)).toEqual({ cooldownUntil: limitedAt + 500 + 60_000, intervalMs: 800 });
     const report = trace.read();
     expect(report.events.filter((event) => event.name === 'http.error-body').map((event) => event.data.code)).toEqual(['99', '99']);
     expect(report.counters['http.start']).toBe(2);
@@ -131,6 +133,46 @@ describe('Fansly browser-session outreach transport', () => {
     expect(calls.filter(([method]) => method === 'POST')).toHaveLength(posts + 1);
     expect(trace.read().events.filter((event) => event.name === 'http.write-refused').map((event) => event.data.reason)).toEqual(['lane-cooling-down']);
   });
+  it('serializes GET and group POST across follower windows while message dispatch bypasses the occupied lane', async () => {
+    vi.useFakeTimers(); const h = harness();
+    const one = h.client.followerSession(h.session), two = h.client.followerSession(h.session);
+    let finish!: (response: Response) => void;
+    const at: Array<[string, number]> = []; const started = Date.now();
+    const fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      at.push([`${init?.method} ${path}`, Date.now() - started]);
+      if (at.length === 1) return new Promise((resolve) => { finish = resolve; });
+      return init?.method === 'GET' ? envelope({ messages: [] }) : path.endsWith('/group')
+        ? envelope({ id: '3', users: [{ userId: '1' }, { userId: '2' }] })
+        : envelope({ id: '99', groupId: '3', senderId: '1' });
+    });
+    vi.stubGlobal('fetch', fetch);
+    const read = h.client.getGroup('3', one, h.signal);
+    const group = h.client.createFollowerGroup('2', '1', two, h.signal);
+    const history = h.client.getMessagePage('3', null, one, h.signal);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(fetch).toHaveBeenCalledOnce();
+    await expect(h.client.sendFollowerMessage('3', 'human message', '1', two, h.signal)).resolves.toBe('99');
+    finish(envelope({ users: [] })); await read;
+    await vi.advanceTimersByTimeAsync(1000); await Promise.all([group, history]);
+    expect(at).toEqual([
+      ['GET /api/v1/group/3/', 0], ['POST /api/v1/message', 1000],
+      ['POST /api/v1/group', 1000], ['GET /api/v1/message', 1400],
+    ]);
+  });
+
+  it('checks the live identity again after a group opening waited for its permit', async () => {
+    vi.useFakeTimers(); const h = harness(); const session = h.client.followerSession(h.session);
+    let finish!: (response: Response) => void;
+    const fetch = vi.fn<typeof globalThis.fetch>().mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    vi.stubGlobal('fetch', fetch);
+    const first = h.client.getGroup('3', session, h.signal);
+    const next = expect(h.client.createFollowerGroup('2', '1', session, h.signal)).rejects.toMatchObject({ key: 'chat_changed' });
+    await vi.advanceTimersByTimeAsync(1000); h.session.authorization = 'another-session';
+    finish(envelope({ users: [] })); await first; await next;
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
   it('marks a read that got no HTTP answer at all, whichever error key it keeps', async () => {
     const h = harness(); const session = h.client.followerSession(h.session);
     vi.stubGlobal('fetch', vi.fn<typeof globalThis.fetch>(async () => { throw new TypeError('NetworkError when attempting to fetch resource.'); }));

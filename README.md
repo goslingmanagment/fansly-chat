@@ -45,6 +45,13 @@ from prose when checking what is installed or live; verify the signed update fee
   from one shared, cached, paced service
   (`src/background/welcome-definitions.ts`). The chat reads one Fansly page; a
   conversation that does not fit it is Reply or Ping territory (E136).
+- **Новые фоловеры** (2.4.6, E138) — a fast pass shows the followers and
+  confirmed results, then one automatic queue resolves only the remaining fans
+  by their account IDs and reads their chats. Confirmed rows are usable while
+  the queue runs; selecting a pending fan makes them next. Pause/continue keeps
+  results and drafts and checks only the remainder. A run may create empty
+  technical chats. Generation and sending still require a human click and
+  confirmed history; a listing/search miss never means «Не писали».
 - **Spenders** — kernel-backed ranking with data freshness and deleted-account labels.
 - **Vault uploader** — on `/creator/vault`, a folder of media goes into the open
   album one file at a time through Fansly's own upload form, each confirmed by
@@ -81,6 +88,32 @@ for access to that origin. Do not create or paste Anthropic, OpenRouter, or othe
 provider credentials into the extension — it holds none.
 
 ## Development
+
+### Two-phase follower verification (2.4.6, E138)
+
+`FollowersService` keeps one scan with two phases. Discovery and the first
+checks reuse positive proofs, inbox matches, and saved creator/fan chat IDs.
+Unresolved identities become `pending`, never `ready`. The sequential tail
+uses a single `POST /group` attempt, validates both participants, saves the ID,
+and reads `GET /group` plus paginated history through the existing checker.
+A missing `lastMessage` field in the POST response proves nothing about history.
+Only an exhausted history proves `ready`/`reply`; a personal outgoing message
+proves `contacted`. `hidden` is diagnostic data with no inferred cause.
+
+Follower GETs and chat-resolution POSTs share one creator lane. Phase-two
+identity/history requests are not automatically retried: the first 429 stops
+the tail; five consecutive network, timeout, 404 or 5xx failures stop an outage
+run. Local refusals remain visible per fan. A soft pause cancels a POST still
+waiting for admission, but lets an already dispatched POST finish and save the
+ID before stopping. Closing the window or changing the session aborts the work.
+Continue rechecks only unfinished rows and reuses saved IDs. Selecting a row
+only changes the next item of an existing run.
+
+Verify/generate/send share the queue's creator/fan lock. Sending retains the
+live-history and reviewed-revision checks, Hub reservation/dispatch and durable
+attempt journal. `POST /message` never enters the read FIFO after Hub dispatch,
+and an uncertain delivery is never retried. Text search remains only a read-only
+preview fallback for old positive proofs that carry no saved chat ID.
 
 ### New-follower diagnostics
 
@@ -126,6 +159,15 @@ Important references:
   architecture.
 
 ## Release
+
+Release 2.4.6 adds the two-phase New Followers check (E138, E139): a fast
+positive-proof pass followed by one automatic identity/history queue for the
+unresolved remainder. Confirmed rows stay usable, selecting a pending fan makes
+them next, and pause/continue preserves drafts and verified chat IDs. Pending
+rows require confirmed history before generation or sending. Empty technical
+chats can be created during verification; messages remain explicit human actions.
+The queue shares the creator pacing lane and stops on a rate limit or a series
+of transport errors. SDK and Core contracts are unchanged from 2.4.5.
 
 Release 2.4.5 unifies the Hi greeting across both surfaces: one `hi-greeting`
 contract (`variantCount`, `personalMessageCount`) replaces the `greetingMode`
@@ -189,6 +231,8 @@ Releases ship from `main`. Keep `package.json` and `manifest.json` versions equa
 update `CHANGELOG.md` and `changelog.html`, run `pnpm check`, then use
 `scripts/deploy.sh`. The deploy script signs the extension, updates the
 self-hosted feed, and verifies served version consistency.
+Use `SKIP_ANNOUNCE=1 scripts/deploy.sh` to publish without a Telegram announcement;
+the local changelog validation still runs before signing.
 
 The public pages ship together: `install.html` becomes the versionless product
 landing at `index.html`; `start.html` is the shared onboarding page for both

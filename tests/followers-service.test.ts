@@ -44,13 +44,21 @@ function harness(debugMode = false, realTransport = false) {
   const service = new FollowersService({ fansly: realTransport ? new FanslyClient({ getSessionByAccount: () => session, markDisconnected: vi.fn() } as unknown as SessionStore) : fansly as unknown as FanslyClient, sessions: { getSessionForTab: () => session } as unknown as SessionStore, gateway: gateway as unknown as KernelFeatureGateway, hub: hub as unknown as AgencyHubClient, readState: async () => state, storage: storage as unknown as browser.storage.StorageArea });
   const start = async (tab = 7) => {
     const snapshot = await service.start(tab, 48);
-    // The background hints are part of what a finished window shows.
-    await vi.waitFor(() => { const state = service.state(tab, snapshot.scanId); expect(state.scanning || state.background?.active).toBeFalsy(); });
+    // A completed run includes the automatic identity-verification tail.
+    await vi.waitFor(() => { const state = service.state(tab, snapshot.scanId); expect(state.scanning || state.verification?.active).toBeFalsy(); });
     return service.state(tab, snapshot.scanId);
   };
   return { service, start, values, state, session, fansly, gateway, hub, storage, setMessages: (value: FanslyMessage[]) => { messages = value; } };
 }
 const msg = (overrides: Partial<FanslyMessage> = {}): FanslyMessage => ({ id: '40', senderId: '1', groupId: '3', content: 'personal hello', type: 1, createdAt: 1, attachments: [], embeds: [], ...overrides });
+
+const personalInbox = (fans: Array<{ followerId: string }>) => ({
+  data: fans.map(({ followerId }) => ({ partnerAccountId: followerId, groupId: String(Number(followerId) + 1000) })),
+  aggregationData: { groups: fans.map(({ followerId }) => ({
+    id: String(Number(followerId) + 1000), users: [{ userId: '1' }, { userId: followerId }],
+    lastMessage: msg({ groupId: String(Number(followerId) + 1000), correlationId: null, inReplyTo: null }),
+  })) },
+});
 
 describe('followers scan and one-attempt send', () => {
   afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); vi.unstubAllGlobals(); });
@@ -297,7 +305,7 @@ describe('followers scan and one-attempt send', () => {
     expect(mixed.service.state(7, second.scanId).rows.every((row) => row.status === 'ready')).toBe(true);
     expect(failed.size).toBe(6);
   });
-  it('replays the live 146-fan trace: a throttled /account?ids= costs no verdict, no pause and no lasting slowdown', async () => {
+  it('preserves the 146-fan list after an optional notes 429 and leaves identity verification paused', async () => {
     vi.useFakeTimers();
     const h = harness(true, true); vi.spyOn(Math, 'random').mockReturnValue(0);
     const firstId = BigInt(Date.now() - 3600_000 - 1561494360000) << 22n;
@@ -325,8 +333,8 @@ describe('followers scan and one-attempt send', () => {
     // Without a search per row the scan is over within the minute (E134).
     await vi.advanceTimersByTimeAsync(60_000);
     const final = h.service.state(7, first.scanId);
-    expect(final.scanning).toBe(false); expect(final.canContinue).toBe(false); expect(final.error).toBeUndefined();
-    expect(final.rows.every((row) => row.status === 'ready' && row.detail === undefined)).toBe(true);
+    expect(final.scanning).toBe(false); expect(final.canContinue).toBe(true); expect(final.error).toBeUndefined();
+    expect(final.rows.every((row) => row.status === 'pending' && row.detail === undefined)).toBe(true);
     expect(times.filter((entry) => entry.ids)).toHaveLength(1);
     expect(times.at(-1)?.ids).toBe(true);
     const pages = times.filter((entry) => entry.path.endsWith('/followersnew'));
@@ -341,10 +349,11 @@ describe('followers scan and one-attempt send', () => {
     expect(report.events).toContainEqual(expect.objectContaining({ name: 'http.cooldown', data: expect.objectContaining({ route: 'GET /account*', spacingMs: 10_000, intervalMs: 400 }) }));
     // E134: no verdict waits on a text search any more. The scan read the
     // inbox once, nobody was listed, and every row says so instead of «не писали».
-    expect(final.rows.every((row) => row.evidence === 'unverified')).toBe(true);
+    expect(final.rows.every((row) => row.evidence === undefined)).toBe(true);
     expect(times.filter((entry) => entry.path.endsWith('/messaging/groups'))).toHaveLength(1);
-    // The optional hints never start into a cooling lane.
-    expect(report.events).toContainEqual(expect.objectContaining({ name: 'background.result', data: { reason: 'lane-cooling-down', searched: 0, hits: 0 } }));
+    // The automatic tail never opens a chat into a cooling lane.
+    expect(final.verification).toMatchObject({ active: false, remaining: 146, stopped: 'cooldown' });
+    expect(report.events.some((event) => event.name === 'group.create')).toBe(false);
     // The owner's next scan came 8.5 minutes later, before the lane counts as
     // idle: the account family keeps its doubled gap, and idle time still
     // forgives nothing (a level heals only after twenty answered reads).
@@ -352,7 +361,7 @@ describe('followers scan and one-attempt send', () => {
     const before = times.length;
     const second = await h.service.start(7, 48);
     await vi.advanceTimersByTimeAsync(400_000);
-    expect(h.service.state(7, second.scanId).rows.every((row) => row.status === 'ready')).toBe(true);
+    expect(h.service.state(7, second.scanId).rows.every((row) => row.status === 'pending')).toBe(true);
     const pagesAgain = times.slice(before).filter((entry) => entry.path.endsWith('/followersnew'));
     expect(pagesAgain[1]!.at - pagesAgain[0]!.at).toBeGreaterThanOrEqual(10_000);
     expect(h.service.traces.get(second.scanId)!.read().events.filter((event) => event.name === 'http.heal')).toEqual([]);
@@ -371,7 +380,7 @@ describe('followers scan and one-attempt send', () => {
       else if (url.pathname.endsWith('/followersnew')) {
         const page = url.searchParams.get('before') === '0' ? fans.slice(0, 100) : fans.slice(100);
         response = { followers: page, aggregationData: { accounts: page.map((fan) => ({ id: fan.followerId, username: `fan${fan.followerId}` })) } };
-      } else if (url.pathname.endsWith('/messaging/groups')) response = { data: [] };
+      } else if (url.pathname.endsWith('/messaging/groups')) response = personalInbox(fans);
       else if (url.pathname === '/api/v1/account') { notes.push(Date.now()); response = (url.searchParams.get('ids') ?? '').split(',').map((id) => ({ id, username: `fan${id}`, notes: [] })); }
       else throw new Error(`Unexpected route ${url.pathname}`);
       return new Response(JSON.stringify({ success: true, response }), { status: 200 });
@@ -401,7 +410,7 @@ describe('followers scan and one-attempt send', () => {
       else if (url.pathname.endsWith('/followersnew')) {
         const page = url.searchParams.get('before') === '0' ? fans.slice(0, 100) : fans.slice(100);
         response = { followers: page, aggregationData: { accounts: page.map((fan) => ({ id: fan.followerId, username: `fan${fan.followerId}` })) } };
-      } else if (url.pathname.endsWith('/messaging/groups')) response = { data: [] };
+      } else if (url.pathname.endsWith('/messaging/groups')) response = personalInbox(fans);
       else if (url.pathname === '/api/v1/account') { if (limitNotes) status = 429; response = (url.searchParams.get('ids') ?? '').split(',').map((id) => ({ id, username: `fan${id}`, notes: [] })); }
       else throw new Error(`Unexpected route ${url.pathname}`);
       return new Response(JSON.stringify({ success: true, response }), { status });
@@ -429,7 +438,7 @@ describe('followers scan and one-attempt send', () => {
     const times: Array<{ path: string; at: number; status: number }> = [];
     let limited = false;
     vi.stubGlobal('fetch', vi.fn<typeof globalThis.fetch>(async (input, init) => {
-      expect(init?.method).toBe('GET');
+      expect(init?.method === 'GET' || init?.method === 'POST').toBe(true);
       const url = new URL(String(input));
       let response: unknown;
       let status = 200;
@@ -441,12 +450,16 @@ describe('followers scan and one-attempt send', () => {
         const search = url.searchParams.get('search');
         const matches = search ? fans.filter((fan) => `fan${fan.followerId}` === search && (Number(fan.followerId) < 157 || fan.followerId === '195')) : fans.slice(0, 100);
         response = { data: matches.map((fan) => ({ groupId: String(Number(fan.followerId) + 1000), partnerAccountId: fan.followerId })) };
+      } else if (url.pathname === '/api/v1/group' && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as { users: Array<{ userId: string }> };
+        const fanId = body.users.find((user) => user.userId !== '1')!.userId;
+        response = { id: String(Number(fanId) + 1000), users: body.users };
       } else if (url.pathname.includes('/group/')) response = { users: [{ userId: '1' }, { userId: String(Number(url.pathname.split('/')[4]) - 1000) }] };
       else if (url.pathname.endsWith('/message')) {
         if (!limited) { limited = true; status = 429; }
         const groupId = url.searchParams.get('groupId')!;
         const fanId = String(Number(groupId) - 1000);
-        response = { messages: url.searchParams.get('before') ? [] : fanId === '195' ? [msg({ groupId, content: 'auto welcome' }), msg({ id: '41', groupId, senderId: fanId })] : [msg({ groupId })] };
+        response = { messages: url.searchParams.get('before') ? [] : fanId === '195' ? [msg({ groupId, content: 'auto welcome' }), msg({ id: '41', groupId, senderId: fanId })] : Number(fanId) < 157 ? [msg({ groupId })] : [] };
       } else throw new Error(`Unexpected route ${url.pathname}`);
       times.push({ path: url.pathname, at: Date.now(), status });
       return new Response(JSON.stringify({ success: true, response }), { status });
@@ -468,12 +481,9 @@ describe('followers scan and one-attempt send', () => {
     for (let i = 1; i < history.length; i++) expect(history[i]!.at - history[i - 1]!.at).toBeGreaterThanOrEqual(625);
     // The limit was on an ordinary key, so the whole lane widened with it (E133).
     expect(times[limitIndex + 2]!.at - times[limitIndex + 1]!.at).toBeGreaterThanOrEqual(800);
-    // One listing, then a background hint per fan it missed (E134). Hints that
-    // alternate with chat reads never ran at their own spacing and prove
-    // nothing, and the 38 back-to-back misses are short of the forty a step takes.
-    const searches = times.filter((entry) => entry.path.endsWith('/messaging/groups'));
-    expect(searches).toHaveLength(1 + 94);
-    expect(Math.min(...searches.slice(1).map((entry, index) => entry.at - searches[index]!.at))).toBeGreaterThanOrEqual(500);
+    // Identity resolution reaches the 94 missed chats without a text search.
+    expect(times.filter((entry) => entry.path.endsWith('/messaging/groups'))).toHaveLength(1);
+    expect(times.filter((entry) => entry.path === '/api/v1/group')).toHaveLength(94);
     const report = h.service.traces.get(first.scanId)!.read();
     expect(report.counters['http.start']).toBe(times.length);
     expect(report.droppedEvents).toBe(0);
@@ -744,12 +754,16 @@ describe('followers scan and one-attempt send', () => {
     expect(early.rows).toHaveLength(99);
     expect(early.rows.every((row) => row.displayName === `fan${row.id}` && row.status === 'checking')).toBe(true);
     expect(h.fansly.getAccountNames).not.toHaveBeenCalled();
+    h.fansly.createFollowerGroup.mockImplementation(async (fanId) => ({ id: String(Number(fanId) + 1000), lastMessage: null }));
+    h.fansly.getGroup.mockImplementation(async (id) => ({ users: [{ userId: '1' }, { userId: String(Number(id) - 1000) }] }));
     release();
-    await vi.waitFor(() => { const state = h.service.state(7, snapshot.scanId); expect(state.scanning || state.background?.active).toBeFalsy(); });
+    await vi.waitFor(() => { const state = h.service.state(7, snapshot.scanId); expect(state.scanning || state.verification?.active).toBeFalsy(); });
     const done = h.service.state(7, snapshot.scanId);
-    // 99 verdicts, then the one saved-name read, then the optional hints.
+    // 99 verdicts, then the one saved-name read, then identity checks for only the unresolved rows.
     expect(order.slice(0, 100)).toEqual([...Array.from({ length: 99 }, () => 'check'), 'notes:99:none']);
-    expect(order.slice(100).every((value) => value === 'search')).toBe(true);
+    expect(order.slice(100).every((value) => value === 'check')).toBe(true);
+    expect(h.fansly.findFollowerGroup).not.toHaveBeenCalled();
+    expect(h.fansly.createFollowerGroup).toHaveBeenCalledTimes(99);
     expect(order.filter((value) => value.startsWith('notes'))).toHaveLength(1);
     expect(done.rows.find((row) => row.id === '2')?.customName).toBe('Alex');
     expect(done.rows.every((row) => row.status === 'ready')).toBe(true);
@@ -978,13 +992,22 @@ describe('E134: a listing or search miss is not absence', () => {
   const PERSONAL = 'chatgoose:followers:v1:personal:1:2', ATTEMPT = 'chatgoose:followers:v1:attempt:1:2', GROUP = 'chatgoose:followers:v1:group:1:2';
   const pages = (list: FanslyMessage[]) => async (_group: string, before: string | null) => ({ messages: before ? [] : list, accountMedia: [], accountMediaBundles: [] });
   /** Nothing lists or finds the fan: the state of all 115 searches of the audit. */
-  function missed(debugMode = false) {
+  function missed(debugMode = false, automatic = false) {
     const h = harness(debugMode);
     h.fansly.listInboxPrefix.mockResolvedValue([]);
     h.fansly.findFollowerGroup.mockResolvedValue(null);
     h.state.accountMappings = { '1': 'persona' };
     h.state.personaCatalog = [{ key: 'persona', displayName: 'Persona', version: 1, definitionId: 'v1:persona-definition', status: 'active' }];
-    return h;
+    if (automatic) return h;
+    const start = h.start;
+    return { ...h, start: async (tab = 7) => {
+      // A cooldown leaves the tail paused so these tests can exercise an
+      // explicit verify/generate/send action on a still-unresolved row.
+      h.fansly.followerReadStatus.mockReturnValue({ cooldownUntil: Date.now() + 60_000, intervalMs: 400 } as never);
+      try { return await start(tab); }
+      finally { h.fansly.followerReadStatus.mockReturnValue(undefined); }
+    } };
+
   }
   const manyFans = (h: ReturnType<typeof harness>, count: number, displayName?: (id: string) => string | undefined) => {
     const followers = Array.from({ length: count }, (_, index) => ({ id: String(BigInt(Date.now() - 3600_000 - index - 1561494360000) << 22n), followerId: String(index + 2) }));
@@ -992,28 +1015,26 @@ describe('E134: a listing or search miss is not absence', () => {
     return followers;
   };
 
-  it('KBilly212: a listing/search miss is unverified evidence, never a verified empty history', async () => {
+  it('a paused listing miss stays pending without any negative history proof', async () => {
     const h = missed(true);
     const snapshot = await h.start();
-    expect(snapshot.rows[0]).toMatchObject({ status: 'ready', evidence: 'unverified', chatKnown: false, messages: [], detail: undefined });
-    expect(snapshot.canContinue).toBe(false);
+    expect(snapshot.rows[0]).toMatchObject({ status: 'pending', evidence: undefined, chatKnown: false, messages: [], detail: undefined });
+    expect(snapshot.canContinue).toBe(true);
     const events = h.service.traces.get(snapshot.scanId)!.read().events;
-    expect(events.filter((event) => event.name === 'row.verdict').map((event) => event.data)).toEqual([{ status: 'ready', reason: 'chat-not-found', evidence: 'unverified' }]);
+    expect(events.filter((event) => event.name === 'row.verdict').map((event) => event.data)).toEqual([{ status: 'pending', reason: 'identity-unresolved' }]);
     expect(JSON.stringify(events)).not.toContain('native-search-no-group');
     // Nothing was read, so nothing was proved, and nothing is remembered.
     expect(h.fansly.getGroup).not.toHaveBeenCalled(); expect(h.fansly.getMessagePage).not.toHaveBeenCalled();
     expect(h.values[PERSONAL]).toBeUndefined(); expect(h.values[GROUP]).toBeUndefined();
-    // The search ran only as a hint, after the verdict was already final.
-    const verdictAt = events.findIndex((event) => event.name === 'row.verdict'), resultAt = events.findIndex((event) => event.name === 'scan.result');
-    const searchAt = events.findIndex((event) => event.name === 'background.search');
-    expect(verdictAt).toBeLessThan(resultAt); expect(resultAt).toBeLessThan(searchAt);
+    expect(h.fansly.findFollowerGroup).not.toHaveBeenCalled();
+    expect(events.some((event) => event.name === 'background.search')).toBe(false);
   });
 
   it('colossal_torpedoes: send over a miss stops loudly when POST /group returns the old conversation', async () => {
     const h = missed();
     h.values['chatgoose:followers:draft:v1:1:2'] = 'typed by hand';
     const snapshot = await h.start();
-    expect(snapshot.rows[0]).toMatchObject({ status: 'ready', evidence: 'unverified' });
+    expect(snapshot.rows[0]).toMatchObject({ status: 'pending', evidence: undefined });
     const old = msg({ id: '45', groupId: '950' });
     h.fansly.createFollowerGroup.mockResolvedValue({ id: '950', lastMessage: old });
     h.fansly.getGroup.mockResolvedValue({ users: [{ userId: '1' }, { userId: '2' }], lastMessage: old });
@@ -1141,7 +1162,7 @@ describe('E134: a listing or search miss is not absence', () => {
       expect(h.gateway.streamFeature).not.toHaveBeenCalled();
       expect(draft).toMatchObject({ key: 'fansly_server_error' });
     }
-    expect(h.service.state(7, snapshot.scanId).rows[0]).toMatchObject({ status: 'ready', evidence: 'unverified' });
+    expect(h.service.state(7, snapshot.scanId).rows[0]).toMatchObject({ status: 'pending', evidence: undefined });
   });
 
   it('verify / generate resolve the chat by identity before any AI call; a contacted fan costs no generation', async () => {
@@ -1182,7 +1203,7 @@ describe('E134: a listing or search miss is not absence', () => {
     expect(reply.service.state(7, snapshot.scanId).rows[0]).toMatchObject({ status: 'reply', evidence: 'history' });
   });
 
-  it('a scan, a selection and a preview never POST /group', async () => {
+  it('automatically resolves only unresolved fans; state, selection and preview never open extra chats', async () => {
     vi.useFakeTimers();
     const h = harness(true, true); vi.spyOn(Math, 'random').mockReturnValue(0);
     const firstId = BigInt(Date.now() - 3600_000 - 1561494360000) << 22n;
@@ -1196,22 +1217,24 @@ describe('E134: a listing or search miss is not absence', () => {
       if (url.pathname.endsWith('/message/automated')) response = [];
       else if (url.pathname.endsWith('/followersnew')) response = { followers: fans, aggregationData: { accounts: fans.map((fan) => ({ id: fan.followerId, username: `fan${fan.followerId}`, notes: [] })) } };
       else if (url.pathname.endsWith('/messaging/groups')) response = { data: url.searchParams.get('search') ? [] : [{ groupId: '1003', partnerAccountId: '3' }] };
-      else if (url.pathname.includes('/group/')) response = { users: [{ userId: '1' }, { userId: '3' }] };
+      else if (url.pathname === '/api/v1/group') response = { id: '1004', users: [{ userId: '1' }, { userId: '4' }] };
+      else if (url.pathname.includes('/group/')) response = { users: [{ userId: '1' }, { userId: String(Number(url.pathname.split('/')[4]) - 1000) }] };
       else if (url.pathname.endsWith('/message')) response = { messages: [] };
       else throw new Error(`Unexpected route ${url.pathname}`);
       return new Response(JSON.stringify({ success: true, response }), { status: 200 });
     }));
     const first = await h.service.start(7, 48);
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(h.service.state(7, first.scanId)).toMatchObject({ scanning: false, rows: [{ id: '2', status: 'contacted' }, { id: '3', status: 'ready', evidence: 'history' }, { id: '4', status: 'ready', evidence: 'unverified' }] });
+    expect(h.service.state(7, first.scanId)).toMatchObject({ scanning: false, rows: [{ id: '2', status: 'contacted' }, { id: '3', status: 'ready', evidence: 'history' }, { id: '4', status: 'ready', evidence: 'history' }] });
     // What the window does on its own: polls, selects rows, previews a chat.
     for (let i = 0; i < 3; i += 1) h.service.state(7, first.scanId);
+    h.service.prioritize(7, first.scanId, '4');
     h.service.conversation(7, first.scanId, '2');
     await vi.advanceTimersByTimeAsync(30_000);
     h.service.pause(7, first.scanId); h.service.resume(7, first.scanId);
     await vi.advanceTimersByTimeAsync(30_000);
     expect(methods.length).toBeGreaterThan(5);
-    expect(methods.every((method) => method === 'GET')).toBe(true);
+    expect(methods.filter((method) => method === 'POST')).toHaveLength(1);
     h.service.close(7);
   });
 
@@ -1265,9 +1288,11 @@ describe('E134: a listing or search miss is not absence', () => {
     expect(first).toMatchObject({ canContinue: true, rows: [{ status: 'unknown', detail: 'Не удалось подтвердить участников чата.' }] });
     expect(mismatch.fansly.getMessagePage).not.toHaveBeenCalled();
     expect(mismatch.values[GROUP]).toBeNull();
+    mismatch.fansly.getGroup.mockResolvedValue({ users: [{ userId: '1' }, { userId: '2' }] });
     mismatch.service.resume(7, first.scanId);
-    await vi.waitFor(() => expect(mismatch.service.state(7, first.scanId).scanning).toBe(false));
-    expect(mismatch.service.state(7, first.scanId).rows[0]).toMatchObject({ status: 'ready', evidence: 'unverified', chatKnown: false });
+    await vi.waitFor(() => expect(mismatch.service.state(7, first.scanId).verification?.active).toBe(false));
+    expect(mismatch.service.state(7, first.scanId).rows[0]).toMatchObject({ status: 'ready', evidence: 'history', chatKnown: true });
+    expect(mismatch.fansly.createFollowerGroup).toHaveBeenCalledOnce();
 
     // A listed chat that fails the fence is Fansly contradicting itself, not
     // a stale cache: it stays unknown, and nothing is forgotten or sent.
@@ -1280,16 +1305,17 @@ describe('E134: a listing or search miss is not absence', () => {
 
     const gone = missed();
     gone.values[GROUP] = { groupId: '88', observedAt: 1 };
-    gone.fansly.getGroup.mockRejectedValue(new ChatGooseError('unknown_error', undefined, { status: 404 }));
+    gone.fansly.getGroup.mockRejectedValueOnce(new ChatGooseError('unknown_error', undefined, { status: 404 }));
     // A 404 is a blip to the pass (E133): the row is asked again three seconds
     // later, and by then the forgotten id is no longer followed.
     vi.useFakeTimers();
     const vanished = await gone.service.start(7, 48);
     await vi.advanceTimersByTimeAsync(4000);
     vi.useRealTimers();
-    expect(gone.service.state(7, vanished.scanId)).toMatchObject({ scanning: false, rows: [{ status: 'ready', evidence: 'unverified' }] });
-    expect(gone.fansly.getGroup).toHaveBeenCalledOnce();
-    expect(gone.values[GROUP]).toBeNull();
+    expect(gone.service.state(7, vanished.scanId)).toMatchObject({ scanning: false, rows: [{ status: 'ready', evidence: 'history' }] });
+    expect(gone.fansly.getGroup).toHaveBeenCalledTimes(2);
+    expect(gone.fansly.createFollowerGroup).toHaveBeenCalledOnce();
+    expect(gone.values[GROUP]).toMatchObject({ groupId: '3' });
     // A 500 is not «gone»: the lead is kept and the row stays unread.
     const flaky = missed();
     flaky.values[GROUP] = { groupId: '88', observedAt: 1 };
@@ -1411,7 +1437,7 @@ describe('E134: a listing or search miss is not absence', () => {
     expect(h.hub.followerOutreachAttempt).not.toHaveBeenCalled(); expect(h.gateway.streamFeature).not.toHaveBeenCalled();
     expect(h.values[ATTEMPT]).toBeUndefined();
     // The row is untouched and works again once the cooldown is over.
-    expect(h.service.state(7, scan.scanId).rows[0]).toMatchObject({ status: 'ready', evidence: 'unverified' });
+    expect(h.service.state(7, scan.scanId).rows[0]).toMatchObject({ status: 'pending', evidence: undefined });
     h.fansly.followerReadStatus.mockReturnValue(undefined as never);
     expect((await h.service.verify(7, scan.scanId, '2')).rows[0]).toMatchObject({ status: 'ready', evidence: 'history' });
   });
@@ -1421,121 +1447,239 @@ describe('E134: a listing or search miss is not absence', () => {
     const scan = await h.start();
     h.fansly.createFollowerGroup.mockRejectedValue(new ChatGooseError('fansly_server_error', undefined, { status: 400, code: '99' }));
     await expect(h.service.verify(7, scan.scanId, '2')).rejects.toThrow('Fansly отказал в открытии чата (код 99). Возможно, у фана закрыты сообщения.');
-    expect(h.service.state(7, scan.scanId).rows[0]).toMatchObject({ status: 'ready', evidence: 'unverified' });
+    expect(h.service.state(7, scan.scanId).rows[0]).toMatchObject({ status: 'pending', evidence: undefined });
     // Without a code there is nothing truthful to add.
     h.fansly.createFollowerGroup.mockRejectedValue(new ChatGooseError('fansly_server_error', undefined, { status: 500 }));
     await expect(h.service.verify(7, scan.scanId, '2')).rejects.toMatchObject({ key: 'fansly_server_error' });
   });
 
-  it('background search: displayName term, one request in flight, stops after 20 empty searches, never turns a miss into evidence', async () => {
-    const h = missed(true);
-    manyFans(h, 25, (id) => Number(id) % 2 ? `Display ${id}` : undefined);
-    let inFlight = 0, most = 0;
-    h.fansly.findFollowerGroup.mockImplementation(async () => { most = Math.max(most, ++inFlight); await new Promise((resolve) => setTimeout(resolve, 1)); inFlight -= 1; return null; });
-    const snapshot = await h.start();
-    expect(h.fansly.findFollowerGroup).toHaveBeenCalledTimes(20);
-    expect(most).toBe(1);
-    expect(h.fansly.findFollowerGroup.mock.calls.map((call) => call[1])).toEqual(snapshot.rows.slice(0, 20).map((row) => Number(row.id) % 2 ? `Display ${row.id}` : `fan${row.id}`));
-    expect(snapshot.background).toEqual({ active: false, searched: 20, total: 25 });
-    expect(snapshot.rows.every((row) => row.status === 'ready' && row.evidence === 'unverified' && !row.chatKnown)).toBe(true);
-    expect(Object.keys(h.values).filter((name) => name.includes(':personal:') || name.includes(':group:'))).toEqual([]);
-    expect(h.fansly.getGroup).not.toHaveBeenCalled(); expect(h.fansly.createFollowerGroup).not.toHaveBeenCalled();
-    const events = h.service.traces.get(snapshot.scanId)!.read().events;
-    expect(events).toContainEqual(expect.objectContaining({ name: 'background.result', data: { reason: 'no-hits', searched: 20, hits: 0 } }));
-    // The budget belongs to the scan: nothing restarts it.
-    h.service.pause(7, snapshot.scanId); h.service.resume(7, snapshot.scanId);
-    expect(h.fansly.findFollowerGroup).toHaveBeenCalledTimes(20);
-  });
-
-  it('background search: a hit is verified and read like a listed chat, a hit keeps the phase going, 150 searches end it', async () => {
-    const h = missed(true);
-    manyFans(h, 160);
-    h.fansly.findFollowerGroup.mockImplementation(async (fanId) => ['2', '3', '4'].includes(fanId) ? chat(fanId, `${fanId}00`, { verified: fanId === '2' }) : null);
-    h.fansly.getGroup.mockImplementation(async (groupId) => ({ users: [{ userId: '1' }, { userId: groupId.slice(0, -2) }] }));
-    h.fansly.getMessagePage.mockImplementation(async (groupId, before) => {
-      if (groupId === '400') throw new ChatGooseError('fansly_server_error', undefined, { status: 500 });
-      return { messages: before ? [] : [groupId === '200' ? msg({ groupId }) : msg({ groupId, senderId: '3', content: 'hey' })], accountMedia: [], accountMediaBundles: [] };
+  it('keeps a confirmed fan usable during the tail and moves only the selected pending fan to the next slot', async () => {
+    const h = missed(true, true); manyFans(h, 4);
+    h.fansly.listInboxPrefix.mockResolvedValue([chat('2', '1002')]);
+    h.fansly.getGroup.mockImplementation(async (id) => ({ users: [{ userId: '1' }, { userId: String(Number(id) - 1000) }] }));
+    let release!: () => void;
+    h.fansly.createFollowerGroup.mockImplementation(async (fan) => {
+      if (fan === '3') await new Promise<void>((resolve) => { release = resolve; });
+      return { id: String(Number(fan) + 1000), lastMessage: null };
     });
-    const snapshot = await h.start();
-    expect(h.fansly.findFollowerGroup).toHaveBeenCalledTimes(150);
-    expect(snapshot.background).toEqual({ active: false, searched: 150, total: 160 });
-    const row = (id: string) => snapshot.rows.find((value) => value.id === id)!;
-    expect(row('2')).toMatchObject({ status: 'contacted', proof: { message: { text: 'personal hello' } } });
-    expect(row('3')).toMatchObject({ status: 'reply', evidence: 'history', messages: [{ text: 'hey' }] });
-    // Found but unread: neither «чат не найден» nor «не писали», and Continue can retry it.
-    expect(row('4')).toMatchObject({ status: 'unknown', chatKnown: true }); expect(snapshot.canContinue).toBe(true);
-    expect(row('5')).toMatchObject({ status: 'ready', evidence: 'unverified' });
-    // The page that verified the pair spares the participant read; a thin hit does not.
-    expect(h.fansly.getGroup.mock.calls.map((call) => call[0])).toEqual(['300', '400']);
-    expect(h.values['chatgoose:followers:v1:group:1:2']).toMatchObject({ groupId: '200' });
-    expect(h.service.traces.get(snapshot.scanId)!.read().events).toContainEqual(expect.objectContaining({ name: 'background.result', data: { reason: 'cap', searched: 150, hits: 3 } }));
-    expect(h.fansly.createFollowerGroup).not.toHaveBeenCalled();
+    const scan = await h.service.start(7, 48);
+    await vi.waitFor(() => expect(h.fansly.createFollowerGroup).toHaveBeenCalledOnce());
+    const running = h.service.state(7, scan.scanId);
+    expect(running).toMatchObject({ scanning: false, verification: { active: true, fanId: '3', total: 3 } });
+    expect(running.rows[0]).toMatchObject({ status: 'ready', evidence: 'history' });
+    const revision = running.rows[0]!.historyRevision;
+    expect(await h.service.generate(7, scan.scanId, '2')).toBe('draft');
+    expect((await h.service.send(7, scan.scanId, '2', 'human greeting', revision)).rows[0]?.status).toBe('sent');
+    expect(h.service.state(7, scan.scanId).verification?.active).toBe(true);
+    h.service.prioritize(7, scan.scanId, '5');
+    expect(h.fansly.createFollowerGroup.mock.calls.map(([id]) => id)).toEqual(['3']);
+    release();
+    await vi.waitFor(() => expect(h.service.state(7, scan.scanId).verification?.active).toBe(false));
+    expect(h.fansly.createFollowerGroup.mock.calls.map(([id]) => id)).toEqual(['3', '5', '4']);
+    expect(h.service.state(7, scan.scanId).rows[0]).toMatchObject({ status: 'sent', historyRevision: revision });
+    expect(h.fansly.getFollowerPage).toHaveBeenCalledOnce();
   });
 
-  it('background search: the checks are final before it starts; Pause, a cooldown and a human action on the same fan end it', async () => {
-    const h = missed(true);
-    manyFans(h, 5);
-    const waiting: Array<{ fanId: string; signal: AbortSignal }> = [];
-    h.fansly.findFollowerGroup.mockImplementation((...args: unknown[]) => new Promise((_resolve, reject) => {
-      const signal = args[4] as AbortSignal;
-      waiting.push({ fanId: args[0] as string, signal });
-      signal.addEventListener('abort', () => reject(signal.reason), { once: true });
-    }));
+  it('a second window reports a busy fan as unfinished and later reuses the first opening instead of becoming stuck', async () => {
+    const h = missed(false, true);
+    let release!: () => void;
+    h.fansly.createFollowerGroup.mockImplementationOnce(async () => {
+      await new Promise<void>((resolve) => { release = resolve; });
+      return { id: '3', lastMessage: null };
+    });
     const first = await h.service.start(7, 48);
-    await vi.waitFor(() => expect(waiting).toHaveLength(1));
-    // «Проверено N из N» is already true: the hints are reported beside it.
-    const running = h.service.state(7, first.scanId);
-    expect(running).toMatchObject({ scanning: false, canContinue: false, background: { active: true, searched: 1, total: 5 } });
-    expect(running.rows.every((row) => row.status === 'ready' && row.evidence === 'unverified')).toBe(true);
-    expect(h.service.traces.get(first.scanId)!.info().state).toBe('completed');
-    // The chatter clicks on the very fan being searched: the hint gives way.
-    expect((await h.service.verify(7, first.scanId, waiting[0]!.fanId)).rows.find((row) => row.id === waiting[0]!.fanId)).toMatchObject({ status: 'ready', evidence: 'history' });
-    expect(waiting[0]!.signal.aborted).toBe(true);
-    await vi.waitFor(() => expect(waiting).toHaveLength(2));
-    expect(waiting[1]!.signal.aborted).toBe(false);
-    h.service.pause(7, first.scanId);
-    await vi.waitFor(() => expect(h.service.state(7, first.scanId).background?.active).toBe(false));
-    expect(waiting).toHaveLength(2);
-    expect(h.service.state(7, first.scanId).rows.filter((row) => row.evidence === 'unverified')).toHaveLength(4);
-
-    const cooling = missed(true);
-    manyFans(cooling, 5);
-    cooling.fansly.followerReadStatus.mockReturnValue({ cooldownUntil: Date.now() + 60_000, intervalMs: 400 } as never);
-    const cooled = await cooling.start();
-    expect(cooling.fansly.findFollowerGroup).not.toHaveBeenCalled();
-    expect(cooling.service.traces.get(cooled.scanId)!.read().events).toContainEqual(expect.objectContaining({ name: 'background.result', data: { reason: 'lane-cooling-down', searched: 0, hits: 0 } }));
-
-    const limited = missed();
-    manyFans(limited, 5);
-    limited.fansly.findFollowerGroup.mockRejectedValue(new ChatGooseError('rate_limited'));
-    const after = await limited.start();
-    expect(limited.fansly.findFollowerGroup).toHaveBeenCalledOnce();
-    expect(after.rows.every((row) => row.status === 'ready' && row.evidence === 'unverified')).toBe(true);
+    await vi.waitFor(() => expect(h.fansly.createFollowerGroup).toHaveBeenCalledOnce());
+    const second = await h.service.start(8, 48);
+    await vi.waitFor(() => expect(h.service.state(8, second.scanId).scanning).toBe(false));
+    expect(h.service.state(8, second.scanId)).toMatchObject({ canContinue: true, rows: [{ status: 'unknown', detail: 'Проверка этого фана уже выполняется. Продолжите позже.' }] });
+    release();
+    await vi.waitFor(() => expect(h.service.state(7, first.scanId).verification?.active).toBe(false));
+    h.service.resume(8, second.scanId);
+    await vi.waitFor(() => expect(h.service.state(8, second.scanId).scanning).toBe(false));
+    expect(h.service.state(8, second.scanId)).toMatchObject({ canContinue: false, rows: [{ status: 'ready', evidence: 'history' }] });
+    expect(h.fansly.createFollowerGroup).toHaveBeenCalledOnce();
   });
 
-  it('background search: gives way to Continue and picks up afterwards without asking about the same fan twice', async () => {
-    const h = missed();
-    manyFans(h, 4);
-    // Fan 2 is listed but unreadable for now; the other three are found nowhere.
-    h.fansly.listInboxPrefix.mockResolvedValue([chat('2', '3')]);
-    h.fansly.getMessagePage.mockRejectedValueOnce(new ChatGooseError('session_expired'));
-    const waiting: Array<{ fanId: string; signal: AbortSignal }> = [];
-    h.fansly.findFollowerGroup.mockImplementation((...args: unknown[]) => new Promise((resolve, reject) => {
-      const signal = args[4] as AbortSignal;
-      waiting.push({ fanId: args[0] as string, signal });
-      signal.addEventListener('abort', () => reject(signal.reason), { once: true });
-      if (waiting.length > 1) resolve(null);
-    }));
-    const first = await h.service.start(7, 48);
-    await vi.waitFor(() => expect(waiting).toHaveLength(1));
-    expect(h.service.state(7, first.scanId)).toMatchObject({ scanning: false, canContinue: true, background: { active: true } });
-    h.service.resume(7, first.scanId);
-    expect(waiting[0]!.signal.aborted).toBe(true);
-    await vi.waitFor(() => { const state = h.service.state(7, first.scanId); expect(state.scanning || state.background?.active).toBeFalsy(); });
-    const done = h.service.state(7, first.scanId);
-    expect(done.rows.find((row) => row.id === '2')).toMatchObject({ status: 'ready', evidence: 'history' });
-    expect(done.canContinue).toBe(false);
-    expect(waiting.map((entry) => entry.fanId)).toEqual(['3', '4', '5']);
-    expect(done.background).toEqual({ active: false, searched: 3, total: 3 });
+  it('verify/generate/send join the active opening and share one row lock, never duplicating POST', async () => {
+    const h = missed(false, true);
+    let release!: () => void;
+    h.fansly.createFollowerGroup.mockImplementationOnce(async () => {
+      await new Promise<void>((resolve) => { release = resolve; });
+      return { id: '3', lastMessage: null };
+    });
+    const scan = await h.service.start(7, 48);
+    await vi.waitFor(() => expect(h.fansly.createFollowerGroup).toHaveBeenCalledOnce());
+    const actions = Promise.allSettled([
+      h.service.verify(7, scan.scanId, '2'),
+      h.service.generate(7, scan.scanId, '2'),
+      h.service.send(7, scan.scanId, '2', 'hello'),
+    ]);
+    release();
+    const results = await actions;
+    expect(results[0]?.status).toBe('fulfilled');
+    expect(results.slice(1)).toEqual([
+      expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ key: 'another_operation' }) }),
+      expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ key: 'another_operation' }) }),
+    ]);
+    expect(h.fansly.createFollowerGroup).toHaveBeenCalledOnce();
+    expect(h.gateway.streamFeature).not.toHaveBeenCalled(); expect(h.fansly.sendFollowerMessage).not.toHaveBeenCalled();
+    expect(h.service.state(7, scan.scanId).rows[0]).toMatchObject({ status: 'ready', evidence: 'history' });
+  });
+
+});
+
+/** Phase two integration: actual creator pacer, HTTP envelopes and cancellation
+ * boundaries. All network traffic in this fixture is intercepted locally. */
+function identityTransport(count = 1) {
+  const h = harness(true, true);
+  const fans = Array.from({ length: count }, (_, index) => ({ id: String(BigInt(Date.now() - 3600_000 - index - 1561494360000) << 22n), followerId: String(index + 2) }));
+  const response = (data: unknown) => new Response(JSON.stringify({ success: true, response: data }), { status: 200 });
+  const group = (fanId: string) => ({ id: String(Number(fanId) + 1000), users: [{ userId: '1', userSettings: { hidden: 1 } }, { userId: fanId }] });
+  const post = vi.fn(async (fanId: string, _signal: AbortSignal): Promise<Response> => response(group(fanId)));
+  const history = vi.fn(async (_fanId: string, _before: string | null) => response({ messages: [] }));
+  const fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith('/message/automated')) return response([]);
+    if (url.pathname.endsWith('/followersnew')) return response({ followers: fans, aggregationData: { accounts: fans.map((fan) => ({ id: fan.followerId, username: `fan${fan.followerId}`, notes: [] })) } });
+    if (url.pathname.endsWith('/messaging/groups')) return response({ data: [] });
+    if (url.pathname === '/api/v1/group' && init?.method === 'POST') {
+      const body = JSON.parse(String(init.body)) as { users: Array<{ userId: string }> };
+      return post(body.users.find((user) => user.userId !== '1')!.userId, init.signal!);
+    }
+    if (url.pathname.includes('/group/')) return response(group(String(Number(url.pathname.split('/')[4]) - 1000)));
+    if (url.pathname === '/api/v1/message' && init?.method === 'GET') return history(String(Number(url.searchParams.get('groupId')) - 1000), url.searchParams.get('before'));
+    throw new Error(`Unexpected request ${init?.method} ${url.pathname}`);
+  });
+  vi.stubGlobal('fetch', fetch);
+  return { ...h, post, history, fetch, group, response };
+}
+
+describe('E138: automatic identity-verification queue', () => {
+  afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+  const begin = () => { vi.useFakeTimers(); vi.spyOn(Math, 'random').mockReturnValue(0); };
+  const finish = async (h: ReturnType<typeof identityTransport>) => {
+    const scan = await h.service.start(7, 48);
+    await vi.advanceTimersByTimeAsync(120_000);
+    return h.service.state(7, scan.scanId);
+  };
+
+  it('KBilly: POST returns an old hidden group without lastMessage, but history proves a personal conversation', async () => {
+    begin(); const h = identityTransport();
+    h.history.mockImplementation(async (_fan, before) => h.response({ messages: before ? [] : [msg({ groupId: '1002', content: 'earlier personal DM' })] }));
+    const state = await finish(h);
+    expect(state).toMatchObject({ scanning: false, canContinue: false, verification: { active: false, remaining: 0, total: 1 } });
+    expect(state.rows[0]).toMatchObject({ status: 'contacted', groupId: '1002', chatKnown: true, proof: { source: 'live', message: { text: 'earlier personal DM' } } });
+    expect(h.post).toHaveBeenCalledOnce(); expect(h.history).toHaveBeenCalledOnce();
+    expect(h.values['chatgoose:followers:v1:group:1:2']).toMatchObject({ groupId: '1002' });
+    const events = h.service.traces.get(state.scanId)!.read().events;
+    expect(events).toContainEqual(expect.objectContaining({ name: 'group.create-result', data: expect.objectContaining({ groupId: '1002', hidden: 1, lastMessagePresent: false }) }));
+    expect(h.fetch.mock.calls.some(([url]) => new URL(String(url)).searchParams.get('search'))).toBe(false);
+    await expect(h.service.send(7, state.scanId, '2', 'hello')).rejects.toThrow('недоступна');
+    expect(h.hub.followerOutreachAttempt).not.toHaveBeenCalled();
+  });
+
+  it('Pause cancels an opening that is still waiting in the creator lane before fetch', async () => {
+    begin(); const h = identityTransport();
+    const scan = await h.service.start(7, 48);
+    await vi.advanceTimersByTimeAsync(800);
+    expect(h.service.state(7, scan.scanId).verification).toMatchObject({ active: true, fanId: '2' });
+    expect(h.post).not.toHaveBeenCalled();
+    h.service.pause(7, scan.scanId);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(h.post).not.toHaveBeenCalled(); expect(h.history).not.toHaveBeenCalled();
+    expect(h.service.state(7, scan.scanId)).toMatchObject({ canContinue: true, verification: { active: false, remaining: 1, stopped: 'paused' }, rows: [{ status: 'pending' }] });
+    h.service.resume(7, scan.scanId);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(h.service.state(7, scan.scanId).rows[0]).toMatchObject({ status: 'ready', evidence: 'history' });
+    expect(h.post).toHaveBeenCalledOnce();
+  });
+
+  it('Pause after POST dispatch saves the returned ID, stops before history and resumes without a second POST', async () => {
+    begin(); const h = identityTransport();
+    let release!: (response: Response) => void;
+    h.post.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+    const scan = await h.service.start(7, 48);
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(h.post).toHaveBeenCalledOnce();
+    h.service.pause(7, scan.scanId);
+    expect(h.post.mock.calls[0]![1].aborted).toBe(false);
+    release(h.response(h.group('2')));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.service.state(7, scan.scanId)).toMatchObject({ canContinue: true, verification: { active: false, remaining: 1, stopped: 'paused' }, rows: [{ status: 'pending', groupId: '1002', chatKnown: true }] });
+    expect(h.values['chatgoose:followers:v1:group:1:2']).toMatchObject({ groupId: '1002' });
+    expect(h.history).not.toHaveBeenCalled();
+    expect(h.fetch.mock.calls.some(([url]) => new URL(String(url)).pathname.includes('/group/'))).toBe(false);
+    h.service.resume(7, scan.scanId);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(h.service.state(7, scan.scanId)).toMatchObject({ canContinue: false, rows: [{ status: 'ready', evidence: 'history', groupId: '1002' }] });
+    expect(h.post).toHaveBeenCalledOnce();
+    // The saved ID remains useful in an entirely new run, too.
+    const again = await h.service.start(7, 48);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(h.service.state(7, again.scanId).rows[0]).toMatchObject({ status: 'ready', evidence: 'history' });
+    expect(h.post).toHaveBeenCalledOnce();
+    expect(h.fetch.mock.calls.filter(([url]) => new URL(String(url)).pathname.endsWith('/followersnew'))).toHaveLength(2);
+  });
+
+  it.each(['close', 'account'] as const)('%s rejects a late opening without saving identity under a different session', async (action) => {
+    begin(); const h = identityTransport();
+    let release!: (response: Response) => void;
+    h.post.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+    const scan = await h.service.start(7, 48);
+    await vi.advanceTimersByTimeAsync(1500);
+    if (action === 'close') h.service.close(7);
+    else { h.session.authorization = 'changed-session'; expect(() => h.service.state(7, scan.scanId)).toThrow(); }
+    expect(h.post.mock.calls[0]![1].aborted).toBe(true);
+    // Even a transport that delivers a response after abort cannot cache it.
+    release(h.response(h.group('2'))); await vi.advanceTimersByTimeAsync(20_000);
+    expect(h.values['chatgoose:followers:v1:group:1:2']).toBeUndefined();
+    expect(h.history).not.toHaveBeenCalled(); expect(h.post).toHaveBeenCalledOnce();
+  });
+
+  it('a first POST 429 stops the tail with a persistent reason, preserving every untouched fan', async () => {
+    begin(); const h = identityTransport(8);
+    h.post.mockResolvedValueOnce(new Response('', { status: 429, headers: { 'retry-after': '90' } }));
+    const state = await finish(h);
+    expect(state).toMatchObject({ canContinue: true, verification: { active: false, remaining: 8, total: 8, stopped: 'cooldown' } });
+    expect(state.rows.map((row) => row.status)).toEqual(['unknown', ...Array.from({ length: 7 }, () => 'pending')]);
+    expect(h.post).toHaveBeenCalledOnce(); expect(h.history).not.toHaveBeenCalled();
+    expect(h.service.traces.get(state.scanId)!.read().events.some((event) => event.name === 'http.cooldown')).toBe(true);
+  });
+
+  it('the first history GET 429 pauses phase two without spending the ordinary read retry budget', async () => {
+    begin(); const h = identityTransport(8);
+    h.history.mockResolvedValue(new Response('', { status: 429 }));
+    const state = await finish(h);
+    expect(state).toMatchObject({ canContinue: true, verification: { active: false, remaining: 8, stopped: 'cooldown' }, rows: [expect.objectContaining({ id: '2', status: 'unknown', groupId: '1002' }), ...Array.from({ length: 7 }, () => expect.objectContaining({ status: 'pending' }))] });
+    expect(h.post).toHaveBeenCalledOnce(); expect(h.history).toHaveBeenCalledOnce();
+    expect(h.values['chatgoose:followers:v1:group:1:2']).toMatchObject({ groupId: '1002' });
+  });
+
+  it.each([503, 404, 'network', 'timeout'] as const)('five consecutive %s opening failures stop the tail without POST retries', async (failure) => {
+    begin(); const h = identityTransport(8);
+    h.post.mockImplementation(async (_fan, _signal) => {
+      if (failure === 'network') throw new TypeError('NetworkError');
+      if (failure === 'timeout') throw new DOMException('Request timed out', 'TimeoutError');
+      return new Response('', { status: failure });
+    });
+    const state = await finish(h);
+    expect(h.post.mock.calls.map(([fan]) => fan)).toEqual(['2', '3', '4', '5', '6']);
+    expect(state).toMatchObject({ canContinue: true, verification: { active: false, remaining: 8, stopped: 'errors' } });
+    expect(state.rows.every((row) => row.status === 'unknown' || row.status === 'pending')).toBe(true);
+    expect(h.service.traces.get(state.scanId)!.read().events.filter((event) => event.name === 'verification.fuse')).toHaveLength(1);
+    await expect(h.service.generate(7, state.scanId, '2')).rejects.toThrow('проверки');
+    await expect(h.service.send(7, state.scanId, '2', 'hello')).rejects.toThrow('недоступна');
+    expect(h.post).toHaveBeenCalledTimes(5);
+  });
+
+  it('a local 403 refusal does not trip the outage fuse or retry that fan', async () => {
+    begin(); const h = identityTransport(7);
+    h.post.mockImplementation(async (fan) => fan === '8' ? h.response(h.group(fan)) : new Response(JSON.stringify({ success: false, error: { code: 99 } }), { status: 403, headers: { 'content-type': 'application/json' } }));
+    const state = await finish(h);
+    expect(h.post).toHaveBeenCalledTimes(7);
+    expect(state).toMatchObject({ canContinue: true, verification: { active: false, remaining: 6 } });
+    expect(state.verification?.stopped).toBeUndefined();
+    expect(state.rows.at(-1)).toMatchObject({ status: 'ready', evidence: 'history' });
+    expect(h.service.traces.get(state.scanId)!.read().events.some((event) => event.name === 'verification.fuse')).toBe(false);
   });
 });

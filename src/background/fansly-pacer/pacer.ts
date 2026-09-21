@@ -69,7 +69,8 @@ function rest(lane: Lane, now: number): void {
 /** Reads that opt in share one FIFO per creator, independently of debug mode:
  * one attempt in flight, a jittered gap between any two starts and a learned
  * spacing per pace key. A permit covers one HTTP attempt, never an entire scan
- * or a POST. Server-requested waits are never shortened. */
+ * or a message dispatch. Chat-resolution POSTs share the lane without retries.
+ * Server-requested waits are never shortened. */
 export class FanslyPacer {
   private readonly lanes = new Map<string, Lane>();
   private readonly store: PacerStore;

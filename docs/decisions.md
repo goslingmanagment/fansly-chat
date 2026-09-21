@@ -128,6 +128,8 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E135 | 2026-09-20 | Release E133 + E134 as 2.4.4 in one release on the owner's word, on the SDK re-vendored in E132; no live measurement yet, trace counters added for every unverified assumption |
 | E136 | 2026-09-20 | Unified Hi greeting: one `hi-greeting` contract (`variantCount`, `personalMessageCount`) for the chat button and the New Followers window, one greeting-context module, one shared welcome-definitions service; the gate counts personal messages; needs Core Decision 379 deployed first; unreleased |
 | E137 | 2026-09-20 | Release E136 as 2.4.5 on the owner's word, after Core Decision 379 (core `82571f3c`) is deployed, on the SDK re-vendored from that deployed commit; no independent review, validation synthetic plus a before/after prompt render |
+| E138 | 2026-09-22 | New followers: fast positive-proof pass followed by one automatic identity/history queue for unresolved rows; group POST joins the creator lane, soft pause preserves an in-flight result, selected fan is next; no unverified sends, no release |
+| E139 | 2026-09-22 | Owner authorizes release 2.4.6 for E138 after independent code review; package, manifest and release pages advance together; no Telegram announcement; live Fansly performance remains unmeasured |
 
 ## Entries
 
@@ -4795,3 +4797,99 @@ fan whose chat holds 25+ automatic messages no longer fits the one page the chat
 Hi reads, so Hi stays closed for him while the New Followers window (up to 30
 pages) greets him; closing that gap means multi-page reads for Hi, which is
 extra Fansly egress on the chatter's own session.
+
+
+**E138 (2026-09-22).** The owner requests a fast first pass followed automatically
+by verification of only the unresolved remainder (for example, six of 67 fans),
+while confirmed rows remain usable. The owner explicitly accepts that resolving
+a chat by account IDs can create an empty technical chat. This supersedes
+E134's ban on `POST /group` during a user-started scan/Continue and removes its
+budgeted background text search. It does not authorize unattended runs,
+generation, messages, a version bump or deployment.
+
+Evidence. A recorded KBilly case was absent from the inbox and text search.
+`POST /group` returned the old chat ID and the creator's `users[].userSettings`
+with `hidden: 1`, but omitted `lastMessage`; subsequent group/history reads
+showed an outgoing personal message. Omission of that field is not empty
+history. The cause of `hidden: 1` on the old chat is not established, and is
+not described as a human hiding it. A separately observed new empty chat also
+had `hidden: 1`; neither observation changes that setting or proves the cause
+for another chat. Regression tests use synthetic participants and messages.
+
+Implementation. One scan has two phases. Discovery and existing positive
+proofs, inbox matches and saved IDs are the fast pass. A miss becomes `pending`
+(`В очереди`), with no eligibility evidence. The sequential second phase
+rechecks local proof/custody, resolves only an unresolved identity with one
+`POST /group`, validates exactly the creator/fan pair, saves the ID immediately,
+then uses the same group/history checker. No negative classification comes
+from a text search, an omitted POST `lastMessage`, or a hidden flag. Personal
+outgoing evidence excludes the fan; a history read to its confirmed end is
+required for `ready`/`reply`. An advertised last message with an empty first
+history page remains unknown. Positive proofs, welcome/mass classification,
+participant fences, history pagination bounds and live revision checks remain.
+
+Queue and transport. One unresolved fan is processed at a time. Selection
+moves only the next queued ID; it neither interrupts an in-flight opening nor
+starts a separate run. Confirmed rows keep their statuses and drafts. All
+mutating row actions share a creator/fan lock, and a human action joins an
+active verification before taking that lock. Group POSTs share the existing
+paced creator FIFO with GETs. Message POSTs bypass that lane after Hub dispatch.
+Group POSTs and the second phase's group/history GETs have one attempt per
+request: a first 429 stops the tail, retaining the shared cooldown and visible
+stop reason. Five consecutive network/timeout/404/5xx failures trip a fuse.
+A per-fan refusal such as HTTP 403 is recorded for that fan without tripping
+the outage fuse. No failed group opening is automatically replayed in the
+same pass; Continue is an explicit retry of the remaining rows.
+
+Pause and continuation. Admission cancellation is separate from request
+cancellation: Pause removes a group POST still waiting for a permit, but lets
+an already dispatched opening complete and persist its verified ID. The queue
+then stops before the next group/history read. Window close and session change
+remain hard cancellation, and late responses cannot cache another session's
+result. Continue does not reload followers or reset confirmed rows: it checks
+only unfinished rows, follows the saved ID when available and resolves only
+identities that still lack one. The UI reports confirmed counts and the
+remainder separately, preserves composer focus/caret while other rows change,
+and permits a pending draft while disabling generation/send until history is
+confirmed. A legacy ready/reply row without history evidence fails closed.
+
+Send custody is unchanged: an explicit send checks current history and the
+reviewed revision, reserves and dispatches through Hub, journals the attempt,
+and validates the Fansly message receipt. An indeterminate send is never
+retried. Refresh and preview cannot authorize messages. POST message never
+waits in the creator FIFO after custody has been granted.
+
+Validation: real paced transport with mocked HTTP pins KBilly, queued versus
+in-flight Pause, saved-ID reuse, late responses after close/session change,
+GET/POST 429 stops, one-attempt failures and the outage fuse. Service tests pin
+priority, confirmed-row use during the tail, shared row locks and existing
+send preflight/custody. The 146- and 194-follower transport scenarios remain,
+with the new identity-resolution contract. UI tests cover pending labels,
+blocked actions, draft/focus/caret preservation and remaining-only Continue.
+The full `pnpm check` gate passed. A local mocked Playwright browser preview
+at 1280 and 430 px verified the ready/pending controls, remaining-only Continue
+and actual textarea identity, focus, selection and draft preservation.
+Live Fansly timing, request totals and rate-limit behavior of the new version
+remain unmeasured; this decision makes no speed or deployment claim.
+
+**E139 (2026-09-22).** After reviewing the E138 implementation, the owner asks
+for a release ("вроде все, надо релиз"). Prepare 2.4.6, the next patch after
+both freshly fetched `origin/main` (`6a76227`) and the published feed's 2.4.5.
+Package and manifest advance together; both changelogs, the landing stamp and
+README describe the two-phase verification. E138 remains the historical record
+of implementation authorization before this separate release request.
+
+The coordinating agent independently reviewed the queue, transport regressions
+and local UI screenshots without finding a release blocker. Validation covers
+the full `pnpm check` gate, mocked HTTP through the real pacer, jsdom and an
+isolated Playwright preview. Live Fansly timing, request totals and rate-limit
+behavior remain unmeasured. No Fansly messages are sent as part of validation.
+No SDK or Core contract change is part of this patch.
+
+Publication follows review and CI on the final release commit, through the
+existing `scripts/deploy.sh` gates on clean, pushed `main`. This entry records
+the authorization and prepared version, not a completed deployment; the signed
+tag and served update feed remain release evidence. Use `SKIP_ANNOUNCE=1`:
+the owner did not authorize messaging the Telegram channel. This suppresses
+the send and its credential requirement while keeping the local changelog
+preflight before signing.

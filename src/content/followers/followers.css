@@ -50,7 +50,7 @@ nav button.active { color: #b95434; border-color: #d97757; }
 .generate, .verify { border: 1px solid var(--line); border-radius: 7px; padding: 7px 11px; font-size: 12px; }
 .verify { border-color: #b27b2966; color: #8a5f1e; }
 .empty.unverified { color: #6f6a5c; max-width: 460px; }
-.send { background: #bd674a; color: #fff; border-radius: 7px; padding: 8px 13px; font-size: 12px; }
+.send { background: #bd674a; color: #fff; border-radius: 7px; padding: 8px 13px; font-size: 12px; white-space: nowrap; flex-shrink: 0; }
 .notice { padding: 16px 22px; border-top: 1px solid var(--line); color: #8d785d; font-size: 12px; }
 .error { padding: 9px 22px; background: #c7864220; font-size: 12px; max-height: 80px; overflow: auto; flex-shrink: 0; }
 .error[hidden] { display: none; }
@@ -62,9 +62,9 @@ nav button.active { color: #b95434; border-color: #d97757; }
 @media (max-width: 650px) { .toolbar { flex-wrap: wrap; gap: 6px; padding-left: 16px; } }
 
 .scan-info { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 6px 22px; border-bottom: 1px solid var(--line); font-size: 11px; color: #817c70; flex-shrink: 0; }
-.scan-info:has(.range:empty):has(.cooldown[hidden]):has(.background[hidden]) { display: none; }
+.scan-info:has(.range:empty):has(.cooldown[hidden]):has(.verification[hidden]) { display: none; }
 .cooldown { width: 100%; color: #9b672e; }
-.cooldown[hidden], .pause[hidden], .background[hidden] { display: none; }
+.cooldown[hidden], .pause[hidden], .verification[hidden] { display: none; }
 .pause { border: 1px solid var(--line); padding: 4px 8px; border-radius: 6px; font-size: 12px; }
 .filter { margin: 8px 14px; width: calc(100% - 28px); font-size: 12px; }
 .proof { margin: 0 22px 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px; font-size: 12px; flex-shrink: 0; max-height: 130px; overflow: auto; }
