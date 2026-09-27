@@ -228,7 +228,8 @@ export class InlinePanelController {
       ) return;
       if (this.model.kind !== 'reply') return;
       if (this.root.classList.contains('chatgoose-hidden')) return;
-      if ('feature' in this.model && this.model.feature !== 'fast-reply') return;
+      // Reply parts and Split Fix parts (E142) share the Enter-inserts-next flow.
+      if ('feature' in this.model && this.model.feature !== 'fast-reply' && this.model.feature !== 'improve-draft') return;
       if (isEditableElement(document.activeElement)) return;
       if (isInteractiveElement(document.activeElement)) return;
       if (
@@ -344,9 +345,10 @@ export class InlinePanelController {
     this.currentView = view;
 
     // Auto-focus the first Insert button for newly visible completed fast replies
+    // and Split Fix parts (E142)
     if (
       model.kind === 'reply' &&
-      'feature' in model && model.feature === 'fast-reply' &&
+      'feature' in model && (model.feature === 'fast-reply' || model.feature === 'improve-draft') &&
       model.operationId !== this.lastFocusedReplyOpId
     ) {
       this.lastFocusedReplyOpId = model.operationId;

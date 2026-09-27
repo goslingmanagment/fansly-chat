@@ -499,7 +499,8 @@ export class OverlayController {
         event.repeat || event.isComposing
       ) return;
       if (this.model.kind !== 'reply') return;
-      if (this.model.feature !== 'fast-reply') return;
+      // Reply parts and Split Fix parts (E142) share the Enter-inserts-next flow.
+      if (this.model.feature !== 'fast-reply' && this.model.feature !== 'improve-draft') return;
       if (isEditableElement(document.activeElement)) return;
       if (isInteractiveElement(document.activeElement)) return;
       if (
@@ -919,9 +920,10 @@ export class OverlayController {
     this.currentView = nextView;
 
     // Auto-focus the first Insert button for newly visible completed fast replies
+    // and Split Fix parts (E142)
     if (
       model.kind === 'reply' &&
-      model.feature === 'fast-reply' &&
+      (model.feature === 'fast-reply' || model.feature === 'improve-draft') &&
       operationIdForModel(model) !== this.lastFocusedReplyOpId
     ) {
       this.lastFocusedReplyOpId = operationIdForModel(model);

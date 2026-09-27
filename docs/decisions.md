@@ -132,6 +132,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E139 | 2026-09-22 | Owner authorizes release 2.4.6 for E138 after independent code review; package, manifest and release pages advance together; no Telegram announcement; live Fansly performance remains unmeasured |
 | E140 | 2026-09-26 | Re-vendor the SDK from deployed Core `a51e687d` (Core Decision 381 alert digest kind + H3 events v2 platform filter, frame provenance, money facts route); production already serves `21a767b8…`, merge at once, no version bump, ships with the next release |
 | E141 | 2026-09-27 | One hotkey scheme for the extension and the OnlyFans desktop app, vendored from the hub (`@chatgoose/hotkeys`): text actions ⌘/Ctrl + E I G P ., panels ⌘⇧ / Ctrl+Alt + H S O B L M C, physical-key matching, fresh-press roll-over guard; replaces ⌘⇧ / Alt+Shift; prepared as 2.5.0, not deployed |
+| E142 | 2026-09-27 | Split on Fix: the same sticky Split flag now also sends `preferSplit` with Fix (Core #268 prompt); a Split result opens in the inline panel with an Insert per part, pinned to its draft so inserting or sending part 1 keeps the rest and Regenerate reruns that draft; one part still auto-inserts; not released |
 
 ## Entries
 
@@ -4974,3 +4975,31 @@ the new ⌘E / Ctrl+E as its old Review. Live checks on real macOS and Windows
 keyboards (EN/RU, the three language switches, Firefox full screen, Services on
 ⌘⇧L/⌘⇧M with selected text) remain before release. Deploy with
 `SKIP_ANNOUNCE=1`: the owner posts the announcement.
+
+**E142 (2026-09-27).** Split works on Fix, as it does on Improve in the
+desktop app (its D42, Core #268). A chatter asked for it after the desktop got
+it; the owner said «да давай сделаем». The name Fix stays (owner, the bar has
+no room for «Improve»).
+
+- One Split flag for Reply and Fix: the square in the Reply capsule and ⌘⇧L /
+  Ctrl+Alt+L arm both, and Fix now sends `replyMode: preferSplit` because its
+  policy has `supportsReplyMode`. The hint, aria label and hotkey label name
+  both buttons. The square stays in the Reply capsule where chatters know it.
+- The kernel writes the parts: with Split it cuts the draft at its natural
+  seams into 2–3 messages without shortening it (a one-liner becomes two short
+  texts); without Split the Fix prompt and result are unchanged.
+  `buildFeatureResult` splits a `single-reply` on [NEXT] only for a feature
+  with the Split policy that asked for it and marks `splitModeRequested`.
+- Presentation: one part auto-inserts into the composer as before. Two or
+  three parts open in the inline panel, each with its own Insert, the Split
+  note, Enter-inserts-next and first-Insert focus (also when expanded to the
+  overlay), like a Split Reply. The
+  panel is pinned to the draft the result was made from (`inlineImprove`):
+  its cache lookup no longer follows the live composer, so inserting or
+  sending part 1 keeps parts 2–3, and Regenerate reruns that draft even when
+  the composer is empty. Closing the panel, a new operation or a chat switch
+  drops the pin.
+- The Fix cache key carries the mode (`split\u0000<draft>`), so a Split Fix
+  and a single Fix of the same draft never answer for each other.
+
+Not released: ships with the next extension release after the owner's go.

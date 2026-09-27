@@ -338,6 +338,12 @@ export class ChatGooseContentApp {
   private voiceRenderFrame: number | null = null;
   private readonly suppressedTerminalOpIds = new Set<string>();
   private activeImproveDraftCacheKey: string | null = null;
+  private activeImproveDraftText: string | null = null;
+  /** E142: a Split Fix shown in the inline panel, pinned to the draft it was
+   * made from. The panel looks its result up by this key instead of the live
+   * composer, so inserting or sending part 1 does not drop parts 2–3, and
+   * Regenerate reruns that draft. */
+  private inlineImprove: { variantKey: string; draftText: string } | null = null;
   private observedDraftDocument: Document | null = null;
   private hasDraftText = false;
   // Deep feature overlay model (completed/error/cache-hit shown in overlay)
@@ -547,6 +553,7 @@ export class ChatGooseContentApp {
         this.activeCompareModel = null;
       } else {
         this.quickInlineVisible = false;
+        this.inlineImprove = null;
       }
       this.renderAll();
     },
@@ -1290,17 +1297,19 @@ export class ChatGooseContentApp {
       return null;
     }
 
+    const variantKey =
+      featureRequiresDraft(this.lastFeature) && this.inlineImprove
+        ? this.inlineImprove.variantKey
+        : this.buildFeatureCacheKey(
+            this.lastFeature,
+            featureRequiresDraft(this.lastFeature)
+              ? getActiveConversationDraftText()
+              : undefined,
+          );
     return this.completedOverlayCache.get(
       this.currentGroupId,
       this.lastFeature,
-      this.overlayCacheIdentity(
-        this.buildFeatureCacheKey(
-          this.lastFeature,
-          featureRequiresDraft(this.lastFeature)
-            ? getActiveConversationDraftText()
-            : undefined,
-        ),
-      ),
+      this.overlayCacheIdentity(variantKey),
     );
   }
 
@@ -1387,16 +1396,20 @@ export class ChatGooseContentApp {
     if (!featureRequiresDraft(feature)) {
       return undefined;
     }
-    return this.buildImproveDraftCacheKey(draftText) ?? undefined;
+    return this.buildImproveDraftCacheKey(
+      draftText,
+      featureSupportsReplyMode(feature) ? this.nextFastReplyMode : undefined,
+    ) ?? undefined;
   }
 
   private restoreCachedFeatureResult(
     feature: FeatureType,
     cachedResult: CompletedOverlayViewModel,
+    improvePin: { variantKey: string; draftText: string } | null,
   ): void {
     this.lastFeature = feature;
     if (featureRequiresDraft(feature) && cachedResult.kind === 'reply') {
-      void this.applyImproveDraftResult(cachedResult);
+      this.presentImproveDraftResult(cachedResult, improvePin);
       return;
     }
     if (usesInlineFeatureSurface(feature)) {
@@ -1408,7 +1421,7 @@ export class ChatGooseContentApp {
     this.renderSurfaces();
   }
 
-  private ensureFeatureCanStart(feature: FeatureType): boolean {
+  private ensureFeatureCanStart(feature: FeatureType, draftText?: string): boolean {
     if (!this.tabState) {
       return false;
     }
@@ -1429,7 +1442,7 @@ export class ChatGooseContentApp {
       this.showUserErrorToast(getErrorMessage('not_connected'));
       return false;
     }
-    if (featureRequiresDraft(feature) && !this.computeHasDraftText()) {
+    if (featureRequiresDraft(feature) && !(draftText ?? getActiveConversationDraftText()).trim()) {
       this.toast.show('Write a draft in the composer first, then use Fix.', {
         tone: 'warning',
       });
@@ -1455,13 +1468,16 @@ export class ChatGooseContentApp {
       this.startStandaloneRecap(recapMode ?? 'full');
       return;
     }
+    // E142: Regenerate on a pinned Split Fix rewrites the draft it came from,
+    // even after part 1 was inserted or sent.
+    const pinnedDraft = featureRequiresDraft(feature) ? this.inlineImprove?.draftText : undefined;
     this.completedOverlayCache.clearFeature(this.currentGroupId, feature);
     // E79: a cached standalone Help result reruns as Coach's situation preset.
     if (feature === 'help-me') {
       this.openCoachPreset();
       return;
     }
-    this.startFeature(feature, true);
+    this.startFeature(feature, true, pinnedDraft);
   }
 
   private buildOperationStartPayload(
@@ -1522,6 +1538,7 @@ export class ChatGooseContentApp {
     this.lastFeature = feature;
     this.overlayRawText = '';
     this.activeImproveDraftCacheKey = improveDraftCacheKey ?? null;
+    this.inlineImprove = null;
     // Default to a full-summary run; standalone short/«Открыть последний» set
     // this AFTER init so completion selects the matching availability/display
     // slot and Refresh can preserve the exact size.
@@ -1542,9 +1559,12 @@ export class ChatGooseContentApp {
     completedModel: CompletedOverlayViewModel,
   ): void {
     if (featureRequiresDraft(feature)) {
+      const improvePin = this.activeImproveDraftCacheKey && this.activeImproveDraftText
+        ? { variantKey: this.activeImproveDraftCacheKey, draftText: this.activeImproveDraftText }
+        : null;
       this.clearOperationState(false);
       if (completedModel.kind === 'reply') {
-        void this.applyImproveDraftResult(completedModel);
+        this.presentImproveDraftResult(completedModel, improvePin);
       } else {
         this.renderAll();
       }
@@ -1589,7 +1609,11 @@ export class ChatGooseContentApp {
 
   // ─── Feature Lifecycle ──────────────────────────────────────────────
 
-  private startFeature(feature: FeatureType, forceRegenerate: boolean): void {
+  private startFeature(
+    feature: FeatureType,
+    forceRegenerate: boolean,
+    draftOverride?: string,
+  ): void {
     // Defensive routing fence: every production caller handles Help explicitly,
     // and a future generic caller still must not revive standalone generation.
     if (feature === 'help-me') {
@@ -1628,9 +1652,12 @@ export class ChatGooseContentApp {
     }
 
     const draftText = featureRequiresDraft(feature)
-      ? getActiveConversationDraftText().trim()
+      ? (draftOverride ?? getActiveConversationDraftText()).trim()
       : undefined;
     const improveDraftCacheKey = this.buildFeatureCacheKey(feature, draftText);
+    const improvePin = improveDraftCacheKey !== undefined && draftText
+      ? { variantKey: improveDraftCacheKey, draftText }
+      : null;
 
     const cachedResult =
       !forceRegenerate
@@ -1642,11 +1669,11 @@ export class ChatGooseContentApp {
           )
         : null;
     if (cachedResult) {
-      this.restoreCachedFeatureResult(feature, cachedResult);
+      this.restoreCachedFeatureResult(feature, cachedResult, improvePin);
       return;
     }
 
-    if (!this.ensureFeatureCanStart(feature)) {
+    if (!this.ensureFeatureCanStart(feature, draftText)) {
       return;
     }
 
@@ -1658,6 +1685,7 @@ export class ChatGooseContentApp {
       domFanDisplayName,
       improveDraftCacheKey,
     );
+    this.activeImproveDraftText = improvePin?.draftText ?? null;
 
     const payload = this.buildOperationStartPayload(
       feature,
@@ -2099,6 +2127,7 @@ export class ChatGooseContentApp {
       // The regen-tone memo is per-conversation — never bleed a tone from
       // one fan's chat into a Regenerate in another's.
       this.lastSentReplyTone = 'none';
+      this.inlineImprove = null;
       // Voice is bound to the conversation route (its attach attestation checks
       // the exact tuple): a new conversation gets a fresh controller. The old
       // attempt survives in storage.session, recoverable if the chatter returns.
@@ -3977,6 +4006,7 @@ export class ChatGooseContentApp {
     this.activeProfiling = null;
     this.activeProgress = null;
     this.activeImproveDraftCacheKey = null;
+    this.activeImproveDraftText = null;
     if (fullReset) {
       this.activeDebugPrompt = null;
       this.activeDebugEcho = null;
@@ -3992,9 +4022,33 @@ export class ChatGooseContentApp {
     return getActiveConversationDraftText().trim().length > 0;
   }
 
-  private buildImproveDraftCacheKey(draftText: string | undefined): string | null {
+  private buildImproveDraftCacheKey(
+    draftText: string | undefined,
+    replyMode?: ReplyMode,
+  ): string | null {
     const trimmed = draftText?.trim() ?? '';
-    return trimmed || null;
+    if (!trimmed) {
+      return null;
+    }
+    // A Split Fix and a single Fix of the same draft are different results.
+    return replyMode === 'preferSplit' ? `split\u0000${trimmed}` : trimmed;
+  }
+
+  /** One part auto-inserts as before. Split parts (E142) open in the inline
+   * panel, each with its own Insert, pinned to the draft they were made from. */
+  private presentImproveDraftResult(
+    model: Extract<CompletedOverlayViewModel, { kind: 'reply' }>,
+    improvePin: { variantKey: string; draftText: string } | null,
+  ): void {
+    if (model.parts.length > 1 && improvePin) {
+      this.inlineImprove = improvePin;
+      this.quickInlineVisible = true;
+      this.quickSurfaceMode = 'inline';
+      this.renderAll();
+      return;
+    }
+    this.inlineImprove = null;
+    void this.applyImproveDraftResult(model);
   }
 
   private async applyImproveDraftResult(

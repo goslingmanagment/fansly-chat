@@ -40,7 +40,7 @@ const FEATURE_HINTS: Record<FeatureType, string> = {
 
 /** Controls that are not `FeatureType` entries but still need explaining. */
 const VOICE_HINT = 'Голосовая заметка на текущем черновике';
-const SPLIT_HINT = 'Ответ придёт серией из 2–3 сообщений. Отправлять руками, по одному';
+const SPLIT_HINT = 'Reply и Fix придут серией из 2–3 сообщений. Отправлять руками, по одному';
 const ACCOUNT_WARNING_HINT =
   'Расширение не видит, в каком аккаунте Fansly открыт этот чат — перезагрузите страницу Fansly';
 
@@ -118,9 +118,9 @@ export class ButtonBar {
   // keeps a chip.
   private readonly accountWarning: HTMLElement;
   // Split — multi-message reply mode (preferSplit). Sticky until toggled off
-  // (E24). It lives INSIDE the options capsule since E73: `supportsReplyMode`
-  // is true for `fast-reply` alone, so Split is an option of one button exactly
-  // like a tone, and E24's own rule — actions are raised chips, options lie in
+  // (E24). It lives INSIDE the options capsule since E73: Split was an option
+  // of the Reply button exactly like a tone (E142 extended the same flag to
+  // Fix, and it stayed where the chatters know it), and E24's own rule — actions are raised chips, options lie in
   // the sunken groove — puts it there. E24 kept it outside because a checkbox
   // among radios could read as a fifth tone; that is answered by the FORM, not
   // by the placement: an armed tone rises as a thumb, an armed Split is pressed
@@ -181,7 +181,7 @@ export class ButtonBar {
     this.replyModeToggle.className = 'chatgoose-tone-seg chatgoose-split-seg';
     this.replyModeToggle.setAttribute('role', 'checkbox');
     this.replyModeToggle.setAttribute('aria-checked', 'false');
-    this.replyModeToggle.setAttribute('aria-label', 'Split reply into 2–3 messages');
+    this.replyModeToggle.setAttribute('aria-label', 'Split Reply and Fix into 2–3 messages');
     this.replyModeToggle.setAttribute(
       'aria-keyshortcuts',
       hotkeyAriaLabel('toggle-split', this.platform),

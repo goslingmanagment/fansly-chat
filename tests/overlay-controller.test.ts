@@ -1321,6 +1321,29 @@ describe('OverlayController', () => {
     });
   });
 
+  it('Enter inserts an expanded Split Fix part too (E142)', async () => {
+    const { insertIntoFanslyTextarea } = await import('../src/content/textarea.js');
+    vi.mocked(insertIntoFanslyTextarea).mockClear();
+    const controller = new OverlayController({
+      onClose: () => undefined,
+      onCancel: () => undefined,
+      onRerun: () => undefined,
+      onCollapse: () => undefined,
+    });
+
+    controller.render({ ...createReplyModel(createPart('Fixed first part')), feature: 'improve-draft' });
+    await vi.waitFor(() => {
+      const btn = document.querySelector<HTMLButtonElement>('.chatgoose-card-actions .chatgoose-button');
+      expect(document.activeElement).toBe(btn);
+    });
+    (document.activeElement as HTMLElement)?.blur?.();
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    await vi.waitFor(() => {
+      expect(insertIntoFanslyTextarea).toHaveBeenCalledWith('Fixed first part');
+    });
+  });
+
   it('Enter is ignored for hidden overlay', async () => {
     const { insertIntoFanslyTextarea } = await import('../src/content/textarea.js');
     vi.mocked(insertIntoFanslyTextarea).mockClear();
