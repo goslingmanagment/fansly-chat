@@ -28,7 +28,7 @@ from prose when checking what is installed or live; verify the signed update fee
 
 ## Features
 
-- **Reply / Fix** — draft or improve a reply, with tone and Split controls.
+- **Reply / Fix** — draft or improve a reply; tone arms Reply, Split works on both (2–3 messages).
 - **Coach** — ask follow-up questions about the current fan, attach a draft,
   and use the **Help** situation-analysis preset (also available through H).
 - **Recap** — independently cached short (up to 300 messages) and full

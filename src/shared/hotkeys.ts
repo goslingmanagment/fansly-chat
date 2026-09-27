@@ -109,7 +109,7 @@ export const HOTKEY_ACTION_NAMES: Record<HotkeyAction, string> = {
   'fan-summary': 'Recap — выбор сводки по фану',
   'cycle-tone': 'Сменить тон (Casual / Flirt / Sell / Spice)',
   'chat-review': 'Review — оценка чата',
-  'toggle-split': 'Split — ответ серией из 2–3 сообщений',
+  'toggle-split': 'Split — Reply и Fix серией из 2–3 сообщений',
   'spenders-board': 'Доска Spenders',
   coach: 'Coach — спросить AI про фана',
   cheatsheet: 'Шпаргалка хоткеев',

@@ -1009,6 +1009,111 @@ describe('ChatGooseContentApp', () => {
     expect((app.inlinePanel.root as HTMLElement).classList.contains('chatgoose-hidden')).toBe(true);
   });
 
+  it('sends Split with Fix and keys its cache apart from a single Fix (E142)', async () => {
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
+    const sendSpy = vi.fn(() => true);
+
+    mountConversationComposer('hey babe how was your day');
+    app.port.send = sendSpy;
+    app.tabState = readyState();
+    app.currentGroupId = 'group-1';
+    app.nextFastReplyMode = 'preferSplit';
+
+    app.startFeature('improve-draft', false);
+
+    expect(sendSpy).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'operation:start',
+      feature: 'improve-draft',
+      draftText: 'hey babe how was your day',
+      replyMode: 'preferSplit',
+    }));
+    expect(app.activeImproveDraftCacheKey).toBe('split\u0000hey babe how was your day');
+    expect(app.activeImproveDraftText).toBe('hey babe how was your day');
+  });
+
+  function completeSplitFix(app: any): void {
+    app.tabState = readyState();
+    app.currentGroupId = 'group-1';
+    app.nextFastReplyMode = 'preferSplit';
+    app.lastFeature = 'improve-draft';
+    app.activeFeature = 'improve-draft';
+    app.activeOperationId = 'improve-op';
+    app.activeFanDisplayName = 'alice';
+    app.activeImproveDraftCacheKey = 'split\u0000hey babe how was your day';
+    app.activeImproveDraftText = 'hey babe how was your day';
+    app.handleComplete({
+      type: 'operation:complete',
+      operationId: 'improve-op',
+      fanDisplayName: 'alice',
+      result: {
+        rawText: 'my bad, wanted you to see the video[NEXT]guess it seemed live lol',
+        parts: ['my bad, wanted you to see the video', 'guess it seemed live lol'],
+        splitModeRequested: true,
+      },
+    });
+  }
+
+  it('opens Split Fix parts in the inline panel and keeps them after part 1 leaves the composer (E142)', async () => {
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
+    const textarea = mountConversationComposer('hey babe how was your day');
+
+    completeSplitFix(app);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // Not auto-inserted: every part gets its own Insert in the panel.
+    expect(textarea.value).toBe('hey babe how was your day');
+    const root = app.inlinePanel.root as HTMLElement;
+    expect(root.classList.contains('chatgoose-hidden')).toBe(false);
+    expect(root.textContent).toContain('my bad, wanted you to see the video');
+    expect(root.textContent).toContain('guess it seemed live lol');
+
+    // Part 1 inserted and sent: the composer no longer holds the draft, and a
+    // re-render still finds the pinned result.
+    textarea.value = '';
+    app.renderSurfaces();
+    expect(root.classList.contains('chatgoose-hidden')).toBe(false);
+    expect(root.textContent).toContain('guess it seemed live lol');
+  });
+
+  it('regenerates a pinned Split Fix from its original draft even with an empty composer (E142)', async () => {
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
+    const textarea = mountConversationComposer('hey babe how was your day');
+
+    completeSplitFix(app);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const sendSpy = vi.fn(() => true);
+    app.port.send = sendSpy;
+    textarea.value = '';
+
+    app.rerunFeature('improve-draft');
+
+    expect(sendSpy).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'operation:start',
+      feature: 'improve-draft',
+      draftText: 'hey babe how was your day',
+      forceRegenerate: true,
+      replyMode: 'preferSplit',
+    }));
+  });
+
+  it('drops the pin when the panel closes, so Fix goes back to the live composer (E142)', async () => {
+    const ChatGooseContentApp = await loadAppClass();
+    const app = new ChatGooseContentApp() as any;
+    mountConversationComposer('hey babe how was your day');
+
+    completeSplitFix(app);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(app.inlineImprove).not.toBeNull();
+
+    app.inlinePanel.callbacks.onClose();
+
+    expect(app.inlineImprove).toBeNull();
+    expect((app.inlinePanel.root as HTMLElement).classList.contains('chatgoose-hidden')).toBe(true);
+  });
+
   it('keeps Fix loading hidden when progress only adds spend telemetry', async () => {
     const ChatGooseContentApp = await loadAppClass();
     const app = new ChatGooseContentApp() as any;

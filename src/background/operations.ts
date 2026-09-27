@@ -424,6 +424,15 @@ export function buildFeatureResult(
     case 'coach-chat':
       return { rawText };
     case 'single-reply':
+      // Split on Fix asks the kernel for [NEXT] parts (E142); without it the
+      // rewrite stays one message.
+      if (getFeaturePolicy(feature).supportsReplyMode && replyMode === 'preferSplit') {
+        return {
+          rawText,
+          splitModeRequested: true,
+          parts: normalizeReplyParts(rawText),
+        };
+      }
       return {
         rawText,
         parts: normalizeSingleReplyPart(rawText),

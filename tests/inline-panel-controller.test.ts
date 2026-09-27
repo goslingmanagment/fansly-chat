@@ -1147,6 +1147,31 @@ describe('InlinePanelController', () => {
     });
   });
 
+  it('Split Fix parts focus the first Insert and Enter walks to the follow-up (E142)', async () => {
+    const { insertIntoFanslyTextarea } = await import('../src/content/textarea.js');
+    vi.mocked(insertIntoFanslyTextarea).mockClear();
+    const controller = createController();
+    document.body.append(controller.root);
+
+    const part1 = createPart('First', 0);
+    const part2 = createPart('Second', 1);
+    const model = { ...createReplyModel([part1, part2], { operationId: 'fix-op' }), feature: 'improve-draft' as const };
+    model.splitModeRequested = true;
+    controller.render(model);
+    await vi.waitFor(() => {
+      const btn = controller.root.querySelector<HTMLButtonElement>('.chatgoose-card-actions .chatgoose-button');
+      expect(document.activeElement).toBe(btn);
+    });
+
+    part1.insertedOnce = true;
+    controller.render(model);
+    (document.activeElement as HTMLElement)?.blur?.();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    await vi.waitFor(() => {
+      expect(insertIntoFanslyTextarea).toHaveBeenCalledWith('Second');
+    });
+  });
+
   it('refuses to insert a result minted for another chat — live URL wins', async () => {
     const { insertIntoFanslyTextarea } = await import('../src/content/textarea.js');
     vi.mocked(insertIntoFanslyTextarea).mockClear();

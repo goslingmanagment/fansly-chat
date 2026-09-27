@@ -60,7 +60,7 @@ export const FEATURE_POLICIES = {
     surfaceKind: 'inline-reply',
     promptMode: 'reply',
     resultKind: 'single-reply',
-    supportsReplyMode: false,
+    supportsReplyMode: true,
     supportsReplyTone: false,
     requiresDraft: true,
     usesPingSegment: false,
