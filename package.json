@@ -1,6 +1,6 @@
 {
   "name": "chatgoose",
-  "version": "2.4.6",
+  "version": "2.5.0",
   "description": "ChatGoose — Fansly chat workspace extension with kernel-served AI assistance",
   "private": true,
   "type": "module",
@@ -35,6 +35,7 @@
     "vitest": "^4.0.18"
   },
   "dependencies": {
+    "@chatgoose/hotkeys": "link:./vendor/chatgoose-hotkeys",
     "@kernel/sdk": "link:./vendor/kernel-sdk",
     "zod": "^4.1.5"
   }

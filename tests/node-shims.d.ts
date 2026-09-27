@@ -50,3 +50,11 @@ declare module 'node:fs/promises' {
   ): Promise<void>;
   export function writeFile(path: string, data: string): Promise<void>;
 }
+
+declare module 'node:crypto' {
+  interface Hash {
+    update(data: string | Uint8Array): Hash;
+    digest(encoding: 'hex'): string;
+  }
+  export function createHash(algorithm: 'sha256'): Hash;
+}

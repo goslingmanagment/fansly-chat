@@ -1,65 +1,40 @@
 import { describe, expect, it } from 'vitest';
+import { createHotkeyEngine, hotkeyDef } from '@chatgoose/hotkeys';
 import {
-  buildHotkeyBindings,
+  EXTENSION_ACTION,
   HOTKEY_FEATURE,
-  type HotkeyAction,
+  hotkeyComboLabel,
 } from '../src/shared/hotkeys.js';
-import { createKeymap } from '../src/shared/keymap.js';
+import { resolveHotkeyKeydown } from '../src/content/hotkey-input.js';
 
-// Task 2 of the Coach extension phase (plan §Task 2): coach + recap become
-// hotkey APP ACTIONS. `dispatchHotkey` arms land in Task 10 — this file only
-// pins the shared hotkey table.
+// Coach and Recap are hotkey APP actions: Coach opens the Coach chat, Recap
+// opens the recap picker; neither starts a generation directly.
 describe('coach + recap app-action hotkeys', () => {
-  const mac = buildHotkeyBindings('mac');
-  const coach = mac.find((b) => b.action === ('coach' as HotkeyAction));
-  const recap = mac.find((b) => b.action === ('fan-summary' as HotkeyAction));
-
-  it('adds a coach binding on ⌘⇧C (letter c)', () => {
-    expect(coach).toBeDefined();
-    expect(coach!.combo).toBe('mod+shift+c');
-    expect(coach!.label).toBe('⌘⇧C');
-    expect(coach!.description.toLowerCase()).toContain('coach');
+  it('binds Coach to the panel level on C, in the extension only', () => {
+    expect(EXTENSION_ACTION.coach).toBe('coach');
+    expect(hotkeyDef('coach').clients).toEqual(['extension']);
+    expect(hotkeyComboLabel('coach', 'mac')).toBe('⌘⇧C');
+    expect(hotkeyComboLabel('coach', 'win')).toBe('Ctrl+Alt+C');
   });
 
-  it('treats coach as an app action, not an AI feature', () => {
-    // Absent from HOTKEY_FEATURE ⇒ dispatchHotkey routes it as an app action.
-    expect(HOTKEY_FEATURE['coach' as HotkeyAction]).toBeUndefined();
-  });
-
-  it('removes fan-summary from HOTKEY_FEATURE so ⌘⇧S opens the recap picker', () => {
-    // App action now: the ⌘⇧S hotkey no longer starts a generation directly.
+  it('binds Recap to the panel level on S, routed to the recap picker', () => {
+    expect(EXTENSION_ACTION.recap).toBe('fan-summary');
+    expect(hotkeyComboLabel('fan-summary', 'mac')).toBe('⌘⇧S');
     expect(HOTKEY_FEATURE['fan-summary']).toBeUndefined();
   });
 
-  it('keeps recap on letter s with a picker-aware description', () => {
-    expect(recap).toBeDefined();
-    expect(recap!.combo).toBe('mod+shift+s');
-    expect(recap!.description.toLowerCase()).toContain('recap');
-    expect(recap!.description.toLowerCase()).toContain('picker');
+  it('treats coach as an app action, not an AI feature', () => {
+    expect(HOTKEY_FEATURE.coach).toBeUndefined();
   });
 
-  it("keeps 'c' clear of macOS-reserved ⌘⇧ letters and every other binding", () => {
-    // File-header reserved ⌘⇧ combos: R (hard reload), T (reopen tab),
-    // P (private window), B (bookmarks bar), A (add-ons).
-    const reserved = new Set(['r', 't', 'p', 'a', 'b']);
-    expect(reserved.has('c')).toBe(false);
+  it('resolves ⌘⇧C and Ctrl+Alt+C to the coach action', () => {
+    const mac = createHotkeyEngine({ platform: 'mac', client: 'extension' });
+    mac.keydown({ code: 'MetaLeft', key: 'Meta', metaKey: true, ctrlKey: false, altKey: false, shiftKey: false });
+    expect(resolveHotkeyKeydown({ code: 'KeyC', key: 'с', metaKey: true, ctrlKey: false, altKey: false, shiftKey: true, repeat: false } as KeyboardEvent, true, mac))
+      .toEqual({ kind: 'action', action: 'coach', repeat: false });
 
-    const combos = mac.map((b) => b.combo);
-    expect(new Set(combos).size).toBe(combos.length);
-    expect(combos.filter((c) => c === 'mod+shift+c')).toHaveLength(1);
-  });
-
-  it('resolves ⌘⇧C through the assembled keymap to the coach action', () => {
-    const keymap = createKeymap(mac);
-    expect(
-      keymap.resolve({
-        key: 'c',
-        metaKey: true,
-        ctrlKey: false,
-        altKey: false,
-        shiftKey: true,
-        inEditable: false,
-      }),
-    ).toBe('coach');
+    const win = createHotkeyEngine({ platform: 'win', client: 'extension' });
+    expect(resolveHotkeyKeydown({ code: 'KeyC', key: 'c', metaKey: false, ctrlKey: true, altKey: true, shiftKey: false, repeat: false } as KeyboardEvent, true, win))
+      .toEqual({ kind: 'action', action: 'coach', repeat: false });
   });
 });

@@ -1474,7 +1474,7 @@ async function render(): Promise<void> {
   // ─── «Хоткеи» (read-only reference) ─────────────────────────
   // Derived from the live binding table, so the pane cannot drift from what the
   // keymap dispatches. The platform is detected at render time: the same install
-  // shows ⌘⇧ on macOS and Alt+Shift elsewhere.
+  // shows ⌘ / ⌘⇧ on macOS and Ctrl / Ctrl+Alt on Windows.
   const hotkeysSection = document.createElement('section');
   hotkeysSection.className = 'chatgoose-pane-plain';
   const hotkeysPlatform = detectLabelPlatform();
@@ -1493,7 +1493,9 @@ async function render(): Promise<void> {
   hotkeysCard.className = 'chatgoose-panecard';
   const hotkeysHint = document.createElement('div');
   hotkeysHint.className = 'chatgoose-status-hint';
-  hotkeysHint.textContent = COPY.hotkeys.hint;
+  hotkeysHint.textContent = hotkeysPlatform === 'mac'
+    ? `${COPY.hotkeys.hint} ${COPY.hotkeys.macLegacyNote}`
+    : COPY.hotkeys.hint;
   hotkeysCard.append(renderHotkeysPane(document, hotkeysPlatform), hotkeysHint);
   const hotkeysBody = document.createElement('div');
   hotkeysBody.className = 'chatgoose-panegrid-single';

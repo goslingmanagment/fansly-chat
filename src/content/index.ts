@@ -42,12 +42,11 @@ import { getActiveConversationDraftText, insertIntoFanslyTextarea } from './text
 import { ToastController } from './toast.js';
 import { isEditableElement } from './ui/view-helpers.js';
 import {
-  buildHotkeyBindings,
   detectLabelPlatform,
   HOTKEY_FEATURE,
   type HotkeyAction,
 } from '../shared/hotkeys.js';
-import { createKeymap } from '../shared/keymap.js';
+import { isGlobalHotkeyAction, resolveHotkeyKeydown } from './hotkey-input.js';
 import { COACH_RECAP_FRESH_MS, SPENDERS_SPA_NAV_VERIFY_MS } from '../shared/constants.js';
 import { parseCoachDrafts } from '../shared/coach-draft.js';
 import { isRecapStatusResponse } from '../shared/protocol.js';
@@ -123,10 +122,6 @@ type RecapMode = 'full' | 'short';
 
 function recapOverlayCacheSlot(mode: RecapMode): CompletedOverlayCacheSlot {
   return mode === 'short' ? 'recap-short' : 'recap-full';
-}
-
-function isGlobalHotkeyAction(action: HotkeyAction): boolean {
-  return action === 'spenders-board' || action === 'cheatsheet';
 }
 
 function hotkeyNeedsInitialTabState(action: HotkeyAction): boolean {
@@ -715,8 +710,6 @@ export class ChatGooseContentApp {
     onRecapOpenLast: () => this.openLastRecap(),
   });
 
-  private readonly hotkeyBindings = buildHotkeyBindings(detectLabelPlatform());
-  private readonly keymap = createKeymap(this.hotkeyBindings);
   private cheatsheetController: CheatsheetController | null = null;
   private boardController: SpendersBoardController | null = null;
   private readonly launcher = new BoardLauncher(() => this.board.toggle());
@@ -733,7 +726,7 @@ export class ChatGooseContentApp {
 
   private get cheatsheet(): CheatsheetController {
     return this.cheatsheetController ??=
-      new CheatsheetController(this.hotkeyBindings);
+      new CheatsheetController(detectLabelPlatform());
   }
 
   private get board(): SpendersBoardController {
@@ -864,22 +857,29 @@ export class ChatGooseContentApp {
   // ─── Hotkeys ────────────────────────────────────────────────────────────
 
   private installKeymap(): void {
+    // Takes over from the bootstrap listener, feeding the same shared engine
+    // (content/hotkey-input.ts) with EVERY keydown — modifiers included.
     document.addEventListener('keydown', (event) => {
-      if (event.repeat) return;
-      const action = this.keymap.resolve({
-        key: event.key,
-        metaKey: event.metaKey,
-        ctrlKey: event.ctrlKey,
-        altKey: event.altKey,
-        shiftKey: event.shiftKey,
-        inEditable: isEditableElement(document.activeElement),
-      });
-      if (action === null) return;
+      const decision = resolveHotkeyKeydown(
+        event,
+        isEditableElement(document.activeElement),
+      );
+      if (decision === null) return;
       const expectedGroupId = parseGroupIdFromPath(window.location.pathname);
-      // preventDefault only when we actually handle it, so an inapplicable
-      // shortcut (e.g. an AI key with no conversation open) doesn't silently
-      // swallow a browser default.
-      if (this.dispatchBootstrapHotkey(action, expectedGroupId)) {
+      // Inside a chat every ChatGoose combo is ours: a retired habit, a
+      // roll-over or an action that cannot run right now must not fall through
+      // to find / print / page info. Outside a chat only the global actions
+      // (Spenders, the cheatsheet) are claimed; the browser keeps the rest.
+      const inChat = expectedGroupId !== null;
+      if (decision.kind === 'swallow') {
+        if (inChat) event.preventDefault();
+        return;
+      }
+      if (decision.repeat) {
+        if (inChat || isGlobalHotkeyAction(decision.action)) event.preventDefault();
+        return;
+      }
+      if (this.dispatchBootstrapHotkey(decision.action, expectedGroupId) || inChat) {
         event.preventDefault();
       }
     });
@@ -2874,7 +2874,7 @@ export class ChatGooseContentApp {
     return `обновить Recap не удалось — использую рекап от ${formatCoachAgeMs(ageMs)}`;
   }
 
-  /** Cancel a streaming coach turn (Esc / ⌘⇧X): the terminal that follows is
+  /** Cancel a streaming coach turn (Esc / ⌘. / Ctrl+.): the terminal that follows is
    * suppressed, and the abandoned attempt becomes a cancelled failed-attempt
    * feed item. recordFailedAttempt is called DIRECTLY — never clearPending
    * first, or the guarded record would drop the spec-mandated item

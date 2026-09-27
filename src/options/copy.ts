@@ -15,30 +15,7 @@
 // rulings applied (no "вернуть N"/changed-from-default markers, no "10 дн" in
 // the rail, hotkeys are a read-only reference, quota is numbers — no bars).
 
-import type { HotkeyAction } from '../shared/hotkeys.js';
-
-/**
- * Russian names for the hotkey actions. Typed as a TOTAL record on purpose: a
- * new `HotkeyAction` fails `pnpm typecheck` until it is named here, so the
- * cheatsheet pane can never silently drop a shortcut.
- * The description of each key comes from `HotkeyDef.description` — never
- * duplicated here.
- */
-const HOTKEY_ACTION_NAMES: Record<HotkeyAction, string> = {
-  'fast-reply': 'Сгенерировать ответ',
-  'improve-draft': 'Исправить черновик',
-  'help-me': 'Помоги-мне',
-  'hi-greeting': 'Приветствие',
-  ping: 'Пинг',
-  'fan-summary': 'Fan Summary',
-  coach: 'Коуч-панель',
-  'chat-review': 'Оценка чата',
-  'cycle-tone': 'Сменить тон',
-  'toggle-split': 'Ответ серией',
-  cancel: 'Отменить генерацию',
-  'spenders-board': 'Доска Spenders',
-  cheatsheet: 'Шпаргалка хоткеев',
-};
+import { HOTKEY_ACTION_NAMES, MAC_LEGACY_NOTE } from '../shared/hotkeys.js';
 
 export const COPY = {
   /** `<title>` of options.html — kept in sync with the static HTML, and pinned
@@ -549,19 +526,20 @@ export const COPY = {
 
   hotkeys: {
     title: 'Хоткеи',
-    subtitle: 'Работают на вкладке Fansly. Сочетания заданы расширением — справочник только для чтения.',
-    hint: 'Сочетание не срабатывает — проверь, что фокус в чате Fansly, а не в адресной строке.',
-    /** Which modifier THIS computer uses — the page detected it for the labels
-     * and never said it out loud (E62). */
-    platformMac: 'этот компьютер · macOS · ⌘⇧',
-    platformOther: 'этот компьютер · Windows/Linux · Alt+Shift',
+    subtitle: 'Те же сочетания, что в приложении для OnlyFans. Работают на вкладке Fansly и на русской раскладке — справочник только для чтения.',
+    hint: 'Сочетание не срабатывает — проверь, что фокус в чате Fansly, а не в адресной строке. Если только что переключал язык, отпусти ⌘/Ctrl и нажми снова.',
+    /** Which modifiers THIS computer uses — the page detected it for the labels
+     * and never said it out loud (E62). Text actions / panels. */
+    platformMac: 'этот компьютер · macOS · ⌘ / ⌘⇧',
+    platformOther: 'этот компьютер · Windows · Ctrl / Ctrl+Alt',
+    /** macOS only, under the reference: the pre-2.5 ⌘⇧ habits that still work. */
+    macLegacyNote: MAC_LEGACY_NOTE,
     actions: HOTKEY_ACTION_NAMES,
-    extraEnter: 'Вставить следующую часть ответа',
-    extraEsc: 'Закрыть оверлей, доску или шпаргалку',
-    /** The three semantic groups of the reference. */
-    groupGeneration: 'Генерация',
-    groupPanels: 'Панели',
+    /** The semantic groups of the reference (the same as the in-page cheatsheet). */
+    groupText: 'Пишут текст',
+    groupPanel: 'Разборы и панели',
     groupReference: 'Справка',
+    groupDiffers: 'Различается с приложением',
   },
 
   appearance: {
