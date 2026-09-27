@@ -170,6 +170,11 @@ Important references:
 
 ## Release
 
+Release 2.5.1 (E142) adds Split on Fix: the sticky Split flag sends
+`preferSplit` with Fix too, and a 2–3 part result opens in the inline panel
+with an Insert per part, pinned to its draft. The prompt is Core #268, already
+in production; SDK and Core contracts are unchanged.
+
 Release 2.5.0 (E141) moves the hotkeys onto the family scheme shared with the
 OnlyFans desktop app (`@chatgoose/hotkeys`, vendored from the hub): ⌘/Ctrl +
 E I G P . for everything that writes text, ⌘⇧ / Ctrl+Alt + H S O B L M C for
