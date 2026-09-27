@@ -2707,7 +2707,7 @@ body.chatgoose-voice-studio-lock {
 }
 
 .chatgoose-cheatsheet-panel {
-  width: min(440px, 100%);
+  width: min(480px, 100%);
   max-height: min(80vh, 720px);
   overflow-y: auto;
   padding: 18px 20px;
@@ -2727,6 +2727,26 @@ body.chatgoose-voice-studio-lock {
   margin-bottom: 12px;
 }
 
+.chatgoose-cheatsheet-lead {
+  margin: -6px 0 10px;
+  font-size: 12px;
+  color: var(--chatgoose-ink-mid);
+}
+
+.chatgoose-cheatsheet-group + .chatgoose-cheatsheet-group {
+  margin-top: 12px;
+}
+
+/* Group caption — the same micro-caps rhythm as the Options «Хоткеи» pane. */
+.chatgoose-cheatsheet-cap {
+  margin-bottom: 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--chatgoose-ink-low);
+}
+
 .chatgoose-cheatsheet-list {
   display: grid;
   gap: 6px;
@@ -2734,7 +2754,8 @@ body.chatgoose-voice-studio-lock {
 
 .chatgoose-cheatsheet-row {
   display: grid;
-  grid-template-columns: 92px 1fr;
+  /* Wide enough for the longest Windows combo («Ctrl+Alt+H», «Ctrl+K Ctrl+U»). */
+  grid-template-columns: 112px 1fr;
   align-items: center;
   gap: 12px;
 }
@@ -2775,7 +2796,7 @@ body.chatgoose-voice-studio-lock {
   color: var(--chatgoose-ink-low);
 }
 
-/* ─── Spenders board ($ / ⌘⇧M) ───────────────────────────────────────────── */
+/* ─── Spenders board ($ / ⌘⇧M, Ctrl+Alt+M) ───────────────────────────────────────────── */
 
 /* Same band as the overlay/voice studio — the tie is DOM order, unchanged by
  * the re-band (see the stacking map at #chatgoose-toast-root). */

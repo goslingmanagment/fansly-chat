@@ -89,6 +89,16 @@ provider credentials into the extension — it holds none.
 
 ## Development
 
+### Hotkeys (2.5.0, E141)
+
+The scheme is the hub's `packages/chatgoose-hotkeys` (spec: its README),
+vendored into `vendor/chatgoose-hotkeys` as `@chatgoose/hotkeys` by the hub's
+`scripts/vendor-hotkeys.mjs` — never edit it here; re-vendor the extension and
+the desktop app from the same hub commit. `src/shared/hotkeys.ts` maps the family
+actions onto the extension's action ids and builds every label;
+`src/content/hotkey-input.ts` holds the one engine instance both content bundles
+feed (the fresh-press roll-over guard needs every keydown and keyup).
+
 ### Two-phase follower verification (2.4.6, E138)
 
 `FollowersService` keeps one scan with two phases. Discovery and the first
@@ -159,6 +169,13 @@ Important references:
   architecture.
 
 ## Release
+
+Release 2.5.0 (E141) moves the hotkeys onto the family scheme shared with the
+OnlyFans desktop app (`@chatgoose/hotkeys`, vendored from the hub): ⌘/Ctrl +
+E I G P . for everything that writes text, ⌘⇧ / Ctrl+Alt + H S O B L M C for
+panels, matched by physical key so the Russian layout works. Ship it together
+with the desktop release (a non-updated desktop reads ⌘E as its old Review), with
+`SKIP_ANNOUNCE=1`. SDK and Core contracts are unchanged.
 
 Release 2.4.6 adds the two-phase New Followers check (E138, E139): a fast
 positive-proof pass followed by one automatic identity/history queue for the

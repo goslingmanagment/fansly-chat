@@ -2,7 +2,7 @@
 // ChatGoose Desktop entry point, adapted for an injected page). Body-anchored
 // so it is independent of the per-conversation mount lifecycle.
 
-import { comboLabel, detectLabelPlatform } from '../../shared/hotkeys.js';
+import { detectLabelPlatform, hotkeyComboLabel } from '../../shared/hotkeys.js';
 
 function ensureLauncherRoot(): HTMLElement {
   let root = document.getElementById('chatgoose-launcher-root');
@@ -25,7 +25,7 @@ export class BoardLauncher {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'chatgoose-launcher';
-    button.title = `Spenders board (${comboLabel('m', detectLabelPlatform())})`;
+    button.title = `Spenders board (${hotkeyComboLabel('spenders-board', detectLabelPlatform())})`;
     button.setAttribute('aria-label', 'Open spenders board');
     button.textContent = '$';
     button.addEventListener('click', () => this.onClick());

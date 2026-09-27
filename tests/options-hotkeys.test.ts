@@ -1,80 +1,50 @@
-// «Хоткеи» pane: a read-only cheatsheet derived from the live binding table.
+// «Хоткеи» pane: a read-only reference derived from the family hotkey table.
 //
-// The point of this suite is DRIFT: a shortcut added to `src/shared/hotkeys.ts`
-// must not be able to reach a release without a Russian name and a row here.
+// The point of this suite is DRIFT: an action added to the vendored scheme must
+// not be able to reach a release without a Russian name and a row here.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 import { COPY } from '../src/options/copy.js';
 import { buildHotkeyRows, renderHotkeysPane } from '../src/options/hotkeys-pane.js';
 import {
-  buildHotkeyBindings,
-  CHEATSHEET_EXTRAS,
-  comboLabel,
+  HOTKEY_ACTION_NAMES,
+  buildHotkeyEntries,
+  hotkeyComboLabel,
   type LabelPlatform,
 } from '../src/shared/hotkeys.js';
 import { mountOptionsPage, unmountOptionsPage } from './helpers/options-page.js';
 import type { MountedOptionsPage } from './helpers/options-page.js';
 
-const PLATFORMS: LabelPlatform[] = ['mac', 'other'];
+const PLATFORMS: LabelPlatform[] = ['mac', 'win'];
 
-describe('hotkey cheatsheet rows', () => {
-  it.each(PLATFORMS)(
-    'names every binding and every extra in russian (%s)',
-    (platform) => {
-      const rows = buildHotkeyRows(platform);
-      const bindings = buildHotkeyBindings(platform).filter(
-        (binding) => !binding.hideFromCheatsheet,
-      );
-
-      // One row per binding plus one per extra — nothing dropped, nothing added.
-      expect(rows).toHaveLength(bindings.length + CHEATSHEET_EXTRAS.length);
-
-      const untranslated = rows.filter((row) => row.untranslated);
-      expect(
-        untranslated.map((row) => row.action ?? row.keys),
-        untranslated.length === 0
-          ? ''
-          : `Add a Russian name for ${untranslated
-              .map((row) => (row.action ? `COPY.hotkeys.actions['${row.action}']` : `the «${row.keys}» extra (EXTRA_NAMES in src/options/hotkeys-pane.ts)`))
-              .join(', ')}`,
-      ).toEqual([]);
-
-      // Every row says something in both columns.
-      for (const row of rows) {
-        expect(row.keys.length, `empty key label for ${row.action ?? row.keys}`)
-          .toBeGreaterThan(0);
-        expect(row.name.length, `empty name for ${row.action ?? row.keys}`)
-          .toBeGreaterThan(0);
-      }
-    },
-  );
-
-  it('takes the Russian name from COPY and the combo from the binding table', () => {
-    const rows = buildHotkeyRows('mac');
-    const fastReply = rows.find((row) => row.action === 'fast-reply')!;
-    expect(fastReply.name).toBe(COPY.hotkeys.actions['fast-reply']);
-    // The combo is never restated here — it comes from the same table the keymap
-    // dispatches from.
-    expect(fastReply.keys).toBe(comboLabel('e', 'mac'));
-
-    // Descriptions live on the bindings and are NOT duplicated into COPY: no row
-    // name may equal the English description of its own binding.
-    const bindings = buildHotkeyBindings('mac');
+describe('hotkey reference rows', () => {
+  it.each(PLATFORMS)('renders exactly the shared reference, every row named (%s)', (platform) => {
+    const rows = buildHotkeyRows(platform);
+    // The in-page cheatsheet renders the same list — nothing dropped, nothing added.
+    expect(rows.map((row) => row.id)).toEqual(buildHotkeyEntries(platform).map((entry) => entry.id));
     for (const row of rows) {
-      if (!row.action) continue;
-      const binding = bindings.find((candidate) => candidate.action === row.action)!;
-      expect(row.name).not.toBe(binding.description);
+      expect(row.keys.length, `empty key label for ${row.id}`).toBeGreaterThan(0);
+      expect(row.name.length, `empty name for ${row.id}`).toBeGreaterThan(0);
     }
   });
 
-  it('renders Alt+Shift combos on non-mac platforms', () => {
-    const rows = buildHotkeyRows('other');
-    expect(rows.find((row) => row.action === 'fast-reply')?.keys).toBe('Alt+Shift+E');
+  it('takes the Russian name from the shared names and the combo from the family table', () => {
+    const rows = buildHotkeyRows('mac');
+    const fastReply = rows.find((row) => row.action === 'fast-reply')!;
+    expect(fastReply.name).toBe(HOTKEY_ACTION_NAMES['fast-reply']);
+    expect(COPY.hotkeys.actions).toBe(HOTKEY_ACTION_NAMES);
+    expect(fastReply.keys).toBe(hotkeyComboLabel('fast-reply', 'mac'));
+    expect(fastReply.keys).toBe('⌘E');
+  });
+
+  it('renders Ctrl / Ctrl+Alt combos on Windows', () => {
+    const rows = buildHotkeyRows('win');
+    expect(rows.find((row) => row.action === 'fast-reply')?.keys).toBe('Ctrl+E');
+    expect(rows.find((row) => row.action === 'help-me')?.keys).toBe('Ctrl+Alt+H');
     expect(rows.find((row) => row.action === 'cheatsheet')?.keys).toBe('?');
-    // The extras are platform-independent.
-    expect(rows.filter((row) => row.action === null).map((row) => row.keys))
-      .toEqual(CHEATSHEET_EXTRAS.map((extra) => extra.label));
+    expect(COPY.hotkeys.platformOther).toContain('Ctrl+Alt');
+    expect(COPY.hotkeys.platformMac).toContain('⌘⇧');
   });
 });
 
@@ -97,27 +67,31 @@ describe('hotkeys pane DOM', () => {
     // The combos are fixed by the extension; a rebinding control would promise
     // control this page does not have.
     expect(list.querySelectorAll('input, select, textarea, button')).toHaveLength(0);
-    expect(rows[0]?.querySelector('kbd')?.textContent).toBe(comboLabel('e', 'mac'));
+    expect(rows[0]?.querySelector('kbd')?.textContent).toBe('⌘E');
     expect(list.querySelector('[data-hotkey-action="fast-reply"]')).not.toBeNull();
-    expect(list.querySelector('[data-hotkey-extra="Enter"]')).not.toBeNull();
+    expect(list.querySelector('[data-hotkey-extra="insert-part"]')).not.toBeNull();
   });
 
-  it('renders three captioned groups and leaves no row outside them', () => {
+  it('renders the captioned groups in three columns and leaves no row outside them', () => {
     const list = renderHotkeysPane(dom.window.document as unknown as Document, 'mac');
     const groups = Array.from(list.querySelectorAll<HTMLElement>('[data-hotkey-group]'))
       .map((group) => group.dataset.hotkeyGroup);
-    expect(groups).toEqual(['generation', 'panels', 'reference']);
+    expect(groups).toEqual(['text', 'panel', 'reference', 'differs']);
+    expect(list.querySelectorAll('.chatgoose-hotkeys-col')).toHaveLength(3);
     // A row outside a group would silently fall out of the two-column layout.
     for (const row of Array.from(list.querySelectorAll('.chatgoose-hotkey-row'))) {
       expect(row.closest('[data-hotkey-group]')).not.toBeNull();
     }
-    // Enter continues a generation; Esc closes — the extras land per the map.
+    // Enter continues a generation; Esc closes; send is Fansly's own.
     expect(
-      list.querySelector('[data-hotkey-extra="Enter"]')?.closest('[data-hotkey-group]'),
-    ).toHaveProperty('dataset.hotkeyGroup', 'generation');
+      list.querySelector('[data-hotkey-extra="insert-part"]')?.closest('[data-hotkey-group]'),
+    ).toHaveProperty('dataset.hotkeyGroup', 'text');
     expect(
-      list.querySelector('[data-hotkey-extra="Esc"]')?.closest('[data-hotkey-group]'),
+      list.querySelector('[data-hotkey-extra="close"]')?.closest('[data-hotkey-group]'),
     ).toHaveProperty('dataset.hotkeyGroup', 'reference');
+    expect(
+      list.querySelector('[data-hotkey-extra="send"]')?.closest('[data-hotkey-group]'),
+    ).toHaveProperty('dataset.hotkeyGroup', 'differs');
   });
 });
 
@@ -140,7 +114,7 @@ describe('«Хоткеи» rail item', () => {
     const pane = page.document.querySelector<HTMLElement>('.chatgoose-cabinet-pane[data-pane="hotkeys"]');
     expect(pane?.querySelector('[data-role="hotkeys-list"]')).not.toBeNull();
     expect(pane?.querySelectorAll('.chatgoose-hotkey-row').length)
-      .toBeGreaterThanOrEqual(CHEATSHEET_EXTRAS.length + 1);
+      .toBe(buildHotkeyRows('mac').length);
     expect(pane?.textContent).toContain(COPY.hotkeys.hint);
   });
 

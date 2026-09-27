@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@chatgoose/hotkeys':
+        specifier: link:./vendor/chatgoose-hotkeys
+        version: link:vendor/chatgoose-hotkeys
       '@kernel/sdk':
         specifier: link:./vendor/kernel-sdk
         version: link:vendor/kernel-sdk

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 import { ButtonBar } from '../src/content/button-bar.js';
 import { installContentStyles } from '../src/content/dom-anchor.js';
-import { detectLabelPlatform, featureHotkeyLabel } from '../src/shared/hotkeys.js';
+import { detectLabelPlatform, featureHotkeyLabel, hotkeyAriaLabel } from '../src/shared/hotkeys.js';
 import type { TabUiState } from '../src/shared/types.js';
 
 const contentStyles = readFileSync(
@@ -149,12 +149,11 @@ describe('ButtonBar toolbar visibility', () => {
     // spends its two lines on explaining the control instead.
     expect(reply?.title).toBe('');
     expect(hintFor(reply).body).not.toContain(replyHotkey.full);
-    expect(reply?.getAttribute('aria-keyshortcuts')).toBe(
-      `${platform === 'mac' ? 'Meta' : 'Alt'}+Shift+${replyHotkey.short}`,
-    );
+    expect(reply?.getAttribute('aria-keyshortcuts')).toBe(replyHotkey.aria);
+    expect(replyHotkey.aria).toBe(platform === 'mac' ? 'Meta+E' : 'Control+E');
 
     // Recap left HOTKEY_FEATURE in the Coach extension phase (plan §Task 2):
-    // ⌘⇧S now opens the recap picker (an app action), not this button's direct
+    // its hotkey opens the recap picker (an app action), not this button's direct
     // fan-summary start — so featureHotkeyLabel('fan-summary') is null and the
     // button no longer advertises a (now-mismatched) shortcut chip.
     expect(featureHotkeyLabel('fan-summary', platform)).toBeNull();
@@ -167,9 +166,7 @@ describe('ButtonBar toolbar visibility', () => {
     // exposed as metadata only and spelled out in the hint.
     const split = splitFlag(bar.root);
     expect(split?.querySelector('.chatgoose-kbd')).toBeNull();
-    expect(split?.getAttribute('aria-keyshortcuts')).toBe(
-      `${platform === 'mac' ? 'Meta' : 'Alt'}+Shift+L`,
-    );
+    expect(split?.getAttribute('aria-keyshortcuts')).toBe(hotkeyAriaLabel('toggle-split', platform));
   });
 
   it('applies the toolbar-hint preference live without removing control metadata', () => {
@@ -505,7 +502,7 @@ describe('ButtonBar Split cell (E73)', () => {
     // The word is gone; the hint and the combo carry it now.
     expect(split.textContent).toBe('');
     expect(split.getAttribute('aria-label')).toContain('Split');
-    expect(split.getAttribute('aria-keyshortcuts')).toMatch(/\+Shift\+L$/);
+    expect(split.getAttribute('aria-keyshortcuts')).toMatch(/^(Meta\+Shift|Control\+Alt)\+L$/);
     expect(hintFor(split).body).toContain('2–3 сообщений');
   });
 

@@ -2112,4 +2112,83 @@ describe('ChatGooseContentApp', () => {
       code: 'CG-FLOW-02',
     });
   });
+  describe('keyboard → the shared hotkey engine', () => {
+    const ENGINE_SLOT = Symbol.for('chatgoose.hotkeys.engine');
+
+    async function keyboardApp(platform: 'MacIntel' | 'Win32') {
+      delete (globalThis as unknown as Record<symbol, unknown>)[ENGINE_SLOT];
+      Object.defineProperty(window.navigator, 'platform', { value: platform, configurable: true });
+      const ChatGooseContentApp = await loadAppClass();
+      const app = new ChatGooseContentApp() as any;
+      app.dispatchBootstrapHotkey = vi.fn((action: string, groupId: string | null) =>
+        groupId !== null || action === 'spenders-board' || action === 'cheatsheet');
+      app.installKeymap();
+      return app;
+    }
+
+    function key(type: 'keydown' | 'keyup', init: KeyboardEventInit): boolean {
+      const event = new window.KeyboardEvent(type, { bubbles: true, cancelable: true, ...init });
+      document.body.dispatchEvent(event);
+      return event.defaultPrevented;
+    }
+
+    const metaDown = () => key('keydown', { key: 'Meta', code: 'MetaLeft', metaKey: true });
+    const ctrlDown = () => key('keydown', { key: 'Control', code: 'ControlLeft', ctrlKey: true });
+
+    it('runs Reply on ⌘E in the Russian layout and swallows the auto-repeat', async () => {
+      const app = await keyboardApp('MacIntel');
+      metaDown();
+      expect(key('keydown', { key: 'у', code: 'KeyE', metaKey: true })).toBe(true);
+      expect(key('keydown', { key: 'у', code: 'KeyE', metaKey: true, repeat: true })).toBe(true);
+      expect(app.dispatchBootstrapHotkey).toHaveBeenCalledTimes(1);
+      expect(app.dispatchBootstrapHotkey).toHaveBeenCalledWith('fast-reply', 'group-1');
+    });
+
+    it('swallows the retired ⌘⇧D / ⌘⇧F in a chat and leaves ⌘F to Firefox', async () => {
+      const app = await keyboardApp('MacIntel');
+      metaDown();
+      key('keydown', { key: 'Shift', code: 'ShiftLeft', metaKey: true, shiftKey: true });
+      expect(key('keydown', { key: 'D', code: 'KeyD', metaKey: true, shiftKey: true })).toBe(true);
+      key('keyup', { key: 'Shift', code: 'ShiftLeft', metaKey: true });
+      key('keyup', { key: 'Meta', code: 'MetaLeft' });
+      metaDown();
+      expect(key('keydown', { key: 'f', code: 'KeyF', metaKey: true })).toBe(false);
+      expect(app.dispatchBootstrapHotkey).not.toHaveBeenCalled();
+    });
+
+    it('keeps ⌘⇧E as Reply and ⌘⇧H as Help', async () => {
+      const app = await keyboardApp('MacIntel');
+      metaDown();
+      key('keydown', { key: 'Shift', code: 'ShiftLeft', metaKey: true, shiftKey: true });
+      expect(key('keydown', { key: 'E', code: 'KeyE', metaKey: true, shiftKey: true })).toBe(true);
+      expect(key('keydown', { key: 'H', code: 'KeyH', metaKey: true, shiftKey: true })).toBe(true);
+      expect(app.dispatchBootstrapHotkey.mock.calls.map((call: unknown[]) => call[0]))
+        .toEqual(['fast-reply', 'help-me']);
+    });
+
+    it('swallows a Windows roll-over after a Ctrl+Shift language switch', async () => {
+      const app = await keyboardApp('Win32');
+      ctrlDown();
+      key('keydown', { key: 'Shift', code: 'ShiftLeft', ctrlKey: true, shiftKey: true });
+      key('keyup', { key: 'Shift', code: 'ShiftLeft', ctrlKey: true });
+      expect(key('keydown', { key: 'у', code: 'KeyE', ctrlKey: true })).toBe(true);
+      expect(app.dispatchBootstrapHotkey).not.toHaveBeenCalled();
+      key('keyup', { key: 'Control', code: 'ControlLeft' });
+      ctrlDown();
+      expect(key('keydown', { key: 'e', code: 'KeyE', ctrlKey: true })).toBe(true);
+      expect(app.dispatchBootstrapHotkey).toHaveBeenCalledWith('fast-reply', 'group-1');
+    });
+
+    it('outside a chat leaves Ctrl+E to Firefox but still opens Spenders on Ctrl+Alt+M', async () => {
+      const app = await keyboardApp('Win32');
+      window.history.replaceState({}, '', '/home');
+      ctrlDown();
+      expect(key('keydown', { key: 'e', code: 'KeyE', ctrlKey: true })).toBe(false);
+      key('keyup', { key: 'Control', code: 'ControlLeft' });
+      ctrlDown();
+      key('keydown', { key: 'Alt', code: 'AltLeft', ctrlKey: true, altKey: true });
+      expect(key('keydown', { key: 'm', code: 'KeyM', ctrlKey: true, altKey: true })).toBe(true);
+      expect(app.dispatchBootstrapHotkey).toHaveBeenLastCalledWith('spenders-board', null);
+    });
+  });
 });

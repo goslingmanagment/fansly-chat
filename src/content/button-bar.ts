@@ -1,5 +1,10 @@
 import type { FeatureType, ReplyMode, ReplyTone, TabUiState } from '../shared/types.js';
-import { comboLabel, detectLabelPlatform, featureHotkeyLabel } from '../shared/hotkeys.js';
+import {
+  detectLabelPlatform,
+  featureHotkeyLabel,
+  hotkeyAriaLabel,
+  hotkeyComboLabel,
+} from '../shared/hotkeys.js';
 import { makeKbd } from './ui/kbd.js';
 import { HoverHintController } from './ui/hover-hint.js';
 
@@ -59,8 +64,9 @@ const TOOLBAR_FEATURES: Array<{ feature: FeatureType; label: string }> = [
 // (radio — one at a time; clicking the armed one disarms); only Reply fires.
 // The armed segment is highlighted without changing width. The label remains
 // available through aria-label + the hover hint, while the fixed geometry keeps
-// the narrow Fansly composer from scrolling when a tone is armed (E27). ⌘⇧O
-// cycles the same set — kept in lock-step with content/index.ts.
+// the narrow Fansly composer from scrolling when a tone is armed (E27). The
+// tone hotkey (⌘⇧O / Ctrl+Alt+O) cycles the same set — kept in lock-step with
+// content/index.ts.
 const TONE_OPTIONS: Array<{
   tone: Exclude<ReplyTone, 'none'>;
   emoji: string;
@@ -72,10 +78,6 @@ const TONE_OPTIONS: Array<{
   { tone: 'upsell', emoji: '💰', word: 'Sell', hint: 'Мягкая продажа контента — без давления' },
   { tone: 'spicy', emoji: '🔥', word: 'Spice', hint: 'Горячо и прямо — телесный, заряженный тон' },
 ];
-
-// The letter bound to cycle-tone in the hotkey table — only used to enrich the
-// tone segments' tooltip with the combo that cycles them.
-const TONE_CYCLE_LETTER = 'O';
 
 interface ButtonBarCallbacks {
   onFeatureClick: (feature: FeatureType) => void;
@@ -182,7 +184,7 @@ export class ButtonBar {
     this.replyModeToggle.setAttribute('aria-label', 'Split reply into 2–3 messages');
     this.replyModeToggle.setAttribute(
       'aria-keyshortcuts',
-      `${this.platform === 'mac' ? 'Meta' : 'Alt'}+Shift+L`,
+      hotkeyAriaLabel('toggle-split', this.platform),
     );
     this.replyModeToggle.addEventListener('click', () => this.callbacks.onReplyModeToggle());
 
@@ -195,7 +197,7 @@ export class ButtonBar {
     this.coachButton.append(coachLabel);
     this.coachButton.setAttribute(
       'aria-keyshortcuts',
-      `${this.platform === 'mac' ? 'Meta' : 'Alt'}+Shift+C`,
+      hotkeyAriaLabel('coach', this.platform),
     );
     this.coachButton.addEventListener('click', () => this.callbacks.onCoachClick());
 
@@ -216,7 +218,7 @@ export class ButtonBar {
     this.toneTrack.className = 'chatgoose-tone-track';
     this.toneTrack.setAttribute('role', 'radiogroup');
     this.toneTrack.setAttribute('aria-label', 'Reply tone');
-    const toneCombo = comboLabel(TONE_CYCLE_LETTER, this.platform);
+    const toneCombo = hotkeyComboLabel('cycle-tone', this.platform);
     for (const entry of TONE_OPTIONS) {
       const segment = document.createElement('button');
       segment.type = 'button';
@@ -301,14 +303,14 @@ export class ButtonBar {
       // The cell traded its word for a square (E73), so this hint and the
       // combo are the whole of its discoverability — the cell is 24px and has
       // nowhere to put a corner keycap.
-      body: `${SPLIT_HINT} · ${comboLabel('L', this.platform)}`,
+      body: `${SPLIT_HINT} · ${hotkeyComboLabel('toggle-split', this.platform)}`,
     }));
 
     this.hints.register(this.coachButton, () => ({
       title: 'Coach',
       // Coach is not a TOOLBAR_FEATURES entry, so it has no corner keycap of
       // its own — its combo lives here.
-      body: `${FEATURE_HINTS['coach-chat']} · ${comboLabel('C', this.platform)}`,
+      body: `${FEATURE_HINTS['coach-chat']} · ${hotkeyComboLabel('coach', this.platform)}`,
     }));
 
     this.hints.register(this.voiceButton, () => ({ title: 'Voice', body: VOICE_HINT }));
@@ -353,10 +355,7 @@ export class ButtonBar {
     }
     const hotkey = featureHotkeyLabel(feature, this.platform);
     if (hotkey) {
-      button.setAttribute(
-        'aria-keyshortcuts',
-        `${this.platform === 'mac' ? 'Meta' : 'Alt'}+Shift+${hotkey.short}`,
-      );
+      button.setAttribute('aria-keyshortcuts', hotkey.aria);
       if (!button.querySelector(':scope > .chatgoose-toolbar-hotkey')) {
         const hotkeyBadge = makeKbd(hotkey.short, { decorative: true });
         hotkeyBadge.classList.add('chatgoose-toolbar-hotkey');

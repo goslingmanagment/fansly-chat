@@ -9,12 +9,12 @@ import {
 } from './route-watcher.js';
 import { VaultLauncher } from './vault/vault-launcher.js';
 import { isVaultPath } from './vault/vault-route.js';
+import type { HotkeyAction } from '../shared/hotkeys.js';
 import {
-  buildHotkeyBindings,
-  detectLabelPlatform,
-  type HotkeyAction,
-} from '../shared/hotkeys.js';
-import { createKeymap } from '../shared/keymap.js';
+  isGlobalHotkeyAction,
+  resolveHotkeyKeydown,
+  sharedHotkeyEngine,
+} from './hotkey-input.js';
 import { installUiTheme, readUiThemeSetting } from '../shared/theme.js';
 
 type ContentAppModule = typeof import('./index.js');
@@ -225,10 +225,7 @@ function runAppIntent(
   intent: HotkeyAction | 'launcher',
   expectedGroupId: string | null,
 ): void {
-  const globalIntent =
-    intent === 'launcher' ||
-    intent === 'spenders-board' ||
-    intent === 'cheatsheet';
+  const globalIntent = intent === 'launcher' || isGlobalHotkeyAction(intent);
   if (!globalIntent && expectedGroupId === null) {
     return;
   }
@@ -343,33 +340,38 @@ startPathWatcher(isVaultPath, (onVault) => {
   }
 });
 
-const keymap = createKeymap(buildHotkeyBindings(detectLabelPlatform()));
+// Created here so its keyup/blur listeners run from the first page load; the
+// conversation app picks up the same instance (content/hotkey-input.ts).
+sharedHotkeyEngine();
 function handleBootstrapKeydown(event: KeyboardEvent): void {
-  if (event.repeat) {
-    return;
-  }
-  const action = keymap.resolve({
-    key: event.key,
-    metaKey: event.metaKey,
-    ctrlKey: event.ctrlKey,
-    altKey: event.altKey,
-    shiftKey: event.shiftKey,
-    inEditable: isEditableElement(document.activeElement),
-  });
-  if (!action) {
+  const decision = resolveHotkeyKeydown(
+    event,
+    isEditableElement(document.activeElement),
+  );
+  if (!decision) {
     return;
   }
 
   const liveGroupId = parseGroupIdFromPath(window.location.pathname);
-  const globallyAvailable =
-    action === 'spenders-board' || action === 'cheatsheet';
-  if (!globallyAvailable && liveGroupId === null) {
+  if (decision.kind === 'swallow') {
+    // A retired habit or a language-switch roll-over: claim it in a chat so
+    // Firefox does nothing either; elsewhere the browser keeps its shortcut.
+    if (liveGroupId !== null) {
+      event.preventDefault();
+    }
+    return;
+  }
+  const { action } = decision;
+  if (!isGlobalHotkeyAction(action) && liveGroupId === null) {
     return;
   }
 
   // Once an action is known to be applicable, claim the browser shortcut
   // immediately; module loading is asynchronous but the event is not.
   event.preventDefault();
+  if (decision.repeat) {
+    return;
+  }
   runAppIntent(action, liveGroupId);
 }
 document.addEventListener('keydown', handleBootstrapKeydown);

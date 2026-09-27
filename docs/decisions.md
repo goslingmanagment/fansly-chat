@@ -131,6 +131,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E138 | 2026-09-22 | New followers: fast positive-proof pass followed by one automatic identity/history queue for unresolved rows; group POST joins the creator lane, soft pause preserves an in-flight result, selected fan is next; no unverified sends, no release |
 | E139 | 2026-09-22 | Owner authorizes release 2.4.6 for E138 after independent code review; package, manifest and release pages advance together; no Telegram announcement; live Fansly performance remains unmeasured |
 | E140 | 2026-09-26 | Re-vendor the SDK from deployed Core `a51e687d` (Core Decision 381 alert digest kind + H3 events v2 platform filter, frame provenance, money facts route); production already serves `21a767b8…`, merge at once, no version bump, ships with the next release |
+| E141 | 2026-09-27 | One hotkey scheme for the extension and the OnlyFans desktop app, vendored from the hub (`@chatgoose/hotkeys`): text actions ⌘/Ctrl + E I G P ., panels ⌘⇧ / Ctrl+Alt + H S O B L M C, physical-key matching, fresh-press roll-over guard; replaces ⌘⇧ / Alt+Shift; prepared as 2.5.0, not deployed |
 
 ## Entries
 
@@ -4921,3 +4922,55 @@ passes on the regenerated SDK with a real install in the worktree (131 suites,
 and no release check is bypassed or weakened. Production already serves the new
 hash, so this merges at once. No version bump: nothing user-visible changes,
 and the refreshed SDK ships with the next planned release.
+
+**E141 (2026-09-27).** Chatters work both ChatGoose clients and complained that
+the same action has different keys: the extension used ⌘⇧ + letter on macOS and
+Alt+Shift + letter elsewhere, the desktop app bare ⌘/Ctrl + another set of
+letters. The owner asked for one scheme everywhere and, after a three-model
+design review, chose the one below. It is no longer defined in this repo: the
+table, the matcher and the labels live in the hub's
+`packages/chatgoose-hotkeys` (its README is the spec) and arrive here through
+the hub's `scripts/vendor-hotkeys.mjs` as `vendor/chatgoose-hotkeys`
+(`@chatgoose/hotkeys`, generated, never hand-edited; the vendor test pins every
+file against the manifest, and both clients must ship the same sha256 from the
+same hub commit — the source commit and sha256 are in
+`vendor/chatgoose-hotkeys/chatgoose-hotkeys.vendor.json`).
+
+The scheme: everything that writes into the reply field plus Cancel is
+⌘ + key on macOS and Ctrl + key on Windows (E Reply, I Fix, G Hi, P Ping,
+. Cancel); analysis, panels and toggles are ⌘⇧ + key on macOS and Ctrl+Alt + key
+on Windows (H Help, S Recap, O tone, B Review, L Split, M Spenders, C Coach —
+Coach is extension-only). `?` outside inputs stays the cheatsheet. Keys match by
+`event.code`, so the Russian layout works without switching. Facts behind the
+letters, from Firefox's `browser-sets.inc.xhtml`: among bare accel + letter only
+N, T, W (and quit) are reserved, among accel+shift P and W; every combo used is
+claimable by the page, and a missed press opens find, page info, print or a
+sidebar — never a reload (R unused; F stays find-in-page, which the chatters use
+in chats). ⌘⇧V stays paste-as-plain-text, so Review moved to B. Windows cannot
+carry hotkeys on Ctrl+Shift or Alt+Shift: the team switches the input language
+with both (and Win+Space). This corrects the old header of
+`src/shared/hotkeys.ts` and `tests/hotkeys.test.ts`, which claimed Firefox
+reserves ⌘⇧ R/T/B/A and that Ctrl+Shift + letter cannot be intercepted — the
+source says neither.
+
+Engine rules (vendored): strict modifiers per level and platform; a fresh-press
+roll-over guard on Reply/Fix/Hi/Ping (a switch of input language followed by a
+letter under the still-held modifier does nothing); auto-repeat is claimed but
+never re-runs; macOS keeps the old ⌘⇧E/⌘⇧I/⌘⇧G and ⌘⇧X as the same actions and
+swallows the retired ⌘⇧D/⌘⇧F in a chat. One engine instance per tab is shared by
+the bootstrap and the conversation bundle (`src/content/hotkey-input.ts`, a
+realm-global slot) so the guard sees every modifier. Inside a chat every
+recognised combo is claimed (a blocked action keeps its reason toast); outside
+one only Spenders and the cheatsheet are, and the browser keeps the rest. The
+generic `src/shared/keymap.ts` engine is deleted.
+
+The in-page cheatsheet and the Options «Хоткеи» pane render one list
+(`buildHotkeyEntries`), grouped «Пишут текст» / «Разборы и панели» / «Справка» /
+«Различается с приложением»; the stale «horny», «Fan Summary» and «Помоги-мне»
+names are replaced with the product vocabulary. Prepared as 2.5.0 (package,
+manifest, CHANGELOG, changelog.html, release pages, guide). Not deployed: the
+desktop app must ship the same scheme first, since a non-updated desktop reads
+the new ⌘E / Ctrl+E as its old Review. Live checks on real macOS and Windows
+keyboards (EN/RU, the three language switches, Firefox full screen, Services on
+⌘⇧L/⌘⇧M with selected text) remain before release. Deploy with
+`SKIP_ANNOUNCE=1`: the owner posts the announcement.
