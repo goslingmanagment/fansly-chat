@@ -5036,8 +5036,10 @@ descriptions into the prompt; generation never waits for them.
   placement (`inline` `[Photo #3]` replacing `[Photo]`; `appended`
   ` [Photo #4]` after a bundle label; `preview` ` (preview #8)` after a PPV
   label), message id and time, sender, kind, accountMedia id and paid flag.
-  Ids only: no URL, no bytes, no new Fansly request. The oldest-first 300k
-  cap reserves room for the tokens.
+  Ids only: no URL, no bytes, no new Fansly request. The kept window is
+  exactly the legacy one (same oldest-first 300k cap); the newest files are
+  numbered while their tokens still fit under the cap, older ones keep the
+  plain label.
 - A message text can never forge a label: `[Photo #3]`-like text gets a
   fullwidth `＃`. The kernel also refuses substitution when a token's count or
   order does not match the list.

@@ -679,9 +679,6 @@ export interface KernelClientMedia {
 
 /** Contract bound on `clientContext.media.items`. */
 export const KERNEL_CLIENT_MEDIA_MAX_ITEMS = 1000;
-/** Upper bound of the characters one numbered token adds to a line. */
-const MEDIA_TOKEN_MAX_EXTRA_CHARS = 18;
-
 const INLINE_LABEL_WORD: Record<TranscriptMediaSlot['kind'], string> = { photo: 'Photo', video: 'Video' };
 
 function numberedLabels(message: NormalizedTranscriptMessage, numbers: Map<TranscriptMediaSlot, number>): string[] {
@@ -723,14 +720,13 @@ export function formatTranscriptWithMediaForKernel(
   }
   const neutralized = messages.map((message) => ({ ...message, text: neutralizeMediaLabelText(message.text) }));
 
-  // Keep the newest lines that fit, reserving room for every token.
+  // Keep exactly the lines the legacy formatter keeps (same cost, same cap),
+  // so a kernel that restores the plain labels rebuilds the legacy window.
   const kept: NormalizedTranscriptMessage[] = [];
   let totalChars = 0;
   for (let index = neutralized.length - 1; index >= 0; index -= 1) {
     const message = neutralized[index]!;
-    const cost = formatTranscriptLine(message).length
-      + (message.mediaSlots?.length ?? 0) * MEDIA_TOKEN_MAX_EXTRA_CHARS
-      + (kept.length > 0 ? 1 : 0);
+    const cost = formatTranscriptLine(message).length + (kept.length > 0 ? 1 : 0);
     if (totalChars + cost > maxChars) {
       break;
     }
@@ -743,12 +739,34 @@ export function formatTranscriptWithMediaForKernel(
   kept.reverse();
 
   // Only slots whose token will actually render (an inline slot needs the
-  // plain `[Photo]`/`[Video]` label it replaces).
-  const slots = kept.flatMap((message) => (message.mediaSlots ?? [])
+  // plain `[Photo]`/`[Video]` label it replaces). Number the newest ones
+  // while the tokens still fit under the cap (and the contract's item bound);
+  // older files keep their plain label.
+  const renderable = kept.flatMap((message) => (message.mediaSlots ?? [])
     .filter((slot) => slot.placement !== 'inline'
       || message.labels[slot.labelIndex] === `[${INLINE_LABEL_WORD[slot.kind]}]`)
     .map((slot) => ({ message, slot })));
-  const numbered = slots.slice(-KERNEL_CLIENT_MEDIA_MAX_ITEMS);
+  const digits = String(Math.min(renderable.length, KERNEL_CLIENT_MEDIA_MAX_ITEMS)).length;
+  const tokenCost = (slot: TranscriptMediaSlot): number => {
+    switch (slot.placement) {
+      case 'inline':
+        return 2 + digits; // ` #n`
+      case 'appended':
+        return ` [${INLINE_LABEL_WORD[slot.kind]} #]`.length + digits;
+      case 'preview':
+        return ' (preview #)'.length + digits;
+    }
+  };
+  let chosen = 0;
+  for (let index = renderable.length - 1; index >= 0 && chosen < KERNEL_CLIENT_MEDIA_MAX_ITEMS; index -= 1) {
+    const cost = tokenCost(renderable[index]!.slot);
+    if (totalChars + cost > maxChars) {
+      break;
+    }
+    totalChars += cost;
+    chosen += 1;
+  }
+  const numbered = renderable.slice(renderable.length - chosen);
   const numbers = new Map<TranscriptMediaSlot, number>();
   const items: KernelClientMedia['items'] = [];
   for (const [index, { message, slot }] of numbered.entries()) {

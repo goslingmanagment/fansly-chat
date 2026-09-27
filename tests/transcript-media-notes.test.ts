@@ -117,12 +117,25 @@ describe('formatTranscriptWithMediaForKernel', () => {
     expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
   });
 
-  it('keeps the kept window inside the character cap with the tokens', () => {
+  it('keeps exactly the legacy window at the cap and numbers the newest files that still fit', () => {
     const messages = normalizeTranscript([page()], MODEL_ID, FAN_ID);
-    const legacy = formatTranscriptForKernel(messages);
-    const tight = formatTranscriptWithMediaForKernel(messages, GROUP_ID, legacy.transcript.length);
-    expect(tight.transcript.length).toBeLessThanOrEqual(legacy.transcript.length);
-    expect(tight.media?.items.every((item) => tight.transcript.includes(`#${item.n}`))).toBe(true);
+    const legacyFull = formatTranscriptForKernel(messages);
+    // A cap that drops the oldest line and leaves room for only some tokens.
+    const lines = legacyFull.transcript.split('\n');
+    const cap = legacyFull.transcript.length - lines[0]!.length - 1 + 12;
+    const legacy = formatTranscriptForKernel(messages, cap);
+    const tight = formatTranscriptWithMediaForKernel(messages, GROUP_ID, cap);
+    expect(tight.messageCount).toBe(legacy.messageCount);
+    expect(tight.transcript.length).toBeLessThanOrEqual(cap);
+    const items = tight.media?.items ?? [];
+    expect(items.length).toBeGreaterThan(0);
+    expect(items.length).toBeLessThan(4);
+    // The newest file is numbered; numbers stay increasing in transcript order.
+    expect(items.at(-1)?.mediaId).toBe('505');
+    expect(items.map((item) => item.n)).toEqual(items.map((_, index) => index + 1));
+    for (const item of items) {
+      expect(tight.transcript).toContain(`#${item.n}`);
+    }
   });
 });
 
