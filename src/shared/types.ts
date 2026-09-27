@@ -332,6 +332,22 @@ export interface PingSegmentAnalysis {
   latestOverallTextAtMs: number | null;
 }
 
+/** AI image notes (hub AI media describer): one describable file behind a
+ * label of a transcript message. The kernel fills its description into the
+ * numbered token, or restores the plain label while the feature is off. */
+export interface TranscriptMediaSlot {
+  /** Index into `labels` of the label this file belongs to. */
+  labelIndex: number;
+  /** inline: the label itself becomes `[Photo #n]`; appended: ` [Photo #n]`
+   * after a bundle label; preview: ` (preview #n)` after a PPV label. */
+  placement: 'inline' | 'appended' | 'preview';
+  kind: 'photo' | 'video';
+  /** Fansly accountMedia id (for a preview: the paid item it teases). */
+  mediaId: string;
+  /** The file is the body of a paid PPV (never described). */
+  paid: boolean;
+}
+
 export interface NormalizedTranscriptMessage {
   id: string;
   createdAt: number;
@@ -340,6 +356,8 @@ export interface NormalizedTranscriptMessage {
   type: number;
   text: string;
   labels: string[];
+  /** Describable media behind `labels` (absent on legacy call sites). */
+  mediaSlots?: TranscriptMediaSlot[];
 }
 
 // ─── Fansly API Types ────────────────────────────────────────────────────
@@ -403,6 +421,10 @@ export interface FanslyMedia {
   permissionFlags?: number;
   price?: number;
   permissions?: FanslyMediaPermissions;
+  /** A PPV's free teaser (what the fan sees before buying). Presence only;
+   * the extension never sends its URL anywhere. */
+  previewId?: string | null;
+  preview?: FanslyMediaInner | null;
 }
 
 export interface FanslyMediaBundleContentEntry {

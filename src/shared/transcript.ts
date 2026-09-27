@@ -9,6 +9,7 @@ import type {
   NormalizedTranscriptMessage,
   PingSegmentAnalysis,
   PingSegment,
+  TranscriptMediaSlot,
 } from './types.js';
 import {
   FAN_SILENCE_DAYS_MAX,
@@ -316,6 +317,67 @@ function describeAttachment(
   return null;
 }
 
+// ─── AI image notes (hub AI media describer) ─────────────────────────────
+// Which files behind a label the kernel may describe: a fan's photo/video,
+// the creator's free media, and a PPV's free teaser — never a PPV body. Ids
+// only; no URL or byte ever leaves the extension for this.
+
+function mediaSlotKind(media: FanslyMedia): 'photo' | 'video' | null {
+  const category = classifyMedia(media);
+  return category === 'photo' || category === 'video' ? category : null;
+}
+
+function hasPreview(media: FanslyMedia): boolean {
+  return Boolean(media.preview) || (typeof media.previewId === 'string' && media.previewId.length > 0);
+}
+
+function describableSlots(
+  attachment: FanslyAttachment,
+  labelIndex: number,
+  mediaMap: Map<string, FanslyMedia>,
+  bundleMap: Map<string, FanslyMediaBundle>,
+): TranscriptMediaSlot[] {
+  const contentId = attachment.contentId;
+  if (!contentId) {
+    return [];
+  }
+  const isBundle = attachment.contentType === ATTACHMENT_CONTENT_TYPE_BUNDLE
+    || (attachment.contentType === undefined && bundleMap.has(contentId));
+  if (isBundle) {
+    const bundle = bundleMap.get(contentId);
+    if (!bundle || findPpvPermission(bundle)) {
+      return [];
+    }
+    return collectBundleChildIds(bundle).flatMap((childId) => {
+      const child = mediaMap.get(childId);
+      const kind = child ? mediaSlotKind(child) : null;
+      return child && kind && !findPpvPermission(child)
+        ? [{ labelIndex, placement: 'appended' as const, kind, mediaId: childId, paid: false }]
+        : [];
+    });
+  }
+  const isMedia = attachment.contentType === ATTACHMENT_CONTENT_TYPE_MEDIA || attachment.contentType === undefined;
+  const media = isMedia ? mediaMap.get(contentId) : undefined;
+  const kind = media ? mediaSlotKind(media) : null;
+  if (!media || !kind) {
+    return [];
+  }
+  if (findPpvPermission(media)) {
+    return hasPreview(media)
+      ? [{ labelIndex, placement: 'preview', kind, mediaId: contentId, paid: true }]
+      : [];
+  }
+  return [{ labelIndex, placement: 'inline', kind, mediaId: contentId, paid: false }];
+}
+
+/** A message text can never forge a numbered media label: the `#` becomes a
+ * fullwidth `＃` inside anything that looks like one. */
+export function neutralizeMediaLabelText(text: string): string {
+  return text
+    .replace(/\[(Photo|Video|GIF)(\s*)#(?=\s*\d)/gi, '[$1$2＃')
+    .replace(/\(preview(\s*)#(?=\s*\d)/gi, '(preview$1＃');
+}
+
 function addAll(target: Set<string>, values: Iterable<string> | undefined): void {
   if (!values) {
     return;
@@ -502,12 +564,14 @@ export function normalizeTranscript(
       }
 
       const labels: string[] = [];
+      const mediaSlots: TranscriptMediaSlot[] = [];
       const totalTipAmount = message.totalTipAmount ?? 0;
 
       for (const attachment of message.attachments ?? []) {
         const label = describeAttachment(attachment, mediaMap, bundleMap, evidence);
         if (label !== null) {
           labels.push(label);
+          mediaSlots.push(...describableSlots(attachment, labels.length - 1, mediaMap, bundleMap));
         }
       }
 
@@ -523,6 +587,7 @@ export function normalizeTranscript(
         type: message.type,
         text: message.type === 1 ? (message.content ?? '').trim() : '[System message]',
         labels,
+        ...(mediaSlots.length > 0 ? { mediaSlots } : {}),
       });
     }
   }
@@ -594,6 +659,118 @@ export function formatTranscriptForKernel(
   return {
     transcript: keptLines.reverse().join('\n'),
     messageCount: keptLines.length,
+  };
+}
+
+/** The kernel's `clientContext.media` (hub AI media describer). */
+export interface KernelClientMedia {
+  groupRef: string;
+  items: Array<{
+    n: number;
+    placement: TranscriptMediaSlot['placement'];
+    messageId: string;
+    sentAt: number;
+    sender: 'fan' | 'model';
+    kind: TranscriptMediaSlot['kind'];
+    mediaId: string;
+    paid: boolean;
+  }>;
+}
+
+/** Contract bound on `clientContext.media.items`. */
+export const KERNEL_CLIENT_MEDIA_MAX_ITEMS = 1000;
+/** Upper bound of the characters one numbered token adds to a line. */
+const MEDIA_TOKEN_MAX_EXTRA_CHARS = 18;
+
+const INLINE_LABEL_WORD: Record<TranscriptMediaSlot['kind'], string> = { photo: 'Photo', video: 'Video' };
+
+function numberedLabels(message: NormalizedTranscriptMessage, numbers: Map<TranscriptMediaSlot, number>): string[] {
+  const labels = [...message.labels];
+  for (const slot of message.mediaSlots ?? []) {
+    const n = numbers.get(slot);
+    if (n === undefined || labels[slot.labelIndex] === undefined) {
+      continue;
+    }
+    const word = INLINE_LABEL_WORD[slot.kind];
+    if (slot.placement === 'inline' && labels[slot.labelIndex] === `[${word}]`) {
+      labels[slot.labelIndex] = `[${word} #${n}]`;
+    } else if (slot.placement === 'appended') {
+      labels[slot.labelIndex] += ` [${word} #${n}]`;
+    } else if (slot.placement === 'preview') {
+      labels[slot.labelIndex] += ` (preview #${n})`;
+    }
+  }
+  return labels;
+}
+
+/**
+ * The kernel-bound transcript WITH numbered media labels and the matching
+ * `clientContext.media` list. Same oldest-first truncation as
+ * {@link formatTranscriptForKernel}, budgeted for the tokens' extra
+ * characters; only the kept window's files are numbered (newest 1000 at
+ * most), in transcript order. The kernel restores the plain labels
+ * byte-for-byte while its describer is off, and fills descriptions when it is
+ * on. Without a groupRef or any describable file, this IS the legacy output.
+ */
+export function formatTranscriptWithMediaForKernel(
+  messages: NormalizedTranscriptMessage[],
+  groupRef: string | null,
+  maxChars = KERNEL_TRANSCRIPT_MAX_CHARS,
+): { transcript: string; messageCount: number; media?: KernelClientMedia } {
+  const hasSlots = messages.some((message) => (message.mediaSlots?.length ?? 0) > 0);
+  if (!groupRef || !/^[0-9]{1,32}$/.test(groupRef) || !hasSlots || messages.length === 0) {
+    return formatTranscriptForKernel(messages, maxChars);
+  }
+  const neutralized = messages.map((message) => ({ ...message, text: neutralizeMediaLabelText(message.text) }));
+
+  // Keep the newest lines that fit, reserving room for every token.
+  const kept: NormalizedTranscriptMessage[] = [];
+  let totalChars = 0;
+  for (let index = neutralized.length - 1; index >= 0; index -= 1) {
+    const message = neutralized[index]!;
+    const cost = formatTranscriptLine(message).length
+      + (message.mediaSlots?.length ?? 0) * MEDIA_TOKEN_MAX_EXTRA_CHARS
+      + (kept.length > 0 ? 1 : 0);
+    if (totalChars + cost > maxChars) {
+      break;
+    }
+    kept.push(message);
+    totalChars += cost;
+  }
+  if (kept.length === 0) {
+    return formatTranscriptForKernel(messages, maxChars);
+  }
+  kept.reverse();
+
+  // Only slots whose token will actually render (an inline slot needs the
+  // plain `[Photo]`/`[Video]` label it replaces).
+  const slots = kept.flatMap((message) => (message.mediaSlots ?? [])
+    .filter((slot) => slot.placement !== 'inline'
+      || message.labels[slot.labelIndex] === `[${INLINE_LABEL_WORD[slot.kind]}]`)
+    .map((slot) => ({ message, slot })));
+  const numbered = slots.slice(-KERNEL_CLIENT_MEDIA_MAX_ITEMS);
+  const numbers = new Map<TranscriptMediaSlot, number>();
+  const items: KernelClientMedia['items'] = [];
+  for (const [index, { message, slot }] of numbered.entries()) {
+    numbers.set(slot, index + 1);
+    items.push({
+      n: index + 1,
+      placement: slot.placement,
+      messageId: message.id,
+      sentAt: message.createdAt * 1000,
+      sender: message.senderLabel === 'Fan' ? 'fan' : 'model',
+      kind: slot.kind,
+      mediaId: slot.mediaId,
+      paid: slot.paid,
+    });
+  }
+  const transcript = kept
+    .map((message) => formatTranscriptLine({ ...message, labels: numberedLabels(message, numbers) }))
+    .join('\n');
+  return {
+    transcript,
+    messageCount: kept.length,
+    ...(items.length > 0 ? { media: { groupRef, items } } : {}),
   };
 }
 

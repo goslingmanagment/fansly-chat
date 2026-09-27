@@ -8,6 +8,7 @@
 // `clientContext` VALUES; prompt ASSEMBLY (templates, personas, platform
 // wording, budgets, capture, ledger) is kernel-side.
 
+import type { KernelClientMedia } from '../shared/transcript.js';
 import { KernelApiError, streamAiFeature, type AiFeatureStreamFrame } from '@kernel/sdk';
 import { ChatGooseError } from '../shared/errors.js';
 import { clientVersionHeaders } from '../shared/client-version.js';
@@ -46,6 +47,8 @@ export interface KernelFeatureClientContext {
    * the fan's whole history or a bounded window. Kernel-bound only — it never
    * rides the content→background protocol. */
   transcriptCoverage?: 'full-history' | 'window';
+  /** Hub AI media describer: the kept window's numbered files, ids only. */
+  media?: KernelClientMedia;
 }
 
 /** One replayed coach exchange (oldest-first), already char-projected client
@@ -502,6 +505,9 @@ export function createKernelFeatureGateway(
                 : {}),
               ...(request.clientContext.fanSilenceDays !== undefined
                 ? { fanSilenceDays: request.clientContext.fanSilenceDays }
+                : {}),
+              ...(request.clientContext.media !== undefined
+                ? { media: request.clientContext.media }
                 : {}),
               ...(request.clientContext.transcriptCoverage !== undefined
                 ? { transcriptCoverage: request.clientContext.transcriptCoverage }
