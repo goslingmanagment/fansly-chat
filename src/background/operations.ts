@@ -77,7 +77,7 @@ import {
   analyzePingSegment,
   fanSilenceDaysFromAnalysis,
   fanWritesCyrillic,
-  formatTranscriptForKernel,
+  formatTranscriptWithMediaForKernel,
   normalizeTranscript,
 } from '../shared/transcript.js';
 import { parseChatReviewXml, parseHelpMeXml } from '../shared/xml.js';
@@ -2843,8 +2843,14 @@ export class OperationCoordinator {
       startStage('prompt-build', 'Build context');
       // W9.4/A26: oldest-first truncation to the kernel's 300k transcript cap
       // — messageCount is the KEPT count, matching what the kernel receives.
-      const { transcript: formattedTranscript, messageCount: keptMessageCount } =
-        formatTranscriptForKernel(transcriptMessages);
+      // Hub AI media describer: the kept window's describable files are
+      // numbered in the transcript and listed by id (never a URL); the kernel
+      // restores the plain labels while its describer is off.
+      const {
+        transcript: formattedTranscript,
+        messageCount: keptMessageCount,
+        media: transcriptMedia,
+      } = formatTranscriptWithMediaForKernel(transcriptMessages, validated.urlGroupId);
       // Stage 32: prompt ASSEMBLY is kernel-side (templates, personas,
       // platform wording, budgets, capture). The client ships context VALUES
       // because Fansly has no webhook lane — the kernel archive is
@@ -2943,6 +2949,7 @@ export class OperationCoordinator {
           ...(pingSegment !== undefined ? { pingSegment } : {}),
           ...(fanSilenceDays !== undefined ? { fanSilenceDays } : {}),
           ...(transcriptCoverage !== undefined ? { transcriptCoverage } : {}),
+          ...(transcriptMedia !== undefined ? { media: transcriptMedia } : {}),
         },
       } as const;
       completeStage(

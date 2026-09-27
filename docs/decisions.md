@@ -134,6 +134,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E141 | 2026-09-27 | One hotkey scheme for the extension and the OnlyFans desktop app, vendored from the hub (`@chatgoose/hotkeys`): text actions ⌘/Ctrl + E I G P ., panels ⌘⇧ / Ctrl+Alt + H S O B L M C, physical-key matching, fresh-press roll-over guard; replaces ⌘⇧ / Alt+Shift; prepared as 2.5.0, not deployed |
 | E142 | 2026-09-27 | Split on Fix: the same sticky Split flag now also sends `preferSplit` with Fix (Core #268 prompt); a Split result opens in the inline panel with an Insert per part, pinned to its draft so inserting or sending part 1 keeps the rest and Regenerate reruns that draft; one part still auto-inserts; not released |
 | E143 | 2026-09-28 | Re-vendor the SDK from deployed Core `89134bb2` (core #267, OFAPI desktop media: `ofapiMediaResolve`, `ofapiMediaReports`, collection registry); production serves `abf87a65…`; the extension uses no OFAPI operation; unblocks the 2.5.1 release gate, no version bump |
+| E144 | 2026-09-28 | AI image notes: the kernel transcript numbers the kept window's describable media (`[Photo #n]`, ` [Photo #n]` after a bundle label, ` (preview #n)` after a PPV label) and `clientContext.media` lists them by id (groupRef, message, sender, kind, accountMedia id, paid) — never a URL or bytes; label-like text in messages is neutralized; the hub restores plain labels while its describer is off; 2.6.0 |
 
 ## Entries
 
@@ -5019,3 +5020,34 @@ worktree at `89134bb28b3f8df0a25efd96c36de735431545e6`; the generated hash
 equals production exactly and `sourceCommit` is clean. No vendored file is
 edited by hand and no release check is bypassed. No version bump: it ships
 inside 2.5.1, which was not yet released.
+
+**E144 (2026-09-28).** AI image notes — the extension side of Core's AI media
+describer (owner-approved plan «AI понимает картинки в чатах», image arena
+2026-09-27/28; Core PRs #269–#271). The hub describes chat images in the
+background (one Anthropic call per file, text only stored) and fills ready
+descriptions into the prompt; generation never waits for them.
+
+- `normalizeTranscript` records, per message, which files behind its labels
+  the kernel may describe (`mediaSlots`): a fan's photo/video, the creator's
+  free media, a PPV's free teaser — never the body of a paid PPV.
+- `formatTranscriptWithMediaForKernel` numbers the KEPT window's files in
+  transcript order (newest 1000 at most) and returns `clientContext.media`:
+  `groupRef` (the chat URL's canonical groupId) plus, per file, the number,
+  placement (`inline` `[Photo #3]` replacing `[Photo]`; `appended`
+  ` [Photo #4]` after a bundle label; `preview` ` (preview #8)` after a PPV
+  label), message id and time, sender, kind, accountMedia id and paid flag.
+  Ids only: no URL, no bytes, no new Fansly request. The kept window is
+  exactly the legacy one (same oldest-first 300k cap); the newest files are
+  numbered while their tokens still fit under the cap, older ones keep the
+  plain label.
+- A message text can never forge a label: `[Photo #3]`-like text gets a
+  fullwidth `＃`. The kernel also refuses substitution when a token's count or
+  order does not match the list.
+- While the hub's describer is off for the page (or for fan-summary, which
+  never gets descriptions), the kernel restores the plain labels, so the
+  prompt is the legacy one. Main lane, Compare cards and Voice Script send
+  it; the New Followers greeting has no window media and sends none.
+- The SDK is re-vendored from the deployed Core that accepts the field (the
+  hub deploys first; its strict schema would 400 an unknown field). Released
+  as 2.6.0.
+

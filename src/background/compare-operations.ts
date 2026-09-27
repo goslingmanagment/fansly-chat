@@ -14,7 +14,7 @@ import { logDebug } from '../shared/log.js';
 import { normalizeReplyParts } from '../shared/reply-output.js';
 import { formatFanSubscriptionData } from '../shared/subscriptions.js';
 import {
-  formatTranscriptForKernel,
+  formatTranscriptWithMediaForKernel,
   normalizeTranscript,
 } from '../shared/transcript.js';
 import type {
@@ -996,8 +996,11 @@ export async function executeCompare(
     startStage('prompt-build', 'Build compare prompts');
     // W9.4/A26: same 300k oldest-first cap as the main lane — compare cards
     // ride the identical kernel clientContext schema.
-    const { transcript: formattedTranscript, messageCount: keptMessageCount } =
-      formatTranscriptForKernel(transcriptMessages);
+    const {
+      transcript: formattedTranscript,
+      messageCount: keptMessageCount,
+      media: transcriptMedia,
+    } = formatTranscriptWithMediaForKernel(transcriptMessages, validated.urlGroupId);
     const promptInputs = {
       transcript: formattedTranscript,
       messageCount: keptMessageCount,
@@ -1126,6 +1129,7 @@ export async function executeCompare(
               fanDisplayName: promptInputs.fanDisplayName,
               fanSpendingData: promptInputs.fanSpendingData,
               fanSubscriptionData: promptInputs.fanSubscriptionData,
+              ...(transcriptMedia !== undefined ? { media: transcriptMedia } : {}),
             },
           },
           {

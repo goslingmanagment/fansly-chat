@@ -16,7 +16,7 @@ import { normalizeAgencyHubBaseUrl } from '../shared/agency-hub.js';
 import { personaCatalogSource } from '../shared/persona-catalog.js';
 import { isContentPortMessage } from '../shared/protocol.js';
 import {
-  formatTranscriptForKernel,
+  formatTranscriptWithMediaForKernel,
   normalizeTranscript,
 } from '../shared/transcript.js';
 import type {
@@ -728,7 +728,7 @@ export class VoiceService {
         fanAccountId,
         purchaseEvidence,
       );
-      const clientTranscript = formatTranscriptForKernel(transcriptMessages);
+      const clientTranscript = formatTranscriptWithMediaForKernel(transcriptMessages, routeBinding.groupId);
 
       let fanDisplayName = context.fanDisplayName?.trim() || 'fan';
       try {
@@ -785,6 +785,7 @@ export class VoiceService {
             fanDisplayName,
             fanSpendingData: '',
             fanSubscriptionData: '',
+            ...(clientTranscript.media !== undefined ? { media: clientTranscript.media } : {}),
           },
         },
         {
