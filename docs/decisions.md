@@ -4933,7 +4933,8 @@ table, the matcher and the labels live in the hub's
 the hub's `scripts/vendor-hotkeys.mjs` as `vendor/chatgoose-hotkeys`
 (`@chatgoose/hotkeys`, generated, never hand-edited; the vendor test pins every
 file against the manifest, and both clients must ship the same sha256 from the
-same hub commit — first vendored from hub `aa40a357`, sha256 `bdf6c634…`).
+same hub commit — the source commit and sha256 are in
+`vendor/chatgoose-hotkeys/chatgoose-hotkeys.vendor.json`).
 
 The scheme: everything that writes into the reply field plus Cancel is
 ⌘ + key on macOS and Ctrl + key on Windows (E Reply, I Fix, G Hi, P Ping,
