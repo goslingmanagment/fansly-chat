@@ -3,11 +3,11 @@
 Firefox MV3 extension (gecko ≥ 142) for agency chatters working Fansly.com:
 injects an AI assistant into the live Fansly DOM (replies, coaching, fan
 summaries, pings, spenders board, vault uploads, followers). It is a client
-of the Agency Hub (`~/code/goose/hub`, "the kernel"): the hub holds the AI
+of the Agency Hub (`~/code/1-platform/hub`, "the kernel"): the hub holds the AI
 keys, assembles prompts and computes money; this repo reads the Fansly page
 and talks to the hub through the vendored SDK. Product description, features
 and current architecture: `README.md` (kept current). Sibling for OnlyFans:
-`~/code/goose/of-desktop`.
+`~/code/1-platform/onlyfans-chat`.
 
 ## Where the truth is
 
