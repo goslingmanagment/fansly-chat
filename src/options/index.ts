@@ -26,6 +26,15 @@ import {
 import { COPY } from './copy.js';
 import { renderHotkeysPane } from './hotkeys-pane.js';
 import { createSignInGate } from './sign-in-gate.js';
+import { accountIdEquivalents } from '../shared/message-sound-decision.js';
+import {
+  createAccountSoundToggle,
+  createMessageSoundCard,
+  messageSoundReportLines,
+  messageSoundStatusRowView,
+  previewMessageSound,
+  readMessageSoundStatus,
+} from './message-sound.js';
 import { detectLabelPlatform } from '../shared/hotkeys.js';
 import {
   buildPersonaRowViews,
@@ -133,6 +142,8 @@ const SESSIONS_REPOLL_MIN_INTERVAL_MS = 5_000;
 // getSessionsSnapshot (whose handler resolves identities against Fansly /me);
 // the throttle keeps a jammed button from storming the hub either.
 const CHECK_ALL_THROTTLE_MS = 10_000;
+/** E145: how often the page re-reads the sound's in-memory counters. */
+const MESSAGE_SOUND_STATUS_POLL_MS = 10_000;
 /** Below this the quota badge turns amber; at 0 it turns red. */
 const AI_QUOTA_LOW_THRESHOLD = 20;
 /** How long a deep link's row stays highlighted. Long enough to find with the
@@ -328,6 +339,8 @@ interface StatusReportModel {
     fansly: boolean;
   };
   readiness: ReadinessStep[];
+  /** E145: the incoming-message sound — counters and states, no content. */
+  messageSoundLines?: string[];
 }
 
 /**
@@ -440,6 +453,10 @@ export function buildStatusReport(model: StatusReportModel): string {
           health.sdkSourceCommit ?? unknown
         }`
   }`);
+
+  if (model.messageSoundLines && model.messageSoundLines.length > 0) {
+    lines.push(...model.messageSoundLines);
+  }
 
   lines.push('');
   for (const step of model.readiness) {
@@ -1090,7 +1107,15 @@ async function render(): Promise<void> {
     toolbarHintsRow,
   );
 
-  appearanceGrid.append(themeCard, chatPreviewCard);
+  // E145: the incoming-message sound. Its inputs are read by the page's one
+  // settings writer below; the per-model switches live in «Аккаунты».
+  const messageSound = createMessageSoundCard(state.settings, () => navigateTo('accounts'));
+  /** The mute list the «Аккаунты» switches edit; saved with the rest of the form. */
+  let messageSoundMutedAccountIds: string[] = [...state.settings.messageSoundMutedAccountIds];
+  const appearanceMainCol = document.createElement('div');
+  appearanceMainCol.className = 'chatgoose-panecol';
+  appearanceMainCol.append(themeCard, messageSound.card);
+  appearanceGrid.append(appearanceMainCol, chatPreviewCard);
   appearanceSection.append(appearanceHead.root, appearanceGrid);
   renderResolvedTheme();
   // The OS scheme is the note's ONLY input, so the OS query is what it listens
@@ -2577,6 +2602,9 @@ async function render(): Promise<void> {
   const signInGate = createSignInGate({
     root, cabinet, form: hubSignInRow, feedback: hubSignInMeta, signOutStatus: hubSignOutStatus,
     helpLink: hubHelpLink, advanced: hubAdvancedDetails, version: extensionVersion,
+    // E145: the sound does not need the hub, so its switch must stay reachable
+    // while the cabinet is closed — a rejected sign-in keeps the token stored.
+    soundToggle: messageSound.toggleRow,
   });
   cleanupTasks.push(() => signInGate.dispose());
   let previouslyRequiredSignIn = signInRequired();
@@ -2657,6 +2685,7 @@ async function render(): Promise<void> {
     activity: createStatusRow(COPY.status.activityLabel, 'activity'),
     spenders: createStatusRow(COPY.status.spendersLabel, 'spenders'),
     contract: createStatusRow(COPY.status.contractLabel, 'contract'),
+    sound: createStatusRow(COPY.sound.statusLabel, 'message-sound'),
   };
   for (const row of Object.values(statusRows)) row.skeleton();
   // The Контракт row is debug-only here (the Hub pane shows it unconditionally
@@ -2713,6 +2742,7 @@ async function render(): Promise<void> {
     statusRows.ai.root,
     statusRows.activity.root,
     statusRows.spenders.root,
+    statusRows.sound.root,
     statusRows.contract.root,
   );
 
@@ -3696,6 +3726,7 @@ async function render(): Promise<void> {
     statusModel.generatedAt = Date.now();
     statusModel.hubBaseUrl = normalizeAgencyHubBaseUrl(state.settings.agencyHubBaseUrl);
     statusModel.readiness = buildReadiness();
+    statusModel.messageSoundLines = messageSoundReportLines(latestMessageSoundStatus, state.settings);
     const report = buildStatusReport(statusModel);
     void navigator.clipboard
       ?.writeText(report)
@@ -3711,6 +3742,41 @@ async function render(): Promise<void> {
   });
 
   refreshStatusView(); // initial paint: the loading line until the first datum
+
+  // ─── E145: the incoming-message sound's state ───────────────
+  // In-memory counters of the background, read every 10 s while this page is
+  // open: the card's health line and the «Статус» row paint from one read.
+  let latestMessageSoundStatus: Awaited<ReturnType<typeof readMessageSoundStatus>> = null;
+  const refreshMessageSoundStatus = async (): Promise<void> => {
+    const status = await readMessageSoundStatus();
+    if (disposed) return;
+    latestMessageSoundStatus = status;
+    messageSound.renderHealth(status);
+    statusRows.sound.set(messageSoundStatusRowView(status, messageSound.toggle.checked));
+  };
+  void refreshMessageSoundStatus();
+  const messageSoundStatusTimer = window.setInterval(() => {
+    void refreshMessageSoundStatus();
+  }, MESSAGE_SOUND_STATUS_POLL_MS);
+  cleanupTasks.push(() => window.clearInterval(messageSoundStatusTimer));
+  messageSound.toggle.addEventListener('change', () => {
+    void refreshMessageSoundStatus();
+  });
+  messageSound.previewButton.addEventListener('click', () => {
+    messageSound.previewButton.disabled = true;
+    void previewMessageSound(
+      messageSound.tone.value as Settings['messageSoundTone'],
+      Number(messageSound.volume.value),
+    )
+      .then((reply) => {
+        if (disposed) return;
+        messageSound.showPreviewResult(reply);
+        void refreshMessageSoundStatus();
+      })
+      .finally(() => {
+        if (!disposed) messageSound.previewButton.disabled = false;
+      });
+  });
 
   // ─── Save whisper ────────────────────────────────────────
   // (The banner above used to say «AI Models» — that section left with Stage 32.)
@@ -3750,6 +3816,10 @@ async function render(): Promise<void> {
   const settingsFormSignature = (): string => JSON.stringify([
     getSelectedTheme(),
     toolbarHintsInput.checked,
+    messageSound.toggle.checked,
+    messageSound.tone.value,
+    messageSound.volume.value,
+    messageSoundMutedAccountIds,
     agencyHubUrlInput.value,
     quickInput.value,
     pingInput.value,
@@ -3763,6 +3833,10 @@ async function render(): Promise<void> {
     const patch: Partial<Settings> = {
       uiTheme: getSelectedTheme(),
       showToolbarHints: toolbarHintsInput.checked,
+      messageSoundEnabled: messageSound.toggle.checked,
+      messageSoundTone: messageSound.tone.value as Settings['messageSoundTone'],
+      messageSoundVolume: Number(messageSound.volume.value),
+      messageSoundMutedAccountIds: [...messageSoundMutedAccountIds],
       agencyHubBaseUrl: agencyHubUrlInput.value,
       quickMessageCount: Number(quickInput.value),
       pingMessageCount: Number(pingInput.value),
@@ -3852,6 +3926,17 @@ async function render(): Promise<void> {
       if (document.activeElement !== toolbarHintsInput) {
         toolbarHintsInput.checked = mergedSettings.showToolbarHints;
       }
+      if (document.activeElement !== messageSound.toggle) {
+        messageSound.toggle.checked = mergedSettings.messageSoundEnabled;
+      }
+      if (document.activeElement !== messageSound.tone) {
+        messageSound.tone.value = mergedSettings.messageSoundTone;
+      }
+      if (document.activeElement !== messageSound.volume) {
+        messageSound.volume.value = String(mergedSettings.messageSoundVolume);
+        messageSound.renderVolume();
+      }
+      messageSoundMutedAccountIds = [...mergedSettings.messageSoundMutedAccountIds];
 
       const hubSignature = buildAgencyHubConnectionSignature(
         mergedSettings.agencyHubBaseUrl,
@@ -3965,6 +4050,9 @@ async function render(): Promise<void> {
   [
     ...themeRadios,
     toolbarHintsInput,
+    messageSound.toggle,
+    messageSound.tone,
+    messageSound.volume,
     agencyHubUrlInput,
     quickInput,
     pingInput,
@@ -5140,6 +5228,20 @@ async function render(): Promise<void> {
       info.className = 'chatgoose-account-pills';
       renderMappingInfo(info, mappedView, isLive, accountId, view.personaMapped);
       actions.append(info);
+      // E145: this model's sound. The row id may be canonical or legacy; a mute
+      // under either name silences the same model.
+      const soundEquivalents = accountIdEquivalents(accountId, state.accountAliases);
+      actions.append(createAccountSoundToggle(
+        view.label,
+        !messageSoundMutedAccountIds.some((id) => soundEquivalents.has(id)),
+        (enabled) => {
+          messageSoundMutedAccountIds = enabled
+            ? messageSoundMutedAccountIds.filter((id) => !soundEquivalents.has(id))
+            : [...messageSoundMutedAccountIds.filter((id) => !soundEquivalents.has(id)), accountId];
+          scheduleSettingsSave();
+          void saveSettingsDebounced.flush();
+        },
+      ));
       // «к вкладке» ONLY for a live row: the tab id comes from the worker's
       // in-memory capture map, and after a restart there is nothing to focus.
       if (isLive && view.tabId !== null) {

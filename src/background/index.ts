@@ -29,6 +29,9 @@ import { readStorageState } from '../shared/storage.js';
 import { FollowersService } from './followers-service.js';
 import { WelcomeDefinitionsService } from './welcome-definitions.js';
 import { registerFollowersRuntime } from './followers-runtime.js';
+import { createMessageSoundPlayer } from './message-sound-player.js';
+import { focusedFanslyConversation, registerMessageSoundRuntime } from './message-sound-runtime.js';
+import { MessageSoundService } from './message-sound-service.js';
 
 // ─── Composition Root (DI, no module-level mutable state) ───────────────
 
@@ -76,6 +79,31 @@ const welcomeDefinitions = new WelcomeDefinitionsService({
 registerFollowersRuntime(new FollowersService({
   fansly: fanslyClient, sessions: sessionStore, gateway: kernelGateway, hub: agencyHubClient,
   readState: readStorageState, storage: browser.storage.local, welcome: welcomeDefinitions,
+}));
+// E145: the incoming-message sound. Reads the page's own socket through the
+// content tap; plays here, where Firefox allows audio without a click.
+registerMessageSoundRuntime(new MessageSoundService({
+  getState: () => storageCoordinator.getState(),
+  getTabSession: (tabId) => {
+    const session = sessionStore.getSessionForTab(tabId);
+    return session
+      ? { accountId: session.accountId, resolvedAccountId: session.resolvedAccountId }
+      : null;
+  },
+  isTabOpen: async (tabId) => {
+    try {
+      await browser.tabs.get(tabId);
+      return true;
+    } catch {
+      return false;
+    }
+  },
+  focusedConversationGroupId: () => focusedFanslyConversation(browser.windows),
+  listFanslyTabIds: async () => (await browser.tabs.query({ url: '*://fansly.com/*' }))
+    .flatMap((tab) => (tab.id === undefined ? [] : [tab.id])),
+  player: createMessageSoundPlayer(),
+  now: () => Date.now(),
+  monotonic: () => performance.now(),
 }));
 const voiceService = new VoiceService({
   kernelGateway,

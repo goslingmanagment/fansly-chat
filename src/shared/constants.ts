@@ -3,6 +3,10 @@ import type {
   Settings,
 } from './types.js';
 import { FEATURE_POLICIES } from './features.js';
+import {
+  MESSAGE_SOUND_TONE_DEFAULT,
+  MESSAGE_SOUND_VOLUME_DEFAULT,
+} from './message-sound.js';
 import type { FeaturePolicy } from './features.js';
 
 // ─── Agency Hub ──────────────────────────────────────────────────────────
@@ -14,7 +18,7 @@ export const DEFAULT_AGENCY_HUB_BASE_URL = 'https://gosling-agency.ru';
 
 // ─── Storage ─────────────────────────────────────────────────────────────
 
-export const STORAGE_SCHEMA_VERSION = 17;
+export const STORAGE_SCHEMA_VERSION = 18;
 /** Full-recap local cache prefix (legacy/unqualified keys read as FULL). */
 export const SUMMARY_CACHE_PREFIX = 'summary:';
 /** Short-recap local cache prefix (spec §5 persistence-collision rule): a short
@@ -340,6 +344,10 @@ export const DEFAULT_SETTINGS: Settings = {
   showToolbarHints: true,
   coachHistoryLimit: COACH_HISTORY_LIMIT_DEFAULT,
   coachAutoRecap: 'off',
+  messageSoundEnabled: true,
+  messageSoundTone: MESSAGE_SOUND_TONE_DEFAULT,
+  messageSoundVolume: MESSAGE_SOUND_VOLUME_DEFAULT,
+  messageSoundMutedAccountIds: [],
 };
 
 // ─── Build ──────────────────────────────────────────────────────────────

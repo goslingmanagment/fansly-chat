@@ -12,6 +12,9 @@ export function createSignInGate(options: {
   helpLink: HTMLElement;
   advanced: HTMLElement;
   version: string;
+  /** E145: the incoming-message sound switch. The sound works without the hub,
+   * so it must stay reachable while the cabinet is closed. */
+  soundToggle?: HTMLElement;
 }): { update: (required: boolean, rejected: boolean) => void; dispose: () => void } {
   const doc = options.root.ownerDocument;
   const gate = doc.createElement('main');
@@ -42,10 +45,12 @@ export function createSignInGate(options: {
   links.className = 'chatgoose-signin-links';
   const advanced = doc.createElement('div');
   advanced.className = 'chatgoose-signin-advanced';
+  const extras = doc.createElement('div');
+  extras.className = 'chatgoose-signin-extras';
   const version = doc.createElement('div');
   version.className = 'chatgoose-signin-version';
   version.textContent = `${COPY.rail.versionPrefix}${options.version}`;
-  card.append(brand, title, subtitle, notice, fields, help, links, advanced);
+  card.append(brand, title, subtitle, notice, fields, help, links, advanced, extras);
   gate.append(card, version);
   options.root.append(gate);
 
@@ -55,6 +60,7 @@ export function createSignInGate(options: {
     { node: options.signOutStatus, target: fields },
     { node: options.helpLink, target: links },
     { node: options.advanced, target: advanced },
+    ...(options.soundToggle ? [{ node: options.soundToggle, target: extras }] : []),
   ].map(({ node, target }) => {
     const marker = doc.createComment('sign-in control home');
     node.before(marker);

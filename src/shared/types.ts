@@ -1,3 +1,4 @@
+import type { MessageSoundTone } from './message-sound-protocol.js';
 import type { PaneKey } from './options-routes.js';
 import type {
   StoredVoiceAttemptRoute,
@@ -40,6 +41,13 @@ export interface Settings {
   coachHistoryLimit: number;
   /** Coach: whether an automatic recap runs, and at what depth. */
   coachAutoRecap: 'off' | 'short' | 'full';
+  /** E145: a blip when a fan writes (desktop parity), on by default. */
+  messageSoundEnabled: boolean;
+  messageSoundTone: MessageSoundTone;
+  /** 5–100 in steps of 5; 50 is the desktop app's loudness. */
+  messageSoundVolume: number;
+  /** Muted models — a mute list, so a new model rings by default. */
+  messageSoundMutedAccountIds: string[];
 }
 
 export interface Personality {

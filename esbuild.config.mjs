@@ -20,6 +20,14 @@ const pageEntryPoints = {
 const contentBootstrapEntryPoints = {
   content: path.join(root, 'src/content/bootstrap.ts'),
 };
+// E145: the two `document_start` scripts of the incoming-message sound — the
+// MAIN-world socket tap and its isolated relay. Classic scripts like the
+// bootstrap, but their own bundles: they run on every Fansly page before the
+// page's own code and must stay tiny.
+const contentEarlyEntryPoints = {
+  'content-socket-tap': path.join(root, 'src/content/page-socket-tap.ts'),
+  'content-sound-relay': path.join(root, 'src/content/sound-relay.ts'),
+};
 const contentAppEntryPoints = {
   'content-followers': path.join(root, 'src/content/followers/index.ts'),
   'content-chat': path.join(root, 'src/content/index.ts'),
@@ -148,6 +156,11 @@ async function buildOnce() {
       entryPoints: contentBootstrapEntryPoints,
       format: 'iife',
     }),
+    esbuild.build({
+      ...common,
+      entryPoints: contentEarlyEntryPoints,
+      format: 'iife',
+    }),
     // Firefox content scripts support dynamic import of moz-extension: URLs.
     // The bootstrap remains a classic manifest script; this self-contained ESM
     // is parsed only when a message route or a global ChatGoose action needs it.
@@ -203,6 +216,11 @@ if (!watchMode) {
       entryPoints: contentBootstrapEntryPoints,
       format: 'iife',
       plugins: [modelCardDraftsPlugin()],
+    }),
+    esbuild.context({
+      ...common,
+      entryPoints: contentEarlyEntryPoints,
+      format: 'iife',
     }),
     esbuild.context({
       ...common,

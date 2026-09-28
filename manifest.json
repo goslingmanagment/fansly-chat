@@ -29,6 +29,25 @@
         "*://fansly.com/*"
       ],
       "js": [
+        "content-socket-tap.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "*://fansly.com/*"
+      ],
+      "js": [
+        "content-sound-relay.js"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "*://fansly.com/*"
+      ],
+      "js": [
         "content.js"
       ],
       "run_at": "document_idle"

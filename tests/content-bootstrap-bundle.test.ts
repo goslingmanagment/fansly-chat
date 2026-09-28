@@ -16,6 +16,7 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 async function bundleInputs(entry: string, format: 'iife' | 'esm'): Promise<{
   bytes: number;
   inputs: string[];
+  text: string;
 }> {
   const result = await esbuild.build({
     entryPoints: { entry: path.join(root, entry) },
@@ -36,6 +37,7 @@ async function bundleInputs(entry: string, format: 'iife' | 'esm'): Promise<{
   return {
     bytes: output?.bytes ?? 0,
     inputs: Object.keys(output?.inputs ?? {}).map((file) => file.replace(/\\/g, '/')),
+    text: result.outputFiles?.[0]?.text ?? '',
   };
 }
 
@@ -76,5 +78,34 @@ describe('content bootstrap bundle composition', () => {
     ]) {
       expect(inputs, `${foreign} must stay out of content-vault.js`).not.toContain(foreign);
     }
+  });
+
+  it('keeps the E145 page-world socket tap tiny and free of extension APIs and egress', async () => {
+    // It runs in Fansly's own world on every page before Fansly's code: parsing
+    // and the bridge only — no `browser.*` (there is none there), no request,
+    // no write to the socket.
+    const { bytes, inputs, text } = await bundleInputs('src/content/page-socket-tap.ts', 'iife');
+
+    expect(inputs.sort()).toEqual([
+      'src/content/page-socket-tap.ts',
+      'src/shared/fansly-ws-frame.ts',
+      'src/shared/message-sound-protocol.ts',
+    ]);
+    for (const forbidden of ['browser.', 'chrome.', 'fetch(', '.send(', 'XMLHttpRequest']) {
+      expect(text, `${forbidden} must stay out of the socket tap`).not.toContain(forbidden);
+    }
+    // Measured 3.9 KB.
+    expect(bytes).toBeLessThan(5 * 1024);
+  });
+
+  it('keeps the E145 isolated relay free of zod and the settings graph', async () => {
+    const { bytes, inputs } = await bundleInputs('src/content/sound-relay.ts', 'iife');
+
+    expect(inputs.sort()).toEqual([
+      'src/content/sound-relay.ts',
+      'src/shared/message-sound-protocol.ts',
+    ]);
+    // Measured 3.2 KB.
+    expect(bytes).toBeLessThan(5 * 1024);
   });
 });
