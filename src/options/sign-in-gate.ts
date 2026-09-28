@@ -12,9 +12,9 @@ export function createSignInGate(options: {
   helpLink: HTMLElement;
   advanced: HTMLElement;
   version: string;
-  /** E145: the incoming-message sound switch. The sound works without the hub,
-   * so it must stay reachable while the cabinet is closed. */
-  soundToggle?: HTMLElement;
+  /** E145/E146: the sound switches. The sounds work without the hub, so they
+   * must stay reachable while the cabinet is closed. */
+  soundToggles?: HTMLElement[];
 }): { update: (required: boolean, rejected: boolean) => void; dispose: () => void } {
   const doc = options.root.ownerDocument;
   const gate = doc.createElement('main');
@@ -60,7 +60,7 @@ export function createSignInGate(options: {
     { node: options.signOutStatus, target: fields },
     { node: options.helpLink, target: links },
     { node: options.advanced, target: advanced },
-    ...(options.soundToggle ? [{ node: options.soundToggle, target: extras }] : []),
+    ...(options.soundToggles ?? []).map((node) => ({ node, target: extras })),
   ].map(({ node, target }) => {
     const marker = doc.createComment('sign-in control home');
     node.before(marker);

@@ -2602,9 +2602,10 @@ async function render(): Promise<void> {
   const signInGate = createSignInGate({
     root, cabinet, form: hubSignInRow, feedback: hubSignInMeta, signOutStatus: hubSignOutStatus,
     helpLink: hubHelpLink, advanced: hubAdvancedDetails, version: extensionVersion,
-    // E145: the sound does not need the hub, so its switch must stay reachable
-    // while the cabinet is closed — a rejected sign-in keeps the token stored.
-    soundToggle: messageSound.toggleRow,
+    // E145/E146: the sounds do not need the hub, so their switches must stay
+    // reachable while the cabinet is closed — a rejected sign-in keeps the
+    // token stored.
+    soundToggles: [messageSound.toggleRow, messageSound.followToggleRow],
   });
   cleanupTasks.push(() => signInGate.dispose());
   let previouslyRequiredSignIn = signInRequired();
@@ -3752,31 +3753,40 @@ async function render(): Promise<void> {
     if (disposed) return;
     latestMessageSoundStatus = status;
     messageSound.renderHealth(status);
-    statusRows.sound.set(messageSoundStatusRowView(status, messageSound.toggle.checked));
+    statusRows.sound.set(messageSoundStatusRowView(
+      status,
+      messageSound.toggle.checked || messageSound.followToggle.checked,
+    ));
   };
   void refreshMessageSoundStatus();
   const messageSoundStatusTimer = window.setInterval(() => {
     void refreshMessageSoundStatus();
   }, MESSAGE_SOUND_STATUS_POLL_MS);
   cleanupTasks.push(() => window.clearInterval(messageSoundStatusTimer));
-  messageSound.toggle.addEventListener('change', () => {
-    void refreshMessageSoundStatus();
-  });
-  messageSound.previewButton.addEventListener('click', () => {
-    messageSound.previewButton.disabled = true;
-    void previewMessageSound(
-      messageSound.tone.value as Settings['messageSoundTone'],
-      Number(messageSound.volume.value),
-    )
-      .then((reply) => {
-        if (disposed) return;
-        messageSound.showPreviewResult(reply);
-        void refreshMessageSoundStatus();
-      })
-      .finally(() => {
-        if (!disposed) messageSound.previewButton.disabled = false;
-      });
-  });
+  for (const toggle of [messageSound.toggle, messageSound.followToggle]) {
+    toggle.addEventListener('change', () => {
+      void refreshMessageSoundStatus();
+    });
+  }
+  const wirePreview = (button: HTMLButtonElement, tone: HTMLSelectElement): void => {
+    button.addEventListener('click', () => {
+      button.disabled = true;
+      void previewMessageSound(
+        tone.value as Settings['messageSoundTone'],
+        Number(messageSound.volume.value),
+      )
+        .then((reply) => {
+          if (disposed) return;
+          messageSound.showPreviewResult(reply);
+          void refreshMessageSoundStatus();
+        })
+        .finally(() => {
+          if (!disposed) button.disabled = false;
+        });
+    });
+  };
+  wirePreview(messageSound.previewButton, messageSound.tone);
+  wirePreview(messageSound.followPreviewButton, messageSound.followTone);
 
   // ─── Save whisper ────────────────────────────────────────
   // (The banner above used to say «AI Models» — that section left with Stage 32.)
@@ -3818,6 +3828,8 @@ async function render(): Promise<void> {
     toolbarHintsInput.checked,
     messageSound.toggle.checked,
     messageSound.tone.value,
+    messageSound.followToggle.checked,
+    messageSound.followTone.value,
     messageSound.volume.value,
     messageSoundMutedAccountIds,
     agencyHubUrlInput.value,
@@ -3837,6 +3849,8 @@ async function render(): Promise<void> {
       messageSoundTone: messageSound.tone.value as Settings['messageSoundTone'],
       messageSoundVolume: Number(messageSound.volume.value),
       messageSoundMutedAccountIds: [...messageSoundMutedAccountIds],
+      followSoundEnabled: messageSound.followToggle.checked,
+      followSoundTone: messageSound.followTone.value as Settings['followSoundTone'],
       agencyHubBaseUrl: agencyHubUrlInput.value,
       quickMessageCount: Number(quickInput.value),
       pingMessageCount: Number(pingInput.value),
@@ -3931,6 +3945,12 @@ async function render(): Promise<void> {
       }
       if (document.activeElement !== messageSound.tone) {
         messageSound.tone.value = mergedSettings.messageSoundTone;
+      }
+      if (document.activeElement !== messageSound.followToggle) {
+        messageSound.followToggle.checked = mergedSettings.followSoundEnabled;
+      }
+      if (document.activeElement !== messageSound.followTone) {
+        messageSound.followTone.value = mergedSettings.followSoundTone;
       }
       if (document.activeElement !== messageSound.volume) {
         messageSound.volume.value = String(mergedSettings.messageSoundVolume);
@@ -4052,6 +4072,8 @@ async function render(): Promise<void> {
     toolbarHintsInput,
     messageSound.toggle,
     messageSound.tone,
+    messageSound.followToggle,
+    messageSound.followTone,
     messageSound.volume,
     agencyHubUrlInput,
     quickInput,

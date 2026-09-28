@@ -9,10 +9,12 @@
 
 import {
   SOUND_BRIDGE_ARM_EVENT,
+  SOUND_BRIDGE_FOLLOW_EVENT,
   SOUND_BRIDGE_MESSAGE_EVENT,
   SOUND_BRIDGE_RELAY_READY_EVENT,
   SOUND_BRIDGE_TAP_EVENT,
   parseBridgeDetail,
+  parseFollowEvent,
   parseIncomingMessage,
   parseSocketTapStatus,
   type FanslySocketState,
@@ -29,9 +31,11 @@ export interface SoundRelayDependencies {
   now: () => number;
 }
 
+/** The tap parses while EITHER sound is on; the background gates each kind. */
 function soundEnabledIn(settings: unknown): boolean {
   if (settings === null || typeof settings !== 'object') return true;
-  return (settings as Record<string, unknown>).messageSoundEnabled !== false;
+  const record = settings as Record<string, unknown>;
+  return record.messageSoundEnabled !== false || record.followSoundEnabled !== false;
 }
 
 export function startSoundRelay(dependencies: SoundRelayDependencies): void {
@@ -47,6 +51,11 @@ export function startSoundRelay(dependencies: SoundRelayDependencies): void {
   target.addEventListener(SOUND_BRIDGE_MESSAGE_EVENT, (event: Event) => {
     const message = parseIncomingMessage(parseBridgeDetail((event as CustomEvent).detail));
     if (message) send({ type: 'messageSound', action: 'incoming', message });
+  });
+
+  target.addEventListener(SOUND_BRIDGE_FOLLOW_EVENT, (event: Event) => {
+    const follow = parseFollowEvent(parseBridgeDetail((event as CustomEvent).detail));
+    if (follow) send({ type: 'messageSound', action: 'follow', follow });
   });
 
   let lastSocket: FanslySocketState | null = null;

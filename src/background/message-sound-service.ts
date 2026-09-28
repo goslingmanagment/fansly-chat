@@ -10,9 +10,10 @@
 // A message id is consumed by every final outcome except `account-unknown`:
 // an unattributed tab must not swallow the copy a correctly bound tab gets.
 
-import type { FanslyIncomingMessage } from '../shared/fansly-ws-frame.js';
+import type { FanslyFollowEvent, FanslyIncomingMessage } from '../shared/fansly-ws-frame.js';
 import {
   MESSAGE_SOUND_OUTCOMES,
+  gateFollowEvent,
   gateIncomingMessage,
   type MessageSoundOutcome,
   type TabSessionIdentity,
@@ -82,6 +83,7 @@ function emptyOutcomes(): Record<MessageSoundOutcome, number> {
 export class MessageSoundService {
   private readonly seen = new SeenMessages();
   private readonly outcomes = emptyOutcomes();
+  private readonly followOutcomes = emptyOutcomes();
   private readonly tabs = new Map<number, MessageSoundTabDiagnostics>();
   private readonly since: number;
   private chain: Promise<unknown> = Promise.resolve();
@@ -104,6 +106,17 @@ export class MessageSoundService {
     );
   }
 
+  /** E146: a new follower — the same chain, throttle and player as messages. */
+  handleFollow(tabId: number, follow: FanslyFollowEvent): Promise<MessageSoundOutcome> {
+    this.tabFor(tabId);
+    const run = this.chain.then(() => this.decideFollow(tabId, follow));
+    this.chain = run.catch(() => undefined);
+    return run.then(
+      (outcome) => this.countFollow(outcome),
+      () => this.countFollow('audio-error'),
+    );
+  }
+
   recordInvalid(): void {
     this.count('invalid');
   }
@@ -113,6 +126,7 @@ export class MessageSoundService {
     tab.socket = status.socket;
     tab.framesSeen = status.framesSeen;
     tab.messagesParsed = status.messagesParsed;
+    tab.followsParsed = status.followsParsed;
     tab.droppedByType = status.droppedByType;
   }
 
@@ -153,6 +167,7 @@ export class MessageSoundService {
       fanslyTabs: openFanslyTabs?.size ?? null,
       tabs,
       outcomes: { ...this.outcomes },
+      followOutcomes: { ...this.followOutcomes },
       lastPlayedAt: this.lastPlayedAt,
       audio: this.deps.player.diagnostics(),
     };
@@ -160,6 +175,11 @@ export class MessageSoundService {
 
   private count(outcome: MessageSoundOutcome): MessageSoundOutcome {
     this.outcomes[outcome] += 1;
+    return outcome;
+  }
+
+  private countFollow(outcome: MessageSoundOutcome): MessageSoundOutcome {
+    this.followOutcomes[outcome] += 1;
     return outcome;
   }
 
@@ -171,6 +191,7 @@ export class MessageSoundService {
         socket: 'none',
         framesSeen: 0,
         messagesParsed: 0,
+        followsParsed: 0,
         droppedByType: 0,
         lastIncomingAt: null,
       };
@@ -222,15 +243,46 @@ export class MessageSoundService {
     }
     if (focusedGroupId === message.groupId) return 'open-chat';
 
-    // One synchronous section: no await between the throttle and the start.
+    return this.startNow(fresh.settings.messageSoundTone, fresh.settings.messageSoundVolume);
+  }
+
+  private async decideFollow(tabId: number, follow: FanslyFollowEvent): Promise<MessageSoundOutcome> {
+    // Follow ids and message ids are different Fansly entities; keep them apart.
+    const key = `follow:${follow.id}`;
+    if (this.seen.has(key, this.deps.now())) return 'duplicate';
+    const outcome = await this.evaluateFollow(tabId, follow);
+    this.seen.consume(key, this.deps.now());
+    return outcome;
+  }
+
+  private async evaluateFollow(tabId: number, follow: FanslyFollowEvent): Promise<MessageSoundOutcome> {
+    const gate = (state: MessageSoundState): MessageSoundOutcome | null => gateFollowEvent(follow, {
+      enabled: state.settings.followSoundEnabled,
+      session: this.deps.getTabSession(tabId),
+      knownAccounts: state.knownAccounts,
+      accountAliases: state.accountAliases,
+      mutedAccountIds: state.settings.messageSoundMutedAccountIds,
+    });
+    const gated = gate(await this.deps.getState());
+    if (gated !== null) return gated;
+    if (!await this.deps.player.prepare()) return 'audio-error';
+    const fresh = await this.deps.getState();
+    const regated = gate(fresh);
+    if (regated !== null) return regated;
+    if (!await this.deps.isTabOpen(tabId)) return 'tab-closed';
+    return this.startNow(fresh.settings.followSoundTone, fresh.settings.messageSoundVolume);
+  }
+
+  /** One synchronous section: no await between the throttle and the start. */
+  private startNow(tone: MessageSoundTone, volume: number): MessageSoundOutcome {
     const at = this.deps.monotonic();
     if (at - this.lastRingAt < MESSAGE_SOUND_THROTTLE_MS) return 'throttled';
     try {
-      this.deps.player.start(fresh.settings.messageSoundTone, fresh.settings.messageSoundVolume);
+      this.deps.player.start(tone, volume);
     } catch {
       return 'audio-error';
     }
-    // Reserved only for a sound that actually started — still no await between.
+    // Reserved only for a sound that actually started.
     this.lastRingAt = at;
     this.lastPlayedAt = this.deps.now();
     return 'played';

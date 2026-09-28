@@ -5,6 +5,7 @@
 
 import {
   isMessageSoundTone,
+  parseFollowEvent,
   parseIncomingMessage,
   parseSocketTapStatus,
   type MessageSoundReply,
@@ -55,6 +56,15 @@ export function handleMessageSoundMessage(
         return refused;
       }
       return service.handleIncoming(sender.tab!.id!, message).then((outcome) => ({ ok: true, outcome }));
+    }
+    case 'follow': {
+      if (!isFanslyTopFrame(sender, runtime.id)) return refused;
+      const follow = parseFollowEvent(request.follow);
+      if (!follow) {
+        service.recordInvalid();
+        return refused;
+      }
+      return service.handleFollow(sender.tab!.id!, follow).then((outcome) => ({ ok: true, outcome }));
     }
     case 'tap': {
       if (!isFanslyTopFrame(sender, runtime.id)) return refused;

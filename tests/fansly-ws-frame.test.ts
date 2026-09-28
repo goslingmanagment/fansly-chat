@@ -69,7 +69,7 @@ describe('extractIncomingMessages (E145)', () => {
       d: JSON.stringify({ session: { token: 'secret-session-value', accountId: '1' } }),
     });
     const result = extractIncomingMessages(session);
-    expect(result).toEqual({ messages: [], droppedByType: 0 });
+    expect(result).toEqual({ messages: [], follows: [], droppedByType: 0 });
     expect(extractIncomingMessages(JSON.stringify({ t: 0, d: '{}' })).messages).toEqual([]);
     expect(extractIncomingMessages(JSON.stringify({ t: 2, d: '{"lastPing":1}' })).messages).toEqual([]);
     // A t:2 that LOOKS like a batch is still a ping, not a batch.
@@ -81,7 +81,7 @@ describe('extractIncomingMessages (E145)', () => {
     const mass = { ...FAN_MESSAGE, type: 3 };
     const automated = { ...FAN_MESSAGE, type: 2, id: '900000000000000009' };
     const batch = JSON.stringify({ t: 10001, d: [messageFrame(mass), messageFrame(automated)] });
-    expect(extractIncomingMessages(batch)).toEqual({ messages: [], droppedByType: 2 });
+    expect(extractIncomingMessages(batch)).toEqual({ messages: [], follows: [], droppedByType: 2 });
   });
 
   it('marks tips by a contentType 7 attachment and by a positive totalTipAmount', () => {
@@ -102,9 +102,9 @@ describe('extractIncomingMessages (E145)', () => {
   });
 
   it('returns nothing for non-strings, broken JSON and oversized frames', () => {
-    expect(extractIncomingMessages(new ArrayBuffer(8))).toEqual({ messages: [], droppedByType: 0 });
-    expect(extractIncomingMessages('{broken')).toEqual({ messages: [], droppedByType: 0 });
-    expect(extractIncomingMessages('p')).toEqual({ messages: [], droppedByType: 0 });
+    expect(extractIncomingMessages(new ArrayBuffer(8))).toEqual({ messages: [], follows: [], droppedByType: 0 });
+    expect(extractIncomingMessages('{broken')).toEqual({ messages: [], follows: [], droppedByType: 0 });
+    expect(extractIncomingMessages('p')).toEqual({ messages: [], follows: [], droppedByType: 0 });
     const huge = messageFrame({ ...FAN_MESSAGE, content: 'x'.repeat(FANSLY_WS_FRAME_MAX_CHARS) });
     expect(extractIncomingMessages(huge).messages).toEqual([]);
   });
@@ -120,5 +120,20 @@ describe('extractIncomingMessages (E145)', () => {
       d: Array.from({ length: 400 }, (_, index) => messageFrame({ ...FAN_MESSAGE, id: String(1000 + index) })),
     });
     expect(extractIncomingMessages(wide).messages.length).toBeLessThan(256);
+  });
+
+  it('E146: projects a follow of the model and ignores unfollows and broken ids', () => {
+    const follow = (type: number, body: Record<string, unknown>) => serviceFrame(3, { type, follow: body });
+    const created = follow(2, { id: '1001', accountId: '200', followerId: '999', accountSortOrder: 5 });
+    expect(extractIncomingMessages(created).follows).toEqual([
+      { v: 1, id: '1001', accountId: '200', followerId: '999' },
+    ]);
+    expect(extractIncomingMessages(follow(3, { id: '1002', accountId: '200', followerId: '999', createdAt: 1 })).follows)
+      .toEqual([]);
+    expect(extractIncomingMessages(follow(2, { id: 'x', accountId: '200', followerId: '999' })).follows).toEqual([]);
+    const mixed = JSON.stringify({ t: 10001, d: [messageFrame(FAN_MESSAGE), created] });
+    const parsed = extractIncomingMessages(mixed);
+    expect(parsed.messages).toHaveLength(1);
+    expect(parsed.follows).toHaveLength(1);
   });
 });

@@ -64,8 +64,14 @@ export interface MessageSoundCard {
   toggleRow: HTMLElement;
   toggle: HTMLInputElement;
   tone: HTMLSelectElement;
+  /** E146: the new-follower sound — its own switch (also borrowed by the gate)
+   * and tone; volume is shared. */
+  followToggleRow: HTMLElement;
+  followToggle: HTMLInputElement;
+  followTone: HTMLSelectElement;
   volume: HTMLInputElement;
   previewButton: HTMLButtonElement;
+  followPreviewButton: HTMLButtonElement;
   /** Repaint the «N %» next to the slider. */
   renderVolume: () => void;
   renderHealth: (status: MessageSoundStatus | null) => void;
@@ -89,20 +95,37 @@ export function createMessageSoundCard(settings: Settings, onOpenAccounts: () =>
   toggleRow.dataset.role = 'message-sound-row';
   toggleRow.append(rowLabels(COPY.sound.toggleTitle, COPY.sound.toggleHint), switchNode);
 
-  const tone = document.createElement('select');
-  tone.className = 'chatgoose-select chatgoose-sound-tone';
-  tone.dataset.role = 'message-sound-tone';
-  tone.setAttribute('aria-label', COPY.sound.toneLabel);
-  for (const value of Object.keys(TONE_LABELS) as MessageSoundTone[]) {
-    const option = document.createElement('option');
-    option.value = value;
-    option.textContent = TONE_LABELS[value];
-    tone.append(option);
-  }
-  tone.value = settings.messageSoundTone;
+  const toneSelect = (role: string, label: string, value: MessageSoundTone): HTMLSelectElement => {
+    const select = document.createElement('select');
+    select.className = 'chatgoose-select chatgoose-sound-tone';
+    select.dataset.role = role;
+    select.setAttribute('aria-label', label);
+    for (const tone of Object.keys(TONE_LABELS) as MessageSoundTone[]) {
+      const option = document.createElement('option');
+      option.value = tone;
+      option.textContent = TONE_LABELS[tone];
+      select.append(option);
+    }
+    select.value = value;
+    return select;
+  };
+  const tone = toneSelect('message-sound-tone', COPY.sound.toneLabel, settings.messageSoundTone);
   const toneRow = document.createElement('div');
   toneRow.className = 'chatgoose-row';
   toneRow.append(rowLabels(COPY.sound.toneLabel), tone);
+
+  const { switchNode: followSwitch, input: followToggle } = createSwitch(
+    settings.followSoundEnabled,
+    'follow-sound-toggle',
+  );
+  const followToggleRow = document.createElement('label');
+  followToggleRow.className = 'chatgoose-row chatgoose-sound-toggle-row';
+  followToggleRow.dataset.role = 'follow-sound-row';
+  followToggleRow.append(rowLabels(COPY.sound.followToggleTitle, COPY.sound.followToggleHint), followSwitch);
+  const followTone = toneSelect('follow-sound-tone', COPY.sound.followToneLabel, settings.followSoundTone);
+  const followToneRow = document.createElement('div');
+  followToneRow.className = 'chatgoose-row';
+  followToneRow.append(rowLabels(COPY.sound.followToneLabel), followTone);
 
   const volume = document.createElement('input');
   volume.type = 'range';
@@ -131,6 +154,8 @@ export function createMessageSoundCard(settings: Settings, onOpenAccounts: () =>
 
   const previewButton = createButton(COPY.sound.preview, true);
   previewButton.dataset.role = 'message-sound-preview';
+  const followPreviewButton = createButton(COPY.sound.followPreview, true);
+  followPreviewButton.dataset.role = 'follow-sound-preview';
   const modelsLink = document.createElement('button');
   modelsLink.type = 'button';
   modelsLink.className = 'chatgoose-fact-link';
@@ -139,7 +164,7 @@ export function createMessageSoundCard(settings: Settings, onOpenAccounts: () =>
   modelsLink.addEventListener('click', onOpenAccounts);
   const actions = document.createElement('div');
   actions.className = 'chatgoose-status-actions chatgoose-sound-actions';
-  actions.append(previewButton, modelsLink);
+  actions.append(previewButton, followPreviewButton, modelsLink);
 
   const previewNote = document.createElement('div');
   previewNote.className = 'chatgoose-status-hint';
@@ -154,11 +179,11 @@ export function createMessageSoundCard(settings: Settings, onOpenAccounts: () =>
 
   const rows = document.createElement('div');
   rows.className = 'chatgoose-rows';
-  rows.append(toggleRow, toneRow, volumeRow);
+  rows.append(toggleRow, toneRow, followToggleRow, followToneRow, volumeRow);
   card.append(head, rows, actions, previewNote, health);
 
   const renderHealth = (status: MessageSoundStatus | null): void => {
-    health.textContent = messageSoundHealthText(status, toggle.checked);
+    health.textContent = messageSoundHealthText(status, toggle.checked || followToggle.checked);
   };
   renderHealth(null);
 
@@ -167,8 +192,12 @@ export function createMessageSoundCard(settings: Settings, onOpenAccounts: () =>
     toggleRow,
     toggle,
     tone,
+    followToggleRow,
+    followToggle,
+    followTone,
     volume,
     previewButton,
+    followPreviewButton,
     renderVolume,
     renderHealth,
     showPreviewResult: (reply) => {
@@ -218,7 +247,10 @@ export function messageSoundHealthText(status: MessageSoundStatus | null, enable
 export function messageSoundStatusRowView(status: MessageSoundStatus | null, enabled: boolean): StatusRowView {
   if (!enabled) return { tone: 'neutral', fact: COPY.sound.statusOff };
   if (status === null) return { tone: 'neutral', fact: COPY.sound.statusUnavailable };
-  const detail = COPY.sound.statusPlayed.replace('{n}', String(status.outcomes.played));
+  const detail = COPY.sound.statusPlayed.replace(
+    '{n}',
+    String(status.outcomes.played + (status.followOutcomes?.played ?? 0)),
+  );
   if (status.outcomes['audio-error'] > 0 && status.lastPlayedAt === null) {
     return { tone: 'bad', fact: COPY.sound.statusAudioError, detail };
   }
@@ -243,7 +275,9 @@ export function messageSoundReportLines(status: MessageSoundStatus | null, setti
   const lines = [
     `${COPY.sound.statusLabel}: ${settings.messageSoundEnabled ? 'on' : 'off'} · ${settings.messageSoundTone} · ${
       settings.messageSoundVolume
-    }% · muted ${settings.messageSoundMutedAccountIds.length}`,
+    }% · muted ${settings.messageSoundMutedAccountIds.length} · follows ${
+      settings.followSoundEnabled ? 'on' : 'off'
+    } ${settings.followSoundTone}`,
   ];
   if (status === null) {
     lines.push(`  ${COPY.sound.statusUnavailable}`);
@@ -253,11 +287,18 @@ export function messageSoundReportLines(status: MessageSoundStatus | null, setti
     status.tabs.length
   }`);
   for (const tab of status.tabs) {
-    lines.push(`  tab ${tab.tabId}: ${tab.socket} · frames ${tab.framesSeen} · parsed ${tab.messagesParsed} · dropped ${
-      tab.droppedByType
-    } · last ${tab.lastIncomingAt === null ? '—' : new Date(tab.lastIncomingAt).toISOString()}`);
+    lines.push(`  tab ${tab.tabId}: ${tab.socket} · frames ${tab.framesSeen} · parsed ${tab.messagesParsed} · follows ${
+      tab.followsParsed ?? 0
+    } · dropped ${tab.droppedByType} · last ${
+      tab.lastIncomingAt === null ? '—' : new Date(tab.lastIncomingAt).toISOString()
+    }`);
   }
   lines.push(`  ${MESSAGE_SOUND_OUTCOMES.map((outcome) => `${outcome}=${status.outcomes[outcome]}`).join(' ')}`);
+  if (status.followOutcomes) {
+    lines.push(`  follows: ${MESSAGE_SOUND_OUTCOMES
+      .map((outcome) => `${outcome}=${status.followOutcomes[outcome]}`)
+      .join(' ')}`);
+  }
   lines.push(`  audio ${status.audio.state ?? '—'} · error ${status.audio.lastError ?? '—'} · last played ${
     status.lastPlayedAt === null ? '—' : new Date(status.lastPlayedAt).toISOString()
   }`);

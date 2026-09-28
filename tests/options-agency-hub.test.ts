@@ -57,6 +57,8 @@ function makeState(overrides?: Partial<PersistedState['settings']>): PersistedSt
       messageSoundTone: 'blip',
       messageSoundVolume: 50,
       messageSoundMutedAccountIds: [],
+      followSoundEnabled: true,
+      followSoundTone: 'double',
       ...overrides,
     },
     personalities: [

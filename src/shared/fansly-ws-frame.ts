@@ -6,7 +6,10 @@
 // ServiceEvent JSON string, `serviceId 5` is MessageService, and its `event` is
 // ANOTHER JSON string whose `type 1` is a new message. `t:10001` is a batch
 // whose `d` is an array of wrapper strings, each handled like a frame of its
-// own. `t:0/1/2` (error, session verified — it carries credentials — and ping)
+// own. E146: `serviceId 3` is FollowerService — `type 2` is a follow
+// (`follow: {id, accountId, followerId}`, the model's socket receives it when a
+// fan follows the model), `type 3` an unfollow. `t:0/1/2` (error, session
+// verified — it carries credentials — and ping)
 // are never parsed past the wrapper. Binary frames go to Fansly's empty
 // `handleBytes`, so only strings are read here.
 
@@ -25,8 +28,18 @@ export interface FanslyIncomingMessage {
   tip: boolean;
 }
 
+/** E146: a follow — no createdAt on the wire; the event id dedupes it. */
+export interface FanslyFollowEvent {
+  v: 1;
+  id: string;
+  /** The account that was followed (the model, for a new follower). */
+  accountId: string;
+  followerId: string;
+}
+
 export interface FanslyFrameParseResult {
   messages: FanslyIncomingMessage[];
+  follows: FanslyFollowEvent[];
   /** Message-created events of any type other than 1 — mass sends and
    * automations. Counted, never forwarded: a mass send from this very tab
    * would otherwise flood the background with thousands of events. */
@@ -41,6 +54,8 @@ const WRAPPER_BATCH = 10001;
 const WRAPPER_SERVICE_EVENT = 10000;
 const MESSAGE_SERVICE_ID = 5;
 const MESSAGE_CREATED = 1;
+const FOLLOWER_SERVICE_ID = 3;
+const FOLLOW_CREATED = 2;
 const TIP_CONTENT_TYPE = 7;
 const FANSLY_ID = /^\d{1,32}$/;
 
@@ -96,8 +111,15 @@ function project(message: Record<string, unknown>): FanslyIncomingMessage | null
 }
 
 /** Never throws: anything unexpected is simply not a message. */
+function projectFollow(follow: Record<string, unknown>): FanslyFollowEvent | null {
+  const id = fanslyId(follow.id);
+  const accountId = fanslyId(follow.accountId);
+  const followerId = fanslyId(follow.followerId);
+  return id && accountId && followerId ? { v: 1, id, accountId, followerId } : null;
+}
+
 export function extractIncomingMessages(frame: unknown): FanslyFrameParseResult {
-  const result: FanslyFrameParseResult = { messages: [], droppedByType: 0 };
+  const result: FanslyFrameParseResult = { messages: [], follows: [], droppedByType: 0 };
   if (typeof frame !== 'string' || frame.length > FANSLY_WS_FRAME_MAX_CHARS) return result;
   let nodes = 0;
   const visit = (encoded: unknown, depth: number): void => {
@@ -117,7 +139,16 @@ export function extractIncomingMessages(frame: unknown): FanslyFrameParseResult 
     }
     if (wrapper.t !== WRAPPER_SERVICE_EVENT) return;
     const service = record(wrapper.d);
-    if (!service || service.serviceId !== MESSAGE_SERVICE_ID) return;
+    if (!service) return;
+    if (service.serviceId === FOLLOWER_SERVICE_ID) {
+      const event = record(service.event);
+      if (!event || event.type !== FOLLOW_CREATED) return;
+      const follow = record(event.follow);
+      const projection = follow ? projectFollow(follow) : null;
+      if (projection) result.follows.push(projection);
+      return;
+    }
+    if (service.serviceId !== MESSAGE_SERVICE_ID) return;
     const event = record(service.event);
     if (!event || event.type !== MESSAGE_CREATED) return;
     const message = record(event.message);

@@ -136,6 +136,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E143 | 2026-09-28 | Re-vendor the SDK from deployed Core `89134bb2` (core #267, OFAPI desktop media: `ofapiMediaResolve`, `ofapiMediaReports`, collection registry); production serves `abf87a65…`; the extension uses no OFAPI operation; unblocks the 2.5.1 release gate, no version bump |
 | E144 | 2026-09-28 | AI image notes: the kernel transcript numbers the kept window's describable media (`[Photo #n]`, ` [Photo #n]` after a bundle label, ` (preview #n)` after a PPV label) and `clientContext.media` lists them by id (groupRef, message, sender, kind, accountMedia id, paid) — never a URL or bytes; label-like text in messages is neutralized; the hub restores plain labels while its describer is off; 2.6.0 |
 | E145 | 2026-09-28 | Incoming-message sound (desktop parity): a MAIN-world `document_start` tap listens passively on Fansly's OWN wsv3 socket (Proxy over `window.WebSocket`, native object, no send/frame of ours), a text-free projection crosses an isolated relay, the background decides (own/automated/tip/stale 180 s/muted/open chat/2 s throttle) and plays a synthesized blip; settings v18 with a per-model mute list; no hub, no Fansly request, no new permission; 2.7.0 |
+| E146 | 2026-09-28 | New-follower sound on the E145 path: the tap also forwards FollowerService (`serviceId 3`) `type 2` follows (`{id, accountId, followerId}`, no createdAt), the background rings a follow of one of our models (`accountId` ours, `followerId` not) with its own switch and tone (`double`), shared volume, throttle and player, per-model mute on the model the event names; settings v19; 2.7.1 |
 
 ## Entries
 
@@ -5106,3 +5107,27 @@ notification, straight to everyone).
 - Tabs opened before the update have no tap until reloaded; the status says so.
   Verified in Firefox 156 (logged-out fansly.com opens wsv3 and the tap sees
   it; a bridge event reaches the background and plays). Released as 2.7.0.
+
+**E146 (2026-09-28).** New-follower sound — the owner asked for it right after
+2.7.0, with separate switches for messages and follows, as 2.7.1.
+
+- The model's own socket receives FollowerService events live: in the hub's
+  captured frames for the week to 2026-09-28, `serviceId 3` `type 2` arrived
+  with `follow: {id, accountId, followerId, …SortOrder}` about 600 times over
+  4–5 pages, `accountId` being the page (a fan followed the model); `type 3` is
+  an unfollow. Fansly's own client only handles a follow BY the session account,
+  but the event reaches the followed account too.
+- The tap projects `{id, accountId, followerId}` onto its own bridge event
+  (`chatgoose:fansly-follow`) and runtime action (`follow`); unfollows are not
+  forwarded. The relay arms the tap while EITHER sound is on.
+- The background runs follows through the same serial chain, throttle and
+  player: duplicate (key `follow:<id>`; there is no createdAt, so no freshness
+  rule) → disabled (`followSoundEnabled`) → own (`followerId` is ours: the model
+  followed someone) → not-ours (`accountId` is not one of our models) → muted
+  (the per-model list, matched against the model the event names and the tab's
+  session) → audio → fresh settings, tab open → throttle + start. No open-chat
+  rule: a follow is not a chat. Counters are kept apart (`followOutcomes`).
+- Settings v19: `followSoundEnabled` (on) and `followSoundTone` (`double`, to be
+  told apart from the message blip); volume and the per-model mute are shared.
+  The card gains «Звук новых фоловеров», «Сигнал фоловеров» and «Проверить звук
+  фоловеров»; both switches ride into the sign-in form. Released as 2.7.1.

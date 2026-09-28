@@ -24,6 +24,8 @@ function createStorage(overrides?: Partial<PersistedState>): PersistedState {
       messageSoundTone: 'blip',
       messageSoundVolume: 50,
       messageSoundMutedAccountIds: [],
+      followSoundEnabled: true,
+      followSoundTone: 'double',
     },
     personalities: [],
     personaCatalog: [],

@@ -213,7 +213,7 @@ describe('migrateState', () => {
 
   it('v18 (E145): adds the incoming-message sound on by default and preserves explicit choices', () => {
     const legacy = migrateState({ schemaVersion: 17, settings: { uiTheme: 'dark' } });
-    expect(legacy.schemaVersion).toBe(18);
+    expect(legacy.schemaVersion).toBe(19);
     expect(legacy.settings).toMatchObject({
       uiTheme: 'dark',
       messageSoundEnabled: true,
@@ -237,6 +237,21 @@ describe('migrateState', () => {
       messageSoundVolume: 85,
       messageSoundMutedAccountIds: ['111', '222'],
     });
+  });
+
+  it('v19 (E146): adds the follower sound on, with its own tone, and preserves explicit choices', () => {
+    const v18 = migrateState({ schemaVersion: 18, settings: { messageSoundEnabled: false, messageSoundTone: 'soft' } });
+    expect(v18.schemaVersion).toBe(19);
+    expect(v18.settings).toMatchObject({
+      messageSoundEnabled: false,
+      messageSoundTone: 'soft',
+      followSoundEnabled: true,
+      followSoundTone: 'double',
+    });
+    const chosen = migrateState({ schemaVersion: 19, settings: { followSoundEnabled: false, followSoundTone: 'blip' } });
+    expect(chosen.settings).toMatchObject({ followSoundEnabled: false, followSoundTone: 'blip' });
+    expect(migrateState({ schemaVersion: 19, settings: { followSoundTone: 'siren' } }).settings.followSoundTone)
+      .toBe('double');
   });
 
   it('v18 (E145): normalizes junk sound settings instead of trusting them', () => {

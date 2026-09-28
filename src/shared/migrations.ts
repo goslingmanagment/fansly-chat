@@ -9,6 +9,7 @@ import {
   STORAGE_SCHEMA_VERSION,
 } from './constants.js';
 import {
+  FOLLOW_SOUND_TONE_DEFAULT,
   MESSAGE_SOUND_TONE_DEFAULT,
   MESSAGE_SOUND_VOLUME_DEFAULT,
   normalizeMessageSoundTone,
@@ -40,6 +41,8 @@ export function createDefaultSettings(): Settings {
     messageSoundTone: MESSAGE_SOUND_TONE_DEFAULT,
     messageSoundVolume: MESSAGE_SOUND_VOLUME_DEFAULT,
     messageSoundMutedAccountIds: [],
+    followSoundEnabled: true,
+    followSoundTone: FOLLOW_SOUND_TONE_DEFAULT,
   };
 }
 
@@ -95,6 +98,8 @@ function migrateSettingsRecord(
   // v18 (E145): messageSound* ADDED — the incoming-message sound. On by default
   // (desktop parity: the chatters asked for it), desktop tone and loudness, no
   // model muted.
+  // v19 (E146): followSound* ADDED — a sound for a new follower, its own switch
+  // (on, like the message sound) and tone (`double`, to tell it apart).
   return {
     // v17: an EMPTY address is the pre-E123 default nobody chose — the fleet has
     // one hub, so it is filled in rather than left blank for the chatter to
@@ -133,6 +138,8 @@ function migrateSettingsRecord(
     messageSoundTone: normalizeMessageSoundTone(raw?.messageSoundTone),
     messageSoundVolume: normalizeMessageSoundVolume(raw?.messageSoundVolume ?? defaults.messageSoundVolume),
     messageSoundMutedAccountIds: normalizeMutedAccountIds(raw?.messageSoundMutedAccountIds),
+    followSoundEnabled: Boolean(raw?.followSoundEnabled ?? defaults.followSoundEnabled),
+    followSoundTone: normalizeMessageSoundTone(raw?.followSoundTone, defaults.followSoundTone),
   };
 }
 

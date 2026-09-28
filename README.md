@@ -62,7 +62,9 @@ from prose when checking what is installed or live; verify the signed update fee
   that model is open. A MAIN-world `document_start` tap listens passively on the
   page's own wsv3 socket; the background decides (own, automated, tips, 180 s
   freshness, per-model mute, 2 s throttle) and plays it. Tone, volume and the
-  switch live in «Вид», the per-model switch in «Аккаунты».
+  switch live in «Вид», the per-model switch in «Аккаунты». Since 2.7.1 (E146)
+  a new follower rings too (FollowerService `type 2` on the same socket), with
+  its own switch and tone; the per-model switch silences both.
 - **Settings cabinet** — seven panes for status, Hub, personas, accounts,
   generation, hotkeys, and appearance; includes sign-out and a support report.
 
@@ -175,6 +177,11 @@ Important references:
   architecture.
 
 ## Release
+
+Release 2.7.1 (E146) adds the new-follower sound on the same page-socket path:
+the tap also forwards `serviceId 3 / type 2` follows, the background rings a
+follow of one of our models with its own tone and switch (settings v19). No new
+permission, no Fansly request, SDK and Core contracts unchanged.
 
 Release 2.7.0 (E145) adds the incoming-message sound: two new `document_start`
 content scripts (`content-socket-tap.js` in the MAIN world, `content-sound-relay.js`

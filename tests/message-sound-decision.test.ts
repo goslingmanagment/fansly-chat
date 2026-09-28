@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { FanslyIncomingMessage } from '../src/shared/fansly-ws-frame.js';
 import {
   accountIdEquivalents,
+  gateFollowEvent,
   gateIncomingMessage,
   isStaleMessage,
   ownSenderIds,
@@ -130,5 +131,34 @@ describe('message sound settings helpers (E145)', () => {
     expect(normalizeMutedAccountIds(['1', '1', '', 'a b', 2, '3', 'acc-1'])).toEqual(['1', '3', 'acc-1']);
     expect(normalizeMutedAccountIds(Array.from({ length: 150 }, (_, index) => String(index)))).toHaveLength(100);
     expect(normalizeMutedAccountIds('1')).toEqual([]);
+  });
+});
+
+describe('gateFollowEvent (E146)', () => {
+  const follow = (accountId: string, followerId: string) => ({ v: 1 as const, id: '1', accountId, followerId });
+  const ctx = {
+    enabled: true,
+    session: { accountId: MODEL_LEGACY, resolvedAccountId: MODEL },
+    knownAccounts: [MODEL, OTHER_MODEL],
+    accountAliases: { [MODEL_LEGACY]: MODEL },
+    mutedAccountIds: [] as string[],
+  };
+
+  it('rings for a fan following one of our models', () => {
+    expect(gateFollowEvent(follow(MODEL, FAN), ctx)).toBeNull();
+    // After a worker restart the event itself names the model.
+    expect(gateFollowEvent(follow(OTHER_MODEL, FAN), { ...ctx, session: null })).toBeNull();
+  });
+
+  it('stays silent for a follow BY the model, of a stranger, or with the switch off', () => {
+    expect(gateFollowEvent(follow('555', MODEL), ctx)).toBe('own');
+    expect(gateFollowEvent(follow('555', FAN), ctx)).toBe('not-ours');
+    expect(gateFollowEvent(follow(MODEL, FAN), { ...ctx, enabled: false })).toBe('disabled');
+  });
+
+  it('honours the per-model mute under either id', () => {
+    expect(gateFollowEvent(follow(MODEL, FAN), { ...ctx, mutedAccountIds: [MODEL_LEGACY] })).toBe('muted');
+    expect(gateFollowEvent(follow(MODEL, FAN), { ...ctx, session: null, mutedAccountIds: [MODEL_LEGACY] })).toBe('muted');
+    expect(gateFollowEvent(follow(MODEL, FAN), { ...ctx, mutedAccountIds: [OTHER_MODEL] })).toBeNull();
   });
 });

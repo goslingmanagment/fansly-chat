@@ -1,7 +1,7 @@
 // E145: which incoming Fansly messages ring. Pure — the background service
 // owns the order of the asynchronous steps (focus, audio) around it.
 
-import type { FanslyIncomingMessage } from './fansly-ws-frame.js';
+import type { FanslyFollowEvent, FanslyIncomingMessage } from './fansly-ws-frame.js';
 import { automationReason } from './followers.js';
 import { FANSLY_STALE_MESSAGE_MS } from './message-sound.js';
 
@@ -15,6 +15,7 @@ export type MessageSoundOutcome =
   | 'stale'
   | 'muted'
   | 'account-unknown'
+  | 'not-ours'
   | 'tab-closed'
   | 'open-chat'
   | 'throttled'
@@ -31,6 +32,7 @@ export const MESSAGE_SOUND_OUTCOMES: readonly MessageSoundOutcome[] = [
   'stale',
   'muted',
   'account-unknown',
+  'not-ours',
   'tab-closed',
   'open-chat',
   'throttled',
@@ -145,4 +147,33 @@ export function gateIncomingMessage(
   }
   const equivalents = tabAccountEquivalents(context.session, context.accountAliases);
   return context.mutedAccountIds.some((id) => equivalents.has(id)) ? 'muted' : null;
+}
+
+export interface FollowSoundGateContext {
+  enabled: boolean;
+  session: TabSessionIdentity | null;
+  knownAccounts: readonly string[];
+  accountAliases: Readonly<Record<string, string>>;
+  mutedAccountIds: readonly string[];
+}
+
+/**
+ * E146: a new follower of one of OUR models. The event names the model itself
+ * (`accountId`), so the per-model mute is checked against it directly — no
+ * «unknown tab» case. A follow made BY the model, or of an account that is not
+ * ours, stays silent.
+ */
+export function gateFollowEvent(
+  follow: FanslyFollowEvent,
+  context: FollowSoundGateContext,
+): MessageSoundOutcome | null {
+  if (!context.enabled) return 'disabled';
+  const ours = ownSenderIds(context.session, context.knownAccounts, context.accountAliases);
+  if (ours.has(follow.followerId)) return 'own';
+  if (!ours.has(follow.accountId)) return 'not-ours';
+  const model = accountIdEquivalents(follow.accountId, context.accountAliases);
+  if (context.session) {
+    for (const id of tabAccountEquivalents(context.session, context.accountAliases)) model.add(id);
+  }
+  return context.mutedAccountIds.some((id) => model.has(id)) ? 'muted' : null;
 }

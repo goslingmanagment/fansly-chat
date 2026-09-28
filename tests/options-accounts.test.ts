@@ -81,6 +81,8 @@ function makeState(overrides?: Partial<PersistedState>): PersistedState {
       messageSoundTone: 'blip',
       messageSoundVolume: 50,
       messageSoundMutedAccountIds: [],
+      followSoundEnabled: true,
+      followSoundTone: 'double',
     },
     personalities: [{ id: 'p1', name: 'Closer', content: 'be nice', updatedAt: 1 }],
     personaCatalog: [{
@@ -657,7 +659,7 @@ describe('Options page account sections', () => {
     expect(
       Array.from(section.querySelectorAll<HTMLButtonElement>('[data-role="message-sound-card"] button'))
         .map((button) => button.dataset.role),
-    ).toEqual(['message-sound-preview', 'message-sound-models']);
+    ).toEqual(['message-sound-preview', 'follow-sound-preview', 'message-sound-models']);
   });
 
   it('renders and saves the toolbar-hint switch in the appearance pane', async () => {

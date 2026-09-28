@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TAP_STATS_INTERVAL_MS, installPageSocketTap } from '../src/content/page-socket-tap.js';
 import {
   SOUND_BRIDGE_ARM_EVENT,
+  SOUND_BRIDGE_FOLLOW_EVENT,
   SOUND_BRIDGE_MESSAGE_EVENT,
   SOUND_BRIDGE_RELAY_READY_EVENT,
   SOUND_BRIDGE_TAP_EVENT,
@@ -233,14 +234,14 @@ describe('page socket tap (E145)', () => {
     const { window } = mountPage();
     const statuses = bridge(window, SOUND_BRIDGE_TAP_EVENT);
     installPageSocketTap(window);
-    expect(statuses.at(-1)).toEqual({ v: 1, socket: 'none', framesSeen: 0, messagesParsed: 0, droppedByType: 0 });
+    expect(statuses.at(-1)).toEqual({ v: 1, socket: 'none', framesSeen: 0, messagesParsed: 0, followsParsed: 0, droppedByType: 0 });
     const Wrapped = window.WebSocket as unknown as FakeSocketClass;
     const con = new Wrapped('wss://wsv3.fansly.com?v=3');
     con.open();
     con.receive(FAN_FRAME);
     con.receive('{"t":2,"d":"{}"}');
     window.dispatchEvent(new window.CustomEvent(SOUND_BRIDGE_RELAY_READY_EVENT));
-    expect(statuses.at(-1)).toEqual({ v: 1, socket: 'open', framesSeen: 2, messagesParsed: 1, droppedByType: 0 });
+    expect(statuses.at(-1)).toEqual({ v: 1, socket: 'open', framesSeen: 2, messagesParsed: 1, followsParsed: 0, droppedByType: 0 });
   });
 
   it('stops parsing while disarmed by the global switch', () => {
@@ -275,5 +276,20 @@ describe('page socket tap (E145)', () => {
     const once = window.WebSocket;
     expect(installPageSocketTap(window)).toBe(false);
     expect(window.WebSocket).toBe(once);
+  });
+
+  it('E146: forwards a follow of the model on its own bridge event and counts it', () => {
+    const { window } = mountPage();
+    const follows = bridge(window, SOUND_BRIDGE_FOLLOW_EVENT);
+    const statuses = bridge(window, SOUND_BRIDGE_TAP_EVENT) as Array<{ followsParsed: number }>;
+    installPageSocketTap(window);
+    const con = new (window.WebSocket as unknown as FakeSocketClass)('wss://wsv3.fansly.com?v=3');
+    con.receive(JSON.stringify({
+      t: 10000,
+      d: JSON.stringify({ serviceId: 3, event: JSON.stringify({ type: 2, follow: { id: '5', accountId: '6', followerId: '7' } }) }),
+    }));
+    window.dispatchEvent(new window.CustomEvent(SOUND_BRIDGE_RELAY_READY_EVENT));
+    expect(follows).toEqual([{ v: 1, id: '5', accountId: '6', followerId: '7' }]);
+    expect(statuses.at(-1)?.followsParsed).toBe(1);
   });
 });
