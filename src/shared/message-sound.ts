@@ -5,11 +5,18 @@ import { isMessageSoundTone, type MessageSoundTone } from './message-sound-proto
 
 /** Desktop parity (`onlyfans-chat/.../lib/sound.ts`): at most one blip per 2 s. */
 export const MESSAGE_SOUND_THROTTLE_MS = 2_000;
+/** E146: a follow wave (a promo, a viral post) must not ring non-stop — and
+ * must never take a message's ring: messages keep their own 2 s pause. */
+export const FOLLOW_SOUND_THROTTLE_MS = 10_000;
 /** Fansly's own rule (`onMessagesEvent`): a message older than 180 s is a
  * possible redelivery, not news. */
 export const FANSLY_STALE_MESSAGE_MS = 180_000;
 
-export const MESSAGE_SOUND_TONE_DEFAULT: MessageSoundTone = 'blip';
+/** E146: Fansly's own chime — `blip` (the OnlyFans app's sound) stays a choice,
+ * but a chatter working both clients must hear which one is ringing. */
+export const MESSAGE_SOUND_TONE_DEFAULT: MessageSoundTone = 'chime';
+/** E146: a follow sounds different from a message by default. */
+export const FOLLOW_SOUND_TONE_DEFAULT: MessageSoundTone = 'double';
 /** 50 % is exactly the desktop blip's peak (0.06); the slider goes up to +12 dB. */
 export const MESSAGE_SOUND_VOLUME_DEFAULT = 50;
 export const MESSAGE_SOUND_VOLUME_MIN = 5;
@@ -23,8 +30,11 @@ const MAX_PEAK_GAIN = 0.24;
  * token-like string rather than silently dropping a mute. */
 const ACCOUNT_ID = /^[\w-]{1,64}$/;
 
-export function normalizeMessageSoundTone(raw: unknown): MessageSoundTone {
-  return isMessageSoundTone(raw) ? raw : MESSAGE_SOUND_TONE_DEFAULT;
+export function normalizeMessageSoundTone(
+  raw: unknown,
+  fallback: MessageSoundTone = MESSAGE_SOUND_TONE_DEFAULT,
+): MessageSoundTone {
+  return isMessageSoundTone(raw) ? raw : fallback;
 }
 
 export function normalizeMessageSoundVolume(raw: unknown): number {

@@ -213,11 +213,11 @@ describe('migrateState', () => {
 
   it('v18 (E145): adds the incoming-message sound on by default and preserves explicit choices', () => {
     const legacy = migrateState({ schemaVersion: 17, settings: { uiTheme: 'dark' } });
-    expect(legacy.schemaVersion).toBe(18);
+    expect(legacy.schemaVersion).toBe(19);
     expect(legacy.settings).toMatchObject({
       uiTheme: 'dark',
       messageSoundEnabled: true,
-      messageSoundTone: 'blip',
+      messageSoundTone: 'chime',
       messageSoundVolume: 50,
       messageSoundMutedAccountIds: [],
     });
@@ -239,6 +239,39 @@ describe('migrateState', () => {
     });
   });
 
+  it('v19 (E146): adds the follower sound on, with its own tone, and preserves explicit choices', () => {
+    const v18 = migrateState({ schemaVersion: 18, settings: { messageSoundTone: 'soft' } });
+    expect(v18.schemaVersion).toBe(19);
+    expect(v18.settings).toMatchObject({
+      messageSoundEnabled: true,
+      messageSoundTone: 'soft',
+      followSoundEnabled: true,
+      followSoundTone: 'double',
+    });
+    // 2.7.0's only switch was off = «no sounds»: the follower sound starts off too.
+    const silenced = migrateState({ schemaVersion: 18, settings: { messageSoundEnabled: false } });
+    expect(silenced.settings).toMatchObject({ messageSoundEnabled: false, followSoundEnabled: false });
+    // A v19 record keeps the two switches independent.
+    const independent = migrateState({ schemaVersion: 19, settings: { messageSoundEnabled: false } });
+    expect(independent.settings.followSoundEnabled).toBe(true);
+    const chosen = migrateState({ schemaVersion: 19, settings: { followSoundEnabled: false, followSoundTone: 'blip' } });
+    expect(chosen.settings).toMatchObject({ followSoundEnabled: false, followSoundTone: 'blip' });
+    expect(migrateState({ schemaVersion: 19, settings: { followSoundTone: 'siren' } }).settings.followSoundTone)
+      .toBe('double');
+  });
+
+  it('v19 (E146): a 2.7.0 install on the OnlyFans blip adopts Fansly\'s chime; a choice survives', () => {
+    expect(migrateState({ schemaVersion: 18, settings: { messageSoundTone: 'blip' } }).settings.messageSoundTone)
+      .toBe('chime');
+    expect(migrateState({ schemaVersion: 18, settings: { messageSoundTone: 'soft' } }).settings.messageSoundTone)
+      .toBe('soft');
+    // Chosen again after the update: a v19 blip is deliberate.
+    expect(migrateState({ schemaVersion: 19, settings: { messageSoundTone: 'blip' } }).settings.messageSoundTone)
+      .toBe('blip');
+    expect(migrateState({ schemaVersion: 19, settings: { messageSoundTone: 'knock' } }).settings.messageSoundTone)
+      .toBe('knock');
+  });
+
   it('v18 (E145): normalizes junk sound settings instead of trusting them', () => {
     const junk = migrateState({
       schemaVersion: 18,
@@ -248,7 +281,7 @@ describe('migrateState', () => {
         messageSoundMutedAccountIds: ['111', '111', 'not an id', '', 42, '333', 'legacy-key_1'],
       },
     });
-    expect(junk.settings.messageSoundTone).toBe('blip');
+    expect(junk.settings.messageSoundTone).toBe('chime');
     expect(junk.settings.messageSoundVolume).toBe(100);
     expect(junk.settings.messageSoundMutedAccountIds).toEqual(['111', '333', 'legacy-key_1']);
     expect(migrateState({ schemaVersion: 18, settings: { messageSoundVolume: 'x' } }).settings.messageSoundVolume)
@@ -540,7 +573,7 @@ describe('sanitizeSettings', () => {
   it('E145: sanitizes the sound settings the options page saves', () => {
     expect(storage.sanitizeSettings({})).toMatchObject({
       messageSoundEnabled: true,
-      messageSoundTone: 'blip',
+      messageSoundTone: 'chime',
       messageSoundVolume: 50,
       messageSoundMutedAccountIds: [],
     });

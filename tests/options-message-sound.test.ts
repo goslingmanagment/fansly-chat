@@ -21,10 +21,11 @@ function status(overrides: Partial<MessageSoundStatus> = {}): MessageSoundStatus
     since: Date.UTC(2026, 8, 28, 7, 0),
     fanslyTabs: 1,
     tabs: [{
-      tabId: 4, socket: 'open', framesSeen: 10, messagesParsed: 2, droppedByType: 1,
+      tabId: 4, socket: 'open', framesSeen: 10, messagesParsed: 2, followsParsed: 1, droppedByType: 1,
       lastIncomingAt: new Date(2026, 8, 28, 10, 5).getTime(),
     }],
     outcomes: Object.fromEntries(MESSAGE_SOUND_OUTCOMES.map((outcome) => [outcome, 0])) as MessageSoundStatus['outcomes'],
+    followOutcomes: Object.fromEntries(MESSAGE_SOUND_OUTCOMES.map((outcome) => [outcome, 0])) as MessageSoundStatus['outcomes'],
     lastPlayedAt: null,
     audio: { state: 'running', lastError: null },
     ...overrides,
@@ -56,13 +57,18 @@ describe('«Звук входящих» in the cabinet (E145)', () => {
 
   it('renders the card in «Вид» with the stored choices', async () => {
     const page = await mountSignedIn({
-      settings: { messageSoundTone: 'soft', messageSoundVolume: 85, messageSoundEnabled: false },
+      settings: {
+        messageSoundTone: 'soft', messageSoundVolume: 85, messageSoundEnabled: false,
+        followSoundEnabled: false, followSoundTone: 'blip',
+      },
     });
     const card = q<HTMLElement>(page, '[data-role="message-sound-card"]');
     expect(card.closest('section')?.textContent).toContain(COPY.appearance.title);
     expect(q<HTMLInputElement>(page, '[data-role="message-sound-toggle"]').checked).toBe(false);
     expect(q<HTMLSelectElement>(page, '[data-role="message-sound-tone"]').value).toBe('soft');
     expect(q<HTMLInputElement>(page, '[data-role="message-sound-volume"]').value).toBe('85');
+    expect(q<HTMLInputElement>(page, '[data-role="follow-sound-toggle"]').checked).toBe(false);
+    expect(q<HTMLSelectElement>(page, '[data-role="follow-sound-tone"]').value).toBe('blip');
     expect(q<HTMLElement>(page, '[data-role="message-sound-volume-value"]').textContent).toBe('85 %');
     expect(q<HTMLElement>(page, '[data-role="message-sound-health"]').textContent).toBe(COPY.sound.healthOff);
   });
@@ -86,6 +92,28 @@ describe('«Звук входящих» in the cabinet (E145)', () => {
     });
     // Nothing else of the form moved.
     expect(page.getState().settings.uiTheme).toBe(createDefaultSettings().uiTheme);
+  });
+
+  it('E146: saves the follower switch and tone apart from the message ones, and previews the follow tone', async () => {
+    const page = await mountSignedIn({ runtime: { messageSound: { preview: { ok: true } } } });
+    const followToggle = q<HTMLInputElement>(page, '[data-role="follow-sound-toggle"]');
+    const followTone = q<HTMLSelectElement>(page, '[data-role="follow-sound-tone"]');
+    expect(followToggle.checked).toBe(true);
+    expect(followTone.value).toBe('double');
+    followToggle.checked = false;
+    change(page, followToggle);
+    followTone.value = 'soft';
+    change(page, followTone);
+    await page.flushAsync();
+    expect(page.getState().settings).toMatchObject({
+      followSoundEnabled: false,
+      followSoundTone: 'soft',
+      messageSoundEnabled: true,
+      messageSoundTone: 'chime',
+    });
+    q<HTMLButtonElement>(page, '[data-role="follow-sound-preview"]').click();
+    await page.flushAsync();
+    expect(page.messageSoundRequests()).toContainEqual({ type: 'messageSound', action: 'preview', tone: 'soft', volume: 50 });
   });
 
   it('previews through the background with the unsaved form values and reports a failure', async () => {
@@ -161,6 +189,13 @@ describe('«Звук входящих» in the cabinet (E145)', () => {
     expect(page.getState().settings.messageSoundEnabled).toBe(false);
     // The same node, not a copy: exactly one switch on the page.
     expect(page.document.querySelectorAll('[data-role="message-sound-toggle"]')).toHaveLength(1);
+    // E146: the follower switch travels with it.
+    const followToggle = gate.querySelector<HTMLInputElement>('[data-role="follow-sound-toggle"]');
+    expect(followToggle).not.toBeNull();
+    followToggle!.checked = false;
+    change(page, followToggle!);
+    await page.flushAsync();
+    expect(page.getState().settings.followSoundEnabled).toBe(false);
   });
 
   it('shows the switch in the sign-in form of a fresh install too', async () => {
@@ -191,6 +226,12 @@ describe('message sound status wording (E145)', () => {
     expect(messageSoundHealthText(late, true)).toBe(COPY.sound.healthReload.replace('{n}', '1'));
   });
 
+  it('E146: asks to reload a tab still running the 2.7.0 tap (no follows there)', () => {
+    const old = status({ tabs: [{ ...status().tabs[0]!, followsParsed: null }] });
+    expect(messageSoundStatusRowView(old, true).fact).toBe(COPY.sound.statusReload.replace('{n}', '1'));
+    expect(messageSoundReportLines(old, createDefaultSettings()).join('\n')).toContain('follows old tap');
+  });
+
   it('names no tabs, a dead audio context and the off switch plainly', () => {
     expect(messageSoundStatusRowView(status({ fanslyTabs: 0, tabs: [] }), true).fact).toBe(COPY.sound.statusNoTabs);
     const broken = status({
@@ -207,8 +248,9 @@ describe('message sound status wording (E145)', () => {
       outcomes: { ...status().outcomes, played: 3, own: 5 },
     }), { ...createDefaultSettings(), messageSoundMutedAccountIds: ['1'] });
     const report = lines.join('\n');
-    expect(report).toContain('on · blip · 50% · muted 1');
-    expect(report).toContain('tab 4: open · frames 10 · parsed 2 · dropped 1');
+    expect(report).toContain('on · chime · 50% · muted 1 · follows on double');
+    expect(report).toContain('tab 4: open · frames 10 · parsed 2 · follows 1 · dropped 1');
+    expect(report).toContain('follows: invalid=0');
     expect(report).toContain('played=3');
     expect(report).toContain('own=5');
     expect(messageSoundReportLines(null, createDefaultSettings()).join('\n')).toContain(COPY.sound.statusUnavailable);

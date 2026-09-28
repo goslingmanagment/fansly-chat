@@ -46,8 +46,12 @@ export interface Settings {
   messageSoundTone: MessageSoundTone;
   /** 5–100 in steps of 5; 50 is the desktop app's loudness. */
   messageSoundVolume: number;
-  /** Muted models — a mute list, so a new model rings by default. */
+  /** Muted models — a mute list, so a new model rings by default. Silences
+   * both the message and the follow sound of that model. */
   messageSoundMutedAccountIds: string[];
+  /** E146: a sound when a fan follows a model; its own switch and tone. */
+  followSoundEnabled: boolean;
+  followSoundTone: MessageSoundTone;
 }
 
 export interface Personality {

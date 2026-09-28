@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TAP_STATUS_MIN_INTERVAL_MS, startSoundRelay } from '../src/content/sound-relay.js';
 import {
   SOUND_BRIDGE_ARM_EVENT,
+  SOUND_BRIDGE_FOLLOW_EVENT,
   SOUND_BRIDGE_MESSAGE_EVENT,
   SOUND_BRIDGE_RELAY_READY_EVENT,
   SOUND_BRIDGE_TAP_EVENT,
@@ -99,12 +100,32 @@ describe('sound relay (E145)', () => {
   });
 
   it('arms the tap from the global switch and follows its changes', async () => {
-    const relay = mount({ messageSoundEnabled: false });
+    const relay = mount({ messageSoundEnabled: false, followSoundEnabled: false });
     await Promise.resolve();
     await Promise.resolve();
     expect(relay.arms).toEqual(['off']);
-    relay.changeSettings({ messageSoundEnabled: true });
+    relay.changeSettings({ messageSoundEnabled: false, followSoundEnabled: true });
     relay.changeSettings(undefined);
-    expect(relay.arms).toEqual(['off', 'on', 'on']);
+    relay.changeSettings({ messageSoundEnabled: false, followSoundEnabled: false });
+    // Either sound keeps the tap parsing; only both off disarm it.
+    expect(relay.arms).toEqual(['off', 'on', 'on', 'off']);
+  });
+
+  it('E146: forwards a valid follow projection and drops a broken one', () => {
+    const relay = mount();
+    relay.page(SOUND_BRIDGE_FOLLOW_EVENT, JSON.stringify({ v: 1, id: '5', accountId: '6', followerId: '7' }));
+    relay.page(SOUND_BRIDGE_FOLLOW_EVENT, JSON.stringify({ v: 1, id: '5', accountId: 'x', followerId: '7' }));
+    expect(relay.sent).toEqual([
+      { type: 'messageSound', action: 'follow', follow: { v: 1, id: '5', accountId: '6', followerId: '7' } },
+    ]);
+  });
+
+  it('accepts a 2.7.0 tap status without followsParsed, marking it old', () => {
+    const relay = mount();
+    relay.page(SOUND_BRIDGE_TAP_EVENT, JSON.stringify({ v: 1, socket: 'open', framesSeen: 1, messagesParsed: 0, droppedByType: 0 }));
+    expect(relay.sent).toEqual([{
+      type: 'messageSound', action: 'tap',
+      status: { v: 1, socket: 'open', framesSeen: 1, messagesParsed: 0, followsParsed: null, droppedByType: 0 },
+    }]);
   });
 });

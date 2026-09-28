@@ -14,6 +14,7 @@ const PROJECTION = {
 function fakeService() {
   return {
     handleIncoming: vi.fn(async () => 'played' as const),
+    handleFollow: vi.fn(async () => 'played' as const),
     recordTap: vi.fn(),
     recordInvalid: vi.fn(),
     previewSound: vi.fn(async () => ({ ok: true as const })),
@@ -65,6 +66,20 @@ describe('messageSound runtime family (E145)', () => {
     }
     expect(service.handleIncoming).toHaveBeenCalledTimes(1);
     expect(service.recordTap).not.toHaveBeenCalled();
+  });
+
+  it('E146: accepts a follow only from a Fansly top frame, and counts a malformed one', async () => {
+    const service = fakeService();
+    const follow = { v: 1, id: '1', accountId: '2', followerId: '3' };
+    await expect(call(service, { type: 'messageSound', action: 'follow', follow }, FANSLY_TAB))
+      .resolves.toEqual({ ok: true, outcome: 'played' });
+    expect(service.handleFollow).toHaveBeenCalledWith(7, follow);
+    await expect(call(service, { type: 'messageSound', action: 'follow', follow }, OPTIONS_PAGE))
+      .resolves.toMatchObject({ ok: false });
+    await expect(call(service, { type: 'messageSound', action: 'follow', follow: { ...follow, id: 'x' } }, FANSLY_TAB))
+      .resolves.toMatchObject({ ok: false });
+    expect(service.handleFollow).toHaveBeenCalledTimes(1);
+    expect(service.recordInvalid).toHaveBeenCalledTimes(1);
   });
 
   it('counts a malformed projection instead of deciding on it', async () => {

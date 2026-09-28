@@ -6,11 +6,13 @@
 // itself. Nothing it carries can do more than ring once (the background
 // throttles) or skew a diagnostics counter.
 
-import type { FanslyIncomingMessage } from './fansly-ws-frame.js';
+import type { FanslyFollowEvent, FanslyIncomingMessage } from './fansly-ws-frame.js';
 import type { MessageSoundOutcome } from './message-sound-decision.js';
 
 /** page → relay: one incoming message projection (detail = JSON string). */
 export const SOUND_BRIDGE_MESSAGE_EVENT = 'chatgoose:fansly-message';
+/** page → relay: one follow projection (detail = JSON string). E146. */
+export const SOUND_BRIDGE_FOLLOW_EVENT = 'chatgoose:fansly-follow';
 /** page → relay: the tap's state (detail = JSON string). */
 export const SOUND_BRIDGE_TAP_EVENT = 'chatgoose:fansly-socket';
 /** relay → page: «I am listening, repeat your state» (no detail). */
@@ -28,11 +30,33 @@ export interface SocketTapStatus {
   socket: FanslySocketState;
   framesSeen: number;
   messagesParsed: number;
+  /** E146. `null` = a 2.7.0 tap still living in a tab opened before the
+   * update: it forwards messages but no follows, so the tab needs a reload. */
+  followsParsed: number | null;
   droppedByType: number;
 }
 
-export type MessageSoundTone = 'blip' | 'double' | 'soft';
-export const MESSAGE_SOUND_TONES: readonly MessageSoundTone[] = ['blip', 'double', 'soft'];
+/** `blip` is the OnlyFans desktop app's sound; E146 adds five of Fansly's own
+ * so the two clients need not sound alike. */
+export type MessageSoundTone =
+  | 'chime'
+  | 'drop'
+  | 'bell'
+  | 'arpeggio'
+  | 'knock'
+  | 'double'
+  | 'soft'
+  | 'blip';
+export const MESSAGE_SOUND_TONES: readonly MessageSoundTone[] = [
+  'chime',
+  'drop',
+  'bell',
+  'arpeggio',
+  'knock',
+  'double',
+  'soft',
+  'blip',
+];
 
 /** One Fansly tab as the background saw it — in memory since `since`. */
 export interface MessageSoundTabDiagnostics {
@@ -40,6 +64,7 @@ export interface MessageSoundTabDiagnostics {
   socket: FanslySocketState;
   framesSeen: number;
   messagesParsed: number;
+  followsParsed: number | null;
   droppedByType: number;
   lastIncomingAt: number | null;
 }
@@ -54,6 +79,8 @@ export interface MessageSoundStatus {
   /** Tabs whose tap reported in — fewer than `fanslyTabs` means «reload». */
   tabs: MessageSoundTabDiagnostics[];
   outcomes: Record<MessageSoundOutcome, number>;
+  /** E146: the same counters for new-follower events. */
+  followOutcomes: Record<MessageSoundOutcome, number>;
   lastPlayedAt: number | null;
   audio: { state: string | null; lastError: string | null };
 }
@@ -64,6 +91,7 @@ export type MessageSoundReply =
 
 export type MessageSoundRequest =
   | { type: 'messageSound'; action: 'incoming'; message: FanslyIncomingMessage }
+  | { type: 'messageSound'; action: 'follow'; follow: FanslyFollowEvent }
   | { type: 'messageSound'; action: 'tap'; status: SocketTapStatus }
   | { type: 'messageSound'; action: 'preview'; tone: MessageSoundTone; volume: number }
   | { type: 'messageSound'; action: 'status' };
@@ -99,12 +127,25 @@ export function parseIncomingMessage(value: unknown): FanslyIncomingMessage | nu
   return { v: 1, id, groupId, senderId, type, createdAt, correlationId, inReplyTo, tip };
 }
 
+export function parseFollowEvent(value: unknown): FanslyFollowEvent | null {
+  if (!isRecord(value) || value.v !== 1) return null;
+  const { id, accountId, followerId } = value;
+  if (!isId(id) || !isId(accountId) || !isId(followerId)) return null;
+  return { v: 1, id, accountId, followerId };
+}
+
 export function parseSocketTapStatus(value: unknown): SocketTapStatus | null {
   if (!isRecord(value) || value.v !== 1) return null;
   const { socket, framesSeen, messagesParsed, droppedByType } = value;
+  const followsParsed = value.followsParsed ?? null;
   if (!SOCKET_STATES.includes(socket as FanslySocketState)) return null;
-  if (!isCount(framesSeen) || !isCount(messagesParsed) || !isCount(droppedByType)) return null;
-  return { v: 1, socket: socket as FanslySocketState, framesSeen, messagesParsed, droppedByType };
+  if (
+    !isCount(framesSeen) || !isCount(messagesParsed) || !isCount(droppedByType) ||
+    (followsParsed !== null && !isCount(followsParsed))
+  ) {
+    return null;
+  }
+  return { v: 1, socket: socket as FanslySocketState, framesSeen, messagesParsed, followsParsed, droppedByType };
 }
 
 /** Parse a bridge event's JSON-string detail; null for anything else. */

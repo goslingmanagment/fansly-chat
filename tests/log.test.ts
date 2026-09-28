@@ -127,6 +127,8 @@ describe('isDebugEnabled', () => {
       messageSoundTone: 'blip',
       messageSoundVolume: 50,
       messageSoundMutedAccountIds: [],
+      followSoundEnabled: true,
+      followSoundTone: 'double',
     })).toBe(true);
   });
 
@@ -148,6 +150,8 @@ describe('isDebugEnabled', () => {
       messageSoundTone: 'blip',
       messageSoundVolume: 50,
       messageSoundMutedAccountIds: [],
+      followSoundEnabled: true,
+      followSoundTone: 'double',
     })).toBe(false);
   });
 

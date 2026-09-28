@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createMessageSoundPlayer } from '../src/background/message-sound-player.js';
+import { MESSAGE_SOUND_TONES } from '../src/shared/message-sound-protocol.js';
 import { scheduleTone, TONE_NOTES, type AudioContextLike } from '../src/shared/sound-synth.js';
 
 interface Recorded {
@@ -78,7 +79,19 @@ describe('scheduleTone (E145)', () => {
     const soft = fakeContext(0);
     scheduleTone(soft.context, 'soft', 0.1);
     expect(soft.notes[0]!.wave).toBe('triangle');
-    expect(Object.keys(TONE_NOTES).sort()).toEqual(['blip', 'double', 'soft']);
+    expect(Object.keys(TONE_NOTES).sort()).toEqual([...MESSAGE_SOUND_TONES].sort());
+  });
+
+  it('E146: schedules every one of the eight tones, all short, none a copy of the desktop blip', () => {
+    expect(MESSAGE_SOUND_TONES).toHaveLength(8);
+    const blip = JSON.stringify(TONE_NOTES.blip);
+    for (const tone of MESSAGE_SOUND_TONES) {
+      const { context, notes } = fakeContext(0);
+      scheduleTone(context, tone, 0.06);
+      expect(notes.length, tone).toBeGreaterThan(0);
+      expect(Math.max(...notes.map((note) => note.stop)), tone).toBeLessThanOrEqual(0.8);
+      if (tone !== 'blip') expect(JSON.stringify(TONE_NOTES[tone]), tone).not.toBe(blip);
+    }
   });
 });
 

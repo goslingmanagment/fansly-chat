@@ -4,6 +4,7 @@ import type {
 } from './types.js';
 import { FEATURE_POLICIES } from './features.js';
 import {
+  FOLLOW_SOUND_TONE_DEFAULT,
   MESSAGE_SOUND_TONE_DEFAULT,
   MESSAGE_SOUND_VOLUME_DEFAULT,
 } from './message-sound.js';
@@ -18,7 +19,7 @@ export const DEFAULT_AGENCY_HUB_BASE_URL = 'https://gosling-agency.ru';
 
 // ─── Storage ─────────────────────────────────────────────────────────────
 
-export const STORAGE_SCHEMA_VERSION = 18;
+export const STORAGE_SCHEMA_VERSION = 19;
 /** Full-recap local cache prefix (legacy/unqualified keys read as FULL). */
 export const SUMMARY_CACHE_PREFIX = 'summary:';
 /** Short-recap local cache prefix (spec §5 persistence-collision rule): a short
@@ -348,6 +349,8 @@ export const DEFAULT_SETTINGS: Settings = {
   messageSoundTone: MESSAGE_SOUND_TONE_DEFAULT,
   messageSoundVolume: MESSAGE_SOUND_VOLUME_DEFAULT,
   messageSoundMutedAccountIds: [],
+  followSoundEnabled: true,
+  followSoundTone: FOLLOW_SOUND_TONE_DEFAULT,
 };
 
 // ─── Build ──────────────────────────────────────────────────────────────

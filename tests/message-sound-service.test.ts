@@ -217,8 +217,8 @@ describe('MessageSoundService (E145)', () => {
 
   it('counts every outcome and reports only tabs still on Fansly', async () => {
     const test = harness();
-    test.service.recordTap(1, { v: 1, socket: 'open', framesSeen: 4, messagesParsed: 1, droppedByType: 2 });
-    test.service.recordTap(3, { v: 1, socket: 'open', framesSeen: 1, messagesParsed: 0, droppedByType: 0 });
+    test.service.recordTap(1, { v: 1, socket: 'open', framesSeen: 4, messagesParsed: 1, followsParsed: 0, droppedByType: 2 });
+    test.service.recordTap(3, { v: 1, socket: 'open', framesSeen: 1, messagesParsed: 0, followsParsed: 0, droppedByType: 0 });
     await test.service.handleIncoming(1, message({ id: '1' }));
     await test.service.handleIncoming(1, message({ id: '2', tip: true }));
     test.service.recordInvalid();
@@ -238,5 +238,47 @@ describe('MessageSoundService (E145)', () => {
     expect(test.played).toEqual([{ tone: 'soft', volume: 100 }]);
     const failing = harness({ prepareOk: false });
     expect(await failing.service.previewSound('blip', 50)).toMatchObject({ ok: false });
+  });
+
+  it('E146: rings a new follower with its own tone, once across tabs, sharing the pause', async () => {
+    const test = harness({ settings: { followSoundTone: 'soft', messageSoundVolume: 70 } });
+    const follow = { v: 1 as const, id: '77', accountId: MODEL, followerId: FAN };
+    const outcomes = await Promise.all([
+      test.service.handleFollow(1, follow),
+      test.service.handleFollow(2, follow),
+    ]);
+    expect(outcomes).toEqual(['played', 'duplicate']);
+    expect(test.played).toEqual([{ tone: 'soft', volume: 70 }]);
+    // A follow never takes a message's ring: a message a second later plays.
+    test.advance(1_000);
+    expect(await test.service.handleIncoming(1, message({ id: '1' }))).toBe('played');
+    // A follow waits out a recent message and its own 10 s pause.
+    expect(await test.service.handleFollow(1, { ...follow, id: '78' })).toBe('throttled');
+    test.advance(3_000);
+    expect(await test.service.handleFollow(1, { ...follow, id: '79' })).toBe('throttled');
+    test.advance(7_000);
+    expect(await test.service.handleFollow(1, { ...follow, id: '80' })).toBe('played');
+    const status = await test.service.status();
+    expect(status.followOutcomes).toMatchObject({ played: 2, duplicate: 1, throttled: 2 });
+    expect(status.outcomes).toMatchObject({ played: 1 });
+  });
+
+  it('E146: a not-ours follow from an unbound tab does not swallow the bound copy', async () => {
+    const test = harness({
+      sessions: { 1: null, 2: { accountId: '444', resolvedAccountId: '444' } },
+    });
+    test.state.knownAccounts = [];
+    const follow = { v: 1 as const, id: '90', accountId: '444', followerId: FAN };
+    expect(await test.service.handleFollow(1, follow)).toBe('not-ours');
+    expect(await test.service.handleFollow(2, follow)).toBe('played');
+  });
+
+  it('E146: the two switches are independent', async () => {
+    const test = harness({ settings: { followSoundEnabled: false } });
+    expect(await test.service.handleFollow(1, { v: 1, id: '78', accountId: MODEL, followerId: FAN })).toBe('disabled');
+    expect(await test.service.handleIncoming(1, message())).toBe('played');
+    const off = harness({ settings: { messageSoundEnabled: false } });
+    expect(await off.service.handleIncoming(1, message())).toBe('disabled');
+    expect(await off.service.handleFollow(1, { v: 1, id: '79', accountId: MODEL, followerId: FAN })).toBe('played');
   });
 });

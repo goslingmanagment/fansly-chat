@@ -16,6 +16,7 @@
 import { extractIncomingMessages } from '../shared/fansly-ws-frame.js';
 import {
   SOUND_BRIDGE_ARM_EVENT,
+  SOUND_BRIDGE_FOLLOW_EVENT,
   SOUND_BRIDGE_MESSAGE_EVENT,
   SOUND_BRIDGE_RELAY_READY_EVENT,
   SOUND_BRIDGE_TAP_EVENT,
@@ -59,7 +60,7 @@ export function installPageSocketTap(target: Window & typeof globalThis = window
    * new socket's `open`. */
   let current: WebSocket | null = null;
   let lastStatsAt = Number.NEGATIVE_INFINITY;
-  const stats = { framesSeen: 0, messagesParsed: 0, droppedByType: 0 };
+  const stats = { framesSeen: 0, messagesParsed: 0, followsParsed: 0, droppedByType: 0 };
 
   const emit = (name: string, payload: unknown): void => {
     try {
@@ -99,6 +100,10 @@ export function installPageSocketTap(target: Window & typeof globalThis = window
         for (const message of parsed.messages) {
           stats.messagesParsed += 1;
           emit(SOUND_BRIDGE_MESSAGE_EVENT, message);
+        }
+        for (const follow of parsed.follows) {
+          stats.followsParsed += 1;
+          emit(SOUND_BRIDGE_FOLLOW_EVENT, follow);
         }
         // «frames seen, none parsed» is how a changed Fansly format shows up.
         if (Date.now() - lastStatsAt >= TAP_STATS_INTERVAL_MS) report();

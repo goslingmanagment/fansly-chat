@@ -288,6 +288,8 @@ export function sanitizeSettings(input: Partial<Settings>): Settings {
     messageSoundTone: normalizeMessageSoundTone(input.messageSoundTone),
     messageSoundVolume: normalizeMessageSoundVolume(input.messageSoundVolume ?? defaults.messageSoundVolume),
     messageSoundMutedAccountIds: normalizeMutedAccountIds(input.messageSoundMutedAccountIds),
+    followSoundEnabled: Boolean(input.followSoundEnabled ?? defaults.followSoundEnabled),
+    followSoundTone: normalizeMessageSoundTone(input.followSoundTone, defaults.followSoundTone),
   };
 }
 

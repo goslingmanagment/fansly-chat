@@ -9,6 +9,7 @@ import {
   STORAGE_SCHEMA_VERSION,
 } from './constants.js';
 import {
+  FOLLOW_SOUND_TONE_DEFAULT,
   MESSAGE_SOUND_TONE_DEFAULT,
   MESSAGE_SOUND_VOLUME_DEFAULT,
   normalizeMessageSoundTone,
@@ -40,6 +41,8 @@ export function createDefaultSettings(): Settings {
     messageSoundTone: MESSAGE_SOUND_TONE_DEFAULT,
     messageSoundVolume: MESSAGE_SOUND_VOLUME_DEFAULT,
     messageSoundMutedAccountIds: [],
+    followSoundEnabled: true,
+    followSoundTone: FOLLOW_SOUND_TONE_DEFAULT,
   };
 }
 
@@ -95,6 +98,10 @@ function migrateSettingsRecord(
   // v18 (E145): messageSound* ADDED — the incoming-message sound. On by default
   // (desktop parity: the chatters asked for it), desktop tone and loudness, no
   // model muted.
+  // v19 (E146): followSound* ADDED — a sound for a new follower, its own switch
+  // (on, like the message sound) and tone (`double`, to tell it apart). Five
+  // Fansly tones join; the message default becomes `chime` (a v18 `blip` is
+  // re-defaulted by adoptFanslyMessageToneDefault before this normalizer).
   return {
     // v17: an EMPTY address is the pre-E123 default nobody chose — the fleet has
     // one hub, so it is filled in rather than left blank for the chatter to
@@ -133,6 +140,8 @@ function migrateSettingsRecord(
     messageSoundTone: normalizeMessageSoundTone(raw?.messageSoundTone),
     messageSoundVolume: normalizeMessageSoundVolume(raw?.messageSoundVolume ?? defaults.messageSoundVolume),
     messageSoundMutedAccountIds: normalizeMutedAccountIds(raw?.messageSoundMutedAccountIds),
+    followSoundEnabled: Boolean(raw?.followSoundEnabled ?? defaults.followSoundEnabled),
+    followSoundTone: normalizeMessageSoundTone(raw?.followSoundTone, defaults.followSoundTone),
   };
 }
 
@@ -177,6 +186,33 @@ export function bumpLegacyDeepMessageCountDefault(
     return rawSettings;
   }
   return { ...rawSettings, deepMessageCount: DEEP_DEFAULT_MESSAGE_COUNT };
+}
+
+/**
+ * v19 (E146) RAW transform. 2.7.0 (v18) stored the OnlyFans app's `blip` as
+ * every install's message tone — the default nobody chose, released hours
+ * earlier — and a chatter working both clients could not tell which one rang.
+ * A v18 record still on `blip` adopts Fansly's own default; a v19+ `blip` is a
+ * deliberate choice and stays. Anchored on the FIXED version, like the v15 bump.
+ */
+export const FANSLY_TONE_DEFAULT_SCHEMA_VERSION = 18;
+
+export function adoptFanslyMessageToneDefault(
+  rawSettings: Record<string, unknown>,
+  incomingSchemaVersion: number,
+): Record<string, unknown> {
+  if (incomingSchemaVersion !== FANSLY_TONE_DEFAULT_SCHEMA_VERSION) return rawSettings;
+  let next = rawSettings;
+  if (next.messageSoundTone === 'blip') {
+    const { messageSoundTone: _desktopDefault, ...rest } = next;
+    next = rest;
+  }
+  // In 2.7.0 «Звук входящих» was the ONLY sound switch: «off» meant «no
+  // sounds», so the new follower sound starts off for that chatter too.
+  if (next.messageSoundEnabled === false && next.followSoundEnabled === undefined) {
+    next = { ...next, followSoundEnabled: false };
+  }
+  return next;
 }
 
 export class UnsupportedFutureStorageSchemaError extends Error {
@@ -233,8 +269,11 @@ function normalizePersistedRecord(
     typeof record.schemaVersion === 'number' ? record.schemaVersion : 0;
   const rawSettings =
     record.settings && typeof record.settings === 'object'
-      ? bumpLegacyDeepMessageCountDefault(
-          record.settings as Record<string, unknown>,
+      ? adoptFanslyMessageToneDefault(
+          bumpLegacyDeepMessageCountDefault(
+            record.settings as Record<string, unknown>,
+            incomingSchemaVersion,
+          ),
           incomingSchemaVersion,
         )
       : null;
