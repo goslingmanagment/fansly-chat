@@ -77,6 +77,10 @@ function makeState(overrides?: Partial<PersistedState>): PersistedState {
       showToolbarHints: true,
       coachHistoryLimit: 10,
       coachAutoRecap: 'off',
+      messageSoundEnabled: true,
+      messageSoundTone: 'blip',
+      messageSoundVolume: 50,
+      messageSoundMutedAccountIds: [],
     },
     personalities: [{ id: 'p1', name: 'Closer', content: 'be nice', updatedAt: 1 }],
     personaCatalog: [{
@@ -644,8 +648,16 @@ describe('Options page account sections', () => {
       section.querySelector<HTMLInputElement>('[data-theme-card="light"] input')?.checked,
     ).toBe(true);
     expect(section.querySelectorAll('.chatgoose-theme-preview')).toHaveLength(3);
-    // No reset-to-default affordance (owner ruling).
-    expect(Array.from(section.querySelectorAll('button'))).toEqual([]);
+    // No reset-to-default affordance (owner ruling). The only buttons in the
+    // pane are the sound card's «Проверить звук» and its link to «Аккаунты» (E145).
+    expect(
+      Array.from(section.querySelectorAll<HTMLButtonElement>('button'))
+        .filter((button) => !button.closest('[data-role="message-sound-card"]')),
+    ).toEqual([]);
+    expect(
+      Array.from(section.querySelectorAll<HTMLButtonElement>('[data-role="message-sound-card"] button'))
+        .map((button) => button.dataset.role),
+    ).toEqual(['message-sound-preview', 'message-sound-models']);
   });
 
   it('renders and saves the toolbar-hint switch in the appearance pane', async () => {

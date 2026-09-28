@@ -21,6 +21,11 @@ import {
 } from './account-aliases.js';
 import { normalizeAgencyHubBaseUrl } from './agency-hub.js';
 import {
+  normalizeMessageSoundTone,
+  normalizeMessageSoundVolume,
+  normalizeMutedAccountIds,
+} from './message-sound.js';
+import {
   createDefaultSettings,
   migrateState,
   serializePersistedState,
@@ -279,6 +284,10 @@ export function sanitizeSettings(input: Partial<Settings>): Settings {
       input.coachAutoRecap === 'off'
         ? input.coachAutoRecap
         : defaults.coachAutoRecap,
+    messageSoundEnabled: Boolean(input.messageSoundEnabled ?? defaults.messageSoundEnabled),
+    messageSoundTone: normalizeMessageSoundTone(input.messageSoundTone),
+    messageSoundVolume: normalizeMessageSoundVolume(input.messageSoundVolume ?? defaults.messageSoundVolume),
+    messageSoundMutedAccountIds: normalizeMutedAccountIds(input.messageSoundMutedAccountIds),
   };
 }
 

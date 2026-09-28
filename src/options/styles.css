@@ -157,6 +157,9 @@ input[type='checkbox'] {
 .chatgoose-signin-links { display: flex; flex-wrap: wrap; gap: 8px; }
 .chatgoose-signin-advanced { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--chatgoose-line); }
 .chatgoose-signin-version { color: var(--chatgoose-ink-low); font-family: var(--chatgoose-font-mono); font-size: 12px; }
+/* E145: the sound switch borrowed from «Вид» while the cabinet is closed. */
+.chatgoose-signin-extras:empty { display: none; }
+.chatgoose-signin-extras { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--chatgoose-line); }
 @media (max-width: 480px) {
   .chatgoose-signin-gate { padding: 20px 14px; }
   .chatgoose-signin-card { padding: 26px 22px; }
@@ -2517,3 +2520,72 @@ input[type='checkbox'] {
 }
 
 .chatgoose-row-clamped[hidden] { display: none; }
+
+/* ─── E145: «Звук входящих» ─────────────────────────────────── */
+.chatgoose-sound-card .chatgoose-rows {
+  display: grid;
+}
+
+/* `.chatgoose-row .chatgoose-select` would otherwise win (E67's trap). */
+.chatgoose-row .chatgoose-sound-tone {
+  width: 220px;
+  flex: none;
+}
+
+.chatgoose-sound-volume-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+}
+
+.chatgoose-sound-volume {
+  width: 160px;
+  accent-color: var(--chatgoose-clay);
+  cursor: pointer;
+}
+
+.chatgoose-sound-volume:focus-visible {
+  outline: 2px solid var(--chatgoose-clay);
+  outline-offset: 3px;
+}
+
+.chatgoose-sound-volume-value {
+  min-width: 4ch;
+  text-align: right;
+  font-size: 13px;
+  color: var(--chatgoose-ink-mid);
+}
+
+.chatgoose-sound-actions {
+  margin-top: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.chatgoose-sound-card .chatgoose-status-hint {
+  margin-top: 8px;
+}
+
+/* The per-model switch in an «Аккаунты» row: a caption and a small switch. */
+.chatgoose-account-sound {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--chatgoose-ink-mid);
+  cursor: pointer;
+}
+
+/* Narrow cabinet: rows already stack label over control (see the global
+   `.chatgoose-row` rule); the controls then take the full line. */
+@media (max-width: 560px) {
+  .chatgoose-row .chatgoose-sound-tone,
+  .chatgoose-sound-volume {
+    width: 100%;
+  }
+
+  .chatgoose-sound-volume-control {
+    width: 100%;
+  }
+}

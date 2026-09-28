@@ -57,6 +57,12 @@ from prose when checking what is installed or live; verify the signed update fee
   album one file at a time through Fansly's own upload form, each confirmed by
   its album card, with a per-account/per-album checkpoint for resuming; an
   unconfirmed file is never re-uploaded without the chatter's answer.
+- **Incoming-message sound** (2.7.0, E145) — the desktop app's blip when a fan
+  writes to a chat that is not open in the focused window, while a Fansly tab of
+  that model is open. A MAIN-world `document_start` tap listens passively on the
+  page's own wsv3 socket; the background decides (own, automated, tips, 180 s
+  freshness, per-model mute, 2 s throttle) and plays it. Tone, volume and the
+  switch live in «Вид», the per-model switch in «Аккаунты».
 - **Settings cabinet** — seven panes for status, Hub, personas, accounts,
   generation, hotkeys, and appearance; includes sign-out and a support report.
 
@@ -169,6 +175,12 @@ Important references:
   architecture.
 
 ## Release
+
+Release 2.7.0 (E145) adds the incoming-message sound: two new `document_start`
+content scripts (`content-socket-tap.js` in the MAIN world, `content-sound-relay.js`
+isolated) next to the idle bootstrap, the decision and the AudioContext in the
+background, settings v18. No new permission, no Fansly request, SDK and Core
+contracts unchanged. Tabs opened before the update need a reload.
 
 Release 2.5.1 (E142) adds Split on Fix: the sticky Split flag sends
 `preferSplit` with Fix too, and a 2–3 part result opens in the inline panel

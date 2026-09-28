@@ -8,6 +8,13 @@ import {
   QUICK_DEFAULT_MESSAGE_COUNT,
   STORAGE_SCHEMA_VERSION,
 } from './constants.js';
+import {
+  MESSAGE_SOUND_TONE_DEFAULT,
+  MESSAGE_SOUND_VOLUME_DEFAULT,
+  normalizeMessageSoundTone,
+  normalizeMessageSoundVolume,
+  normalizeMutedAccountIds,
+} from './message-sound.js';
 import { collectSummaryCacheEntries } from './summary-cache.js';
 import {
   normalizePersonaCatalog,
@@ -29,6 +36,10 @@ export function createDefaultSettings(): Settings {
     showToolbarHints: true,
     coachHistoryLimit: COACH_HISTORY_LIMIT_DEFAULT,
     coachAutoRecap: 'off',
+    messageSoundEnabled: true,
+    messageSoundTone: MESSAGE_SOUND_TONE_DEFAULT,
+    messageSoundVolume: MESSAGE_SOUND_VOLUME_DEFAULT,
+    messageSoundMutedAccountIds: [],
   };
 }
 
@@ -81,6 +92,9 @@ function migrateSettingsRecord(
   // the newest build, so a ≤1.8.0 install (pre-v13) jumps straight to v17 and
   // would lose a working sign-in without it. The dedicated custody slot always
   // beats the blob.
+  // v18 (E145): messageSound* ADDED — the incoming-message sound. On by default
+  // (desktop parity: the chatters asked for it), desktop tone and loudness, no
+  // model muted.
   return {
     // v17: an EMPTY address is the pre-E123 default nobody chose — the fleet has
     // one hub, so it is filled in rather than left blank for the chatter to
@@ -115,6 +129,10 @@ function migrateSettingsRecord(
       raw?.coachAutoRecap === 'off'
         ? raw.coachAutoRecap
         : defaults.coachAutoRecap,
+    messageSoundEnabled: Boolean(raw?.messageSoundEnabled ?? defaults.messageSoundEnabled),
+    messageSoundTone: normalizeMessageSoundTone(raw?.messageSoundTone),
+    messageSoundVolume: normalizeMessageSoundVolume(raw?.messageSoundVolume ?? defaults.messageSoundVolume),
+    messageSoundMutedAccountIds: normalizeMutedAccountIds(raw?.messageSoundMutedAccountIds),
   };
 }
 

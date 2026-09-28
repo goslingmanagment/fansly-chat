@@ -1,9 +1,7 @@
 import { ROUTE_POLL_INTERVAL_MS } from '../shared/constants.js';
+import { parseGroupIdFromPath } from '../shared/fansly-routes.js';
 
-export function parseGroupIdFromPath(pathname: string): string | null {
-  const match = /^\/messages\/([^/?#]+)/.exec(pathname);
-  return match?.[1] ?? null;
-}
+export { parseGroupIdFromPath };
 
 // Fansly is a pushState SPA and a content script cannot observe the page
 // world's history calls, so the pathname is polled. One interval per bundle

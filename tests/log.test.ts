@@ -123,6 +123,10 @@ describe('isDebugEnabled', () => {
       showToolbarHints: true,
       coachHistoryLimit: 10,
       coachAutoRecap: 'off',
+      messageSoundEnabled: true,
+      messageSoundTone: 'blip',
+      messageSoundVolume: 50,
+      messageSoundMutedAccountIds: [],
     })).toBe(true);
   });
 
@@ -140,6 +144,10 @@ describe('isDebugEnabled', () => {
       showToolbarHints: true,
       coachHistoryLimit: 10,
       coachAutoRecap: 'off',
+      messageSoundEnabled: true,
+      messageSoundTone: 'blip',
+      messageSoundVolume: 50,
+      messageSoundMutedAccountIds: [],
     })).toBe(false);
   });
 

@@ -53,6 +53,10 @@ function makeState(overrides?: Partial<PersistedState['settings']>): PersistedSt
       showToolbarHints: true,
       coachHistoryLimit: 10,
       coachAutoRecap: 'off',
+      messageSoundEnabled: true,
+      messageSoundTone: 'blip',
+      messageSoundVolume: 50,
+      messageSoundMutedAccountIds: [],
       ...overrides,
     },
     personalities: [

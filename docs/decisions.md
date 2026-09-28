@@ -135,6 +135,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E142 | 2026-09-27 | Split on Fix: the same sticky Split flag now also sends `preferSplit` with Fix (Core #268 prompt); a Split result opens in the inline panel with an Insert per part, pinned to its draft so inserting or sending part 1 keeps the rest and Regenerate reruns that draft; one part still auto-inserts; not released |
 | E143 | 2026-09-28 | Re-vendor the SDK from deployed Core `89134bb2` (core #267, OFAPI desktop media: `ofapiMediaResolve`, `ofapiMediaReports`, collection registry); production serves `abf87a65…`; the extension uses no OFAPI operation; unblocks the 2.5.1 release gate, no version bump |
 | E144 | 2026-09-28 | AI image notes: the kernel transcript numbers the kept window's describable media (`[Photo #n]`, ` [Photo #n]` after a bundle label, ` (preview #n)` after a PPV label) and `clientContext.media` lists them by id (groupRef, message, sender, kind, accountMedia id, paid) — never a URL or bytes; label-like text in messages is neutralized; the hub restores plain labels while its describer is off; 2.6.0 |
+| E145 | 2026-09-28 | Incoming-message sound (desktop parity): a MAIN-world `document_start` tap listens passively on Fansly's OWN wsv3 socket (Proxy over `window.WebSocket`, native object, no send/frame of ours), a text-free projection crosses an isolated relay, the background decides (own/automated/tip/stale 180 s/muted/open chat/2 s throttle) and plays a synthesized blip; settings v18 with a per-model mute list; no hub, no Fansly request, no new permission; 2.7.0 |
 
 ## Entries
 
@@ -5051,3 +5052,57 @@ descriptions into the prompt; generation never waits for them.
   hub deploys first; its strict schema would 400 an unknown field). Released
   as 2.6.0.
 
+**E145 (2026-09-28).** Incoming-message sound — the chatters asked for the
+desktop app's blip on Fansly (owner-approved plan from the 2026-09-28 arena:
+Opus 5.5, Fable 5.1, gpt-6-astra; owner answers: only while a tab of the model
+is open, tips silent as D39, volume/tone and a per-model switch, no OS
+notification, straight to everyone).
+
+- **Signal = the page's own socket.** Fansly creates `new WebSocket(uri)` on
+  every (re)connect (`setUpConnection`, main.51b59e98940f00c0.js) and parses
+  `t:10000 → serviceId 5 → JSON.parse(event).type 1` as a new message; `t:10001`
+  is a batch of wrapper strings; `t:1` carries the session and is never parsed.
+  `content-socket-tap.js` runs in the MAIN world at `document_start` and puts a
+  Proxy over `window.WebSocket`: exactly one `Reflect.construct`, the NATIVE
+  object back (`instanceof`, statics, `prototype`, `send`, `on*` untouched, a
+  constructor exception reaches the page), a passive `message` listener only on
+  `wss://wsv3.fansly.com`. The hub was rejected (Fansly messages reach its
+  archive in minutes); a second socket of our own or polling would be new
+  Fansly egress; the unread badge cannot tell a tip or our own message apart.
+- **Bridge.** Only `{id, groupId, senderId, type, createdAt, correlationId,
+  inReplyTo, tip}` leaves the page — no text, media, amounts or frames — as a
+  `CustomEvent` with a JSON-string detail (not `postMessage`: Fansly has its own
+  global `message` handlers). `type ≠ 1` is dropped in the page so a mass send
+  from this tab never floods the background. `content-sound-relay.js` (ISOLATED,
+  `document_start`, no zod) validates and forwards one-shot, reports the tap's
+  state at most every 5 s, and arms/disarms the tap from the switch. The bridge
+  is page-reachable: a forged event can at most ring once (throttled).
+- **Decision in the background** (`message-sound-service.ts`), one candidate
+  at a time: duplicate (LRU 2000 ids / 10 min, key = message id) → disabled →
+  own (`senderId` ∈ the tab session under its legacy AND canonical id ∪ persisted
+  `knownAccounts` ∪ both sides of `accountAliases` — `getAccountIdForTab` is the
+  legacy key, so it alone is not enough) → automated (`type ≠ 1` or the existing
+  `automationReason` correlation rule) → tip (attachment `contentType 7` or
+  `totalTipAmount > 0`; live tips carry the attachment without the amount) →
+  stale (older than 180 s — Fansly's own rule; no createdAt is live; no future
+  bound) → muted / account-unknown (an unattributed tab rings only while no model
+  is muted, and such a verdict does not consume the id) → audio ready → fresh
+  settings, tab still open, open chat (active tab of the FOCUSED window on
+  `/messages/<groupId>`) → one synchronous section: 2 s throttle, reserve, start.
+- **Sound in the background page**: Firefox blocks audible autoplay in a tab
+  until a click (`media.autoplay.default = 1`) and exempts extension background
+  pages (`media.autoplay.allow-extension-background-pages = true`). `blip` at
+  50 % is the desktop note (880→1320 Hz, 0.06, 0.2 s); `double`, `soft`;
+  volume 5–100 % quadratic up to 0.24 (+12 dB). «Проверить звук» plays through
+  the same player.
+- **Settings v18** in the `settings` blob, written only by the options page
+  (E59): `messageSoundEnabled` (on), `messageSoundTone`, `messageSoundVolume`,
+  `messageSoundMutedAccountIds` (a mute list, so a new model rings; stored under
+  the row's id, matched through aliases — the background never rewrites it,
+  which would make it a second settings writer). Card «Звук» in «Вид», a switch
+  per row in «Аккаунты», a «Статус» row and report lines (counters only). The
+  master switch is also placed in the sign-in form: a rejected sign-in keeps
+  the token stored and the cabinet closed, and the sound does not need the hub.
+- Tabs opened before the update have no tap until reloaded; the status says so.
+  Verified in Firefox 156 (logged-out fansly.com opens wsv3 and the tap sees
+  it; a bridge event reaches the background and plays). Released as 2.7.0.

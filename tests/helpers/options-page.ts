@@ -108,6 +108,12 @@ export interface MountOverrides {
      * all-green state — the hub step requires a `connected` feedback. A factory
      * may defer or fail the test. Ignored when `revealCatalogOnConnect` is set. */
     connection?: TestConnectionReply | (() => TestConnectionReply | Promise<TestConnectionReply>);
+    /** E145: replies for the `messageSound` family (status / preview). Omitted
+     * = no handler, exactly like an older background. */
+    messageSound?: {
+      status?: MaybeFactory<unknown>;
+      preview?: MaybeFactory<unknown>;
+    };
   };
 }
 
@@ -159,6 +165,8 @@ export interface MountedOptionsPage {
   lastSeenWrites: () => string[];
   /** Every URL the page asked the browser to open in a new tab. */
   openedTabs: () => string[];
+  /** Every `messageSound` request the page sent, in order (E145). */
+  messageSoundRequests: () => Array<Record<string, unknown>>;
 }
 
 let dom: InstanceType<typeof JSDOM> | null = null;
@@ -199,6 +207,7 @@ export async function mountOptionsPage(
   const onboardingDismissals: number[] = [];
   const lastSeenWrites: string[] = [];
   const openedTabs: string[] = [];
+  const messageSoundRequests: Array<Record<string, unknown>> = [];
   // Mutable so a label write is visible to the next view read, as in production.
   const accountsView: AccountsView | null = overrides.accounts
     ? structuredClone(overrides.accounts)
@@ -438,6 +447,17 @@ export async function mountOptionsPage(
             }
             return reply;
           }
+          case 'messageSound': {
+            const request = message as Record<string, unknown>;
+            messageSoundRequests.push(structuredClone(request));
+            if (request.action === 'status') {
+              return runtimeReply<unknown>(runtime.messageSound?.status, undefined);
+            }
+            if (request.action === 'preview') {
+              return runtimeReply<unknown>(runtime.messageSound?.preview, undefined);
+            }
+            return undefined;
+          }
           default:
             return undefined;
         }
@@ -508,6 +528,7 @@ export async function mountOptionsPage(
     onboardingDismissals: () => onboardingDismissals.length,
     lastSeenWrites: () => [...lastSeenWrites],
     openedTabs: () => [...openedTabs],
+    messageSoundRequests: () => messageSoundRequests.map((request) => structuredClone(request)),
   };
 }
 

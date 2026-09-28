@@ -7,16 +7,30 @@ const readRepoFile = (path: string): string =>
   readFileSync(new URL(path, root), 'utf8');
 
 describe('two-stage content bootstrap build contract', () => {
-  it('injects only the lightweight classic bootstrap from the manifest', () => {
-    expect(manifest.content_scripts).toHaveLength(1);
-    expect(manifest.content_scripts[0]).toMatchObject({
+  it('injects the lightweight classic bootstrap and the two early sound scripts only', () => {
+    // E145: the MAIN-world socket tap must be in place before Fansly's own code
+    // opens its socket, and its isolated relay must listen from the same moment.
+    // Everything else still waits for the document_idle bootstrap.
+    expect(manifest.content_scripts).toHaveLength(3);
+    expect(manifest.content_scripts[0]).toEqual({
+      matches: ['*://fansly.com/*'],
+      js: ['content-socket-tap.js'],
+      run_at: 'document_start',
+      world: 'MAIN',
+    });
+    expect(manifest.content_scripts[1]).toEqual({
+      matches: ['*://fansly.com/*'],
+      js: ['content-sound-relay.js'],
+      run_at: 'document_start',
+    });
+    expect(manifest.content_scripts[2]).toMatchObject({
       matches: ['*://fansly.com/*'],
       js: ['content.js'],
       run_at: 'document_idle',
     });
     expect(
       manifest.content_scripts.flatMap((entry) => entry.js),
-    ).toEqual(['content.js']);
+    ).toEqual(['content-socket-tap.js', 'content-sound-relay.js', 'content.js']);
     expect(
       manifest.content_scripts.flatMap((entry) => 'css' in entry ? entry.css : []),
     ).toEqual([]);
@@ -48,6 +62,11 @@ describe('two-stage content bootstrap build contract', () => {
     expect(build).toMatch(
       /entryPoints: contentBootstrapEntryPoints,\s*format: 'iife'/,
     );
+    expect(build).toMatch(
+      /const contentEarlyEntryPoints = \{[^}]*'content-socket-tap': path\.join\(root, 'src\/content\/page-socket-tap\.ts'\),\s*'content-sound-relay': path\.join\(root, 'src\/content\/sound-relay\.ts'\),?\s*\};/,
+    );
+    // Both the one-shot build and the watch contexts carry the early scripts.
+    expect(build.match(/entryPoints: contentEarlyEntryPoints,\s*format: 'iife'/g)).toHaveLength(2);
     expect(build).toMatch(
       /entryPoints: contentAppEntryPoints,\s*format: 'esm'/,
     );
