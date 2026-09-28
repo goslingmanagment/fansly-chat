@@ -18,7 +18,7 @@ import {
   type MessageSoundOutcome,
   type TabSessionIdentity,
 } from '../shared/message-sound-decision.js';
-import { MESSAGE_SOUND_THROTTLE_MS } from '../shared/message-sound.js';
+import { FOLLOW_SOUND_THROTTLE_MS, MESSAGE_SOUND_THROTTLE_MS } from '../shared/message-sound.js';
 import type {
   MessageSoundReply,
   MessageSoundStatus,
@@ -87,7 +87,10 @@ export class MessageSoundService {
   private readonly tabs = new Map<number, MessageSoundTabDiagnostics>();
   private readonly since: number;
   private chain: Promise<unknown> = Promise.resolve();
-  private lastRingAt = Number.NEGATIVE_INFINITY;
+  /** Messages answer only to the last message ring: a follow never takes a
+   * message's sound. A follow waits out both, and its own longer pause. */
+  private lastMessageRingAt = Number.NEGATIVE_INFINITY;
+  private lastFollowRingAt = Number.NEGATIVE_INFINITY;
   private lastPlayedAt: number | null = null;
   private preview: PlayingTone | null = null;
 
@@ -117,8 +120,9 @@ export class MessageSoundService {
     );
   }
 
-  recordInvalid(): void {
-    this.count('invalid');
+  recordInvalid(kind: 'message' | 'follow' = 'message'): void {
+    if (kind === 'follow') this.countFollow('invalid');
+    else this.count('invalid');
   }
 
   recordTap(tabId: number, status: SocketTapStatus): void {
@@ -243,7 +247,7 @@ export class MessageSoundService {
     }
     if (focusedGroupId === message.groupId) return 'open-chat';
 
-    return this.startNow(fresh.settings.messageSoundTone, fresh.settings.messageSoundVolume);
+    return this.startNow('message', fresh.settings.messageSoundTone, fresh.settings.messageSoundVolume);
   }
 
   private async decideFollow(tabId: number, follow: FanslyFollowEvent): Promise<MessageSoundOutcome> {
@@ -251,7 +255,9 @@ export class MessageSoundService {
     const key = `follow:${follow.id}`;
     if (this.seen.has(key, this.deps.now())) return 'duplicate';
     const outcome = await this.evaluateFollow(tabId, follow);
-    this.seen.consume(key, this.deps.now());
+    // «Not ours» may only mean this tab's identity is not resolved yet; a copy
+    // from a bound tab of the same model must still be able to ring.
+    if (outcome !== 'not-ours') this.seen.consume(key, this.deps.now());
     return outcome;
   }
 
@@ -270,20 +276,25 @@ export class MessageSoundService {
     const regated = gate(fresh);
     if (regated !== null) return regated;
     if (!await this.deps.isTabOpen(tabId)) return 'tab-closed';
-    return this.startNow(fresh.settings.followSoundTone, fresh.settings.messageSoundVolume);
+    return this.startNow('follow', fresh.settings.followSoundTone, fresh.settings.messageSoundVolume);
   }
 
   /** One synchronous section: no await between the throttle and the start. */
-  private startNow(tone: MessageSoundTone, volume: number): MessageSoundOutcome {
+  private startNow(kind: 'message' | 'follow', tone: MessageSoundTone, volume: number): MessageSoundOutcome {
     const at = this.deps.monotonic();
-    if (at - this.lastRingAt < MESSAGE_SOUND_THROTTLE_MS) return 'throttled';
+    const throttled = kind === 'message'
+      ? at - this.lastMessageRingAt < MESSAGE_SOUND_THROTTLE_MS
+      : at - this.lastMessageRingAt < MESSAGE_SOUND_THROTTLE_MS ||
+        at - this.lastFollowRingAt < FOLLOW_SOUND_THROTTLE_MS;
+    if (throttled) return 'throttled';
     try {
       this.deps.player.start(tone, volume);
     } catch {
       return 'audio-error';
     }
     // Reserved only for a sound that actually started.
-    this.lastRingAt = at;
+    if (kind === 'message') this.lastMessageRingAt = at;
+    else this.lastFollowRingAt = at;
     this.lastPlayedAt = this.deps.now();
     return 'played';
   }

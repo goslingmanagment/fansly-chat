@@ -202,9 +202,17 @@ export function adoptFanslyMessageToneDefault(
   incomingSchemaVersion: number,
 ): Record<string, unknown> {
   if (incomingSchemaVersion !== FANSLY_TONE_DEFAULT_SCHEMA_VERSION) return rawSettings;
-  if (rawSettings.messageSoundTone !== 'blip') return rawSettings;
-  const { messageSoundTone: _desktopDefault, ...rest } = rawSettings;
-  return rest;
+  let next = rawSettings;
+  if (next.messageSoundTone === 'blip') {
+    const { messageSoundTone: _desktopDefault, ...rest } = next;
+    next = rest;
+  }
+  // In 2.7.0 «Звук входящих» was the ONLY sound switch: «off» meant «no
+  // sounds», so the new follower sound starts off for that chatter too.
+  if (next.messageSoundEnabled === false && next.followSoundEnabled === undefined) {
+    next = { ...next, followSoundEnabled: false };
+  }
+  return next;
 }
 
 export class UnsupportedFutureStorageSchemaError extends Error {

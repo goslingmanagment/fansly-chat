@@ -221,17 +221,23 @@ export function createMessageSoundCard(settings: Settings, onOpenAccounts: () =>
   };
 }
 
-/** A tab listens only while its newest Fansly socket is up or coming up. A tap
- * that arrived after the page's socket (a tab left open across the update)
- * reports `none` and needs a reload. */
+/** A tab listens only while its newest Fansly socket is up or coming up, and
+ * only with a current tap. A tap that arrived after the page's socket reports
+ * `none`; a 2.7.0 tap (no follow counter) never forwards follows. Both need a
+ * reload. */
 function listeningTabs(status: MessageSoundStatus): MessageSoundStatus['tabs'] {
-  return status.tabs.filter((tab) => tab.socket === 'open' || tab.socket === 'connecting');
+  return status.tabs.filter((tab) =>
+    (tab.socket === 'open' || tab.socket === 'connecting') && tab.followsParsed !== null);
+}
+
+function audioErrors(status: MessageSoundStatus): number {
+  return status.outcomes['audio-error'] + (status.followOutcomes?.['audio-error'] ?? 0);
 }
 
 export function messageSoundHealthText(status: MessageSoundStatus | null, enabled: boolean): string {
   if (!enabled) return COPY.sound.healthOff;
   if (status === null) return COPY.sound.healthUnavailable;
-  if (status.outcomes['audio-error'] > 0 && status.audio.lastError && status.lastPlayedAt === null) {
+  if (audioErrors(status) > 0 && status.audio.lastError && status.lastPlayedAt === null) {
     return COPY.sound.healthAudioError.replace('{error}', status.audio.lastError);
   }
   if (status.fanslyTabs === 0) return COPY.sound.healthNoTabs;
@@ -257,7 +263,7 @@ export function messageSoundStatusRowView(status: MessageSoundStatus | null, ena
     '{n}',
     String(status.outcomes.played + (status.followOutcomes?.played ?? 0)),
   );
-  if (status.outcomes['audio-error'] > 0 && status.lastPlayedAt === null) {
+  if (audioErrors(status) > 0 && status.lastPlayedAt === null) {
     return { tone: 'bad', fact: COPY.sound.statusAudioError, detail };
   }
   if (status.fanslyTabs === 0) return { tone: 'neutral', fact: COPY.sound.statusNoTabs, detail };
@@ -294,7 +300,7 @@ export function messageSoundReportLines(status: MessageSoundStatus | null, setti
   }`);
   for (const tab of status.tabs) {
     lines.push(`  tab ${tab.tabId}: ${tab.socket} · frames ${tab.framesSeen} · parsed ${tab.messagesParsed} · follows ${
-      tab.followsParsed ?? 0
+      tab.followsParsed ?? 'old tap'
     } · dropped ${tab.droppedByType} · last ${
       tab.lastIncomingAt === null ? '—' : new Date(tab.lastIncomingAt).toISOString()
     }`);

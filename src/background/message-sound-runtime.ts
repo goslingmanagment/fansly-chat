@@ -61,7 +61,7 @@ export function handleMessageSoundMessage(
       if (!isFanslyTopFrame(sender, runtime.id)) return refused;
       const follow = parseFollowEvent(request.follow);
       if (!follow) {
-        service.recordInvalid();
+        service.recordInvalid('follow');
         return refused;
       }
       return service.handleFollow(sender.tab!.id!, follow).then((outcome) => ({ ok: true, outcome }));

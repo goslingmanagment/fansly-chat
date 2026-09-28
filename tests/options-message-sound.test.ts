@@ -226,6 +226,12 @@ describe('message sound status wording (E145)', () => {
     expect(messageSoundHealthText(late, true)).toBe(COPY.sound.healthReload.replace('{n}', '1'));
   });
 
+  it('E146: asks to reload a tab still running the 2.7.0 tap (no follows there)', () => {
+    const old = status({ tabs: [{ ...status().tabs[0]!, followsParsed: null }] });
+    expect(messageSoundStatusRowView(old, true).fact).toBe(COPY.sound.statusReload.replace('{n}', '1'));
+    expect(messageSoundReportLines(old, createDefaultSettings()).join('\n')).toContain('follows old tap');
+  });
+
   it('names no tabs, a dead audio context and the off switch plainly', () => {
     expect(messageSoundStatusRowView(status({ fanslyTabs: 0, tabs: [] }), true).fact).toBe(COPY.sound.statusNoTabs);
     const broken = status({

@@ -120,12 +120,12 @@ describe('sound relay (E145)', () => {
     ]);
   });
 
-  it('accepts a 2.7.0 tap status without followsParsed', () => {
+  it('accepts a 2.7.0 tap status without followsParsed, marking it old', () => {
     const relay = mount();
     relay.page(SOUND_BRIDGE_TAP_EVENT, JSON.stringify({ v: 1, socket: 'open', framesSeen: 1, messagesParsed: 0, droppedByType: 0 }));
     expect(relay.sent).toEqual([{
       type: 'messageSound', action: 'tap',
-      status: { v: 1, socket: 'open', framesSeen: 1, messagesParsed: 0, followsParsed: 0, droppedByType: 0 },
+      status: { v: 1, socket: 'open', framesSeen: 1, messagesParsed: 0, followsParsed: null, droppedByType: 0 },
     }]);
   });
 });

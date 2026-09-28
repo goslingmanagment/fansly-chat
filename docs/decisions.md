@@ -5126,11 +5126,18 @@ notification, straight to everyone).
   followed someone) → not-ours (`accountId` is not one of our models) → muted
   (the per-model list, matched against the model the event names and the tab's
   session) → audio → fresh settings, tab open → throttle + start. No open-chat
-  rule: a follow is not a chat. Counters are kept apart (`followOutcomes`).
+  rule: a follow is not a chat. A follow never takes a message's ring: messages
+  keep their own 2 s pause; a follow waits out a message ring (2 s) and the last
+  follow ring (10 s), so a follow wave rings at most every 10 s. A `not-ours`
+  verdict is not consumed (the tab's identity may be unresolved; a bound tab's
+  copy must still ring). Counters are kept apart (`followOutcomes`); a 2.7.0 tap
+  still living in a tab (no follow counter) counts as «reload».
 - Settings v19: `followSoundEnabled` (on) and `followSoundTone` (`double`, to be
   told apart from the message blip); volume and the per-model mute are shared.
   The card gains «Звук новых фоловеров», «Сигнал фоловеров» and «Проверить звук
-  фоловеров»; both switches ride into the sign-in form. Released as 2.7.1.
+  фоловеров»; both switches ride into the sign-in form. A v18 record with the
+  sound OFF (2.7.0's only switch) starts with the follower sound off too.
+  Released as 2.7.1.
 - **Fansly sounds unlike the OnlyFans app** (owner, same day: identical
   sounds on both clients mislead a chatter working both). Five synthesized
   tones join — `chime`, `drop`, `bell`, `arpeggio`, `knock` — for eight in all;

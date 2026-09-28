@@ -240,14 +240,20 @@ describe('migrateState', () => {
   });
 
   it('v19 (E146): adds the follower sound on, with its own tone, and preserves explicit choices', () => {
-    const v18 = migrateState({ schemaVersion: 18, settings: { messageSoundEnabled: false, messageSoundTone: 'soft' } });
+    const v18 = migrateState({ schemaVersion: 18, settings: { messageSoundTone: 'soft' } });
     expect(v18.schemaVersion).toBe(19);
     expect(v18.settings).toMatchObject({
-      messageSoundEnabled: false,
+      messageSoundEnabled: true,
       messageSoundTone: 'soft',
       followSoundEnabled: true,
       followSoundTone: 'double',
     });
+    // 2.7.0's only switch was off = «no sounds»: the follower sound starts off too.
+    const silenced = migrateState({ schemaVersion: 18, settings: { messageSoundEnabled: false } });
+    expect(silenced.settings).toMatchObject({ messageSoundEnabled: false, followSoundEnabled: false });
+    // A v19 record keeps the two switches independent.
+    const independent = migrateState({ schemaVersion: 19, settings: { messageSoundEnabled: false } });
+    expect(independent.settings.followSoundEnabled).toBe(true);
     const chosen = migrateState({ schemaVersion: 19, settings: { followSoundEnabled: false, followSoundTone: 'blip' } });
     expect(chosen.settings).toMatchObject({ followSoundEnabled: false, followSoundTone: 'blip' });
     expect(migrateState({ schemaVersion: 19, settings: { followSoundTone: 'siren' } }).settings.followSoundTone)

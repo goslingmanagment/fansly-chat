@@ -249,12 +249,28 @@ describe('MessageSoundService (E145)', () => {
     ]);
     expect(outcomes).toEqual(['played', 'duplicate']);
     expect(test.played).toEqual([{ tone: 'soft', volume: 70 }]);
-    // A message a second later waits out the same 2 s pause.
+    // A follow never takes a message's ring: a message a second later plays.
     test.advance(1_000);
-    expect(await test.service.handleIncoming(1, message({ id: '1' }))).toBe('throttled');
+    expect(await test.service.handleIncoming(1, message({ id: '1' }))).toBe('played');
+    // A follow waits out a recent message and its own 10 s pause.
+    expect(await test.service.handleFollow(1, { ...follow, id: '78' })).toBe('throttled');
+    test.advance(3_000);
+    expect(await test.service.handleFollow(1, { ...follow, id: '79' })).toBe('throttled');
+    test.advance(7_000);
+    expect(await test.service.handleFollow(1, { ...follow, id: '80' })).toBe('played');
     const status = await test.service.status();
-    expect(status.followOutcomes).toMatchObject({ played: 1, duplicate: 1 });
-    expect(status.outcomes).toMatchObject({ throttled: 1, played: 0 });
+    expect(status.followOutcomes).toMatchObject({ played: 2, duplicate: 1, throttled: 2 });
+    expect(status.outcomes).toMatchObject({ played: 1 });
+  });
+
+  it('E146: a not-ours follow from an unbound tab does not swallow the bound copy', async () => {
+    const test = harness({
+      sessions: { 1: null, 2: { accountId: '444', resolvedAccountId: '444' } },
+    });
+    test.state.knownAccounts = [];
+    const follow = { v: 1 as const, id: '90', accountId: '444', followerId: FAN };
+    expect(await test.service.handleFollow(1, follow)).toBe('not-ours');
+    expect(await test.service.handleFollow(2, follow)).toBe('played');
   });
 
   it('E146: the two switches are independent', async () => {

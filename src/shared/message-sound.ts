@@ -5,6 +5,9 @@ import { isMessageSoundTone, type MessageSoundTone } from './message-sound-proto
 
 /** Desktop parity (`onlyfans-chat/.../lib/sound.ts`): at most one blip per 2 s. */
 export const MESSAGE_SOUND_THROTTLE_MS = 2_000;
+/** E146: a follow wave (a promo, a viral post) must not ring non-stop — and
+ * must never take a message's ring: messages keep their own 2 s pause. */
+export const FOLLOW_SOUND_THROTTLE_MS = 10_000;
 /** Fansly's own rule (`onMessagesEvent`): a message older than 180 s is a
  * possible redelivery, not news. */
 export const FANSLY_STALE_MESSAGE_MS = 180_000;

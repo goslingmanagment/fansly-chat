@@ -597,7 +597,7 @@ export const COPY = {
     healthLastIncoming: 'Последнее входящее — {time}.',
     healthAudioError: 'Звук недоступен: {error}',
     accountToggle: 'Звук',
-    accountToggleAria: 'Звук входящих для {label}',
+    accountToggleAria: 'Звук сообщений и фоловеров для {label}',
     accountToggleTitle: 'Сигналы о новых сообщениях и фоловерах этой модели',
     statusLabel: 'Звук входящих',
     statusOff: 'выключен',

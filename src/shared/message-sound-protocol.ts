@@ -30,8 +30,9 @@ export interface SocketTapStatus {
   socket: FanslySocketState;
   framesSeen: number;
   messagesParsed: number;
-  /** E146. Absent from a 2.7.0 tap still living in a tab opened before the update. */
-  followsParsed: number;
+  /** E146. `null` = a 2.7.0 tap still living in a tab opened before the
+   * update: it forwards messages but no follows, so the tab needs a reload. */
+  followsParsed: number | null;
   droppedByType: number;
 }
 
@@ -63,7 +64,7 @@ export interface MessageSoundTabDiagnostics {
   socket: FanslySocketState;
   framesSeen: number;
   messagesParsed: number;
-  followsParsed: number;
+  followsParsed: number | null;
   droppedByType: number;
   lastIncomingAt: number | null;
 }
@@ -136,9 +137,12 @@ export function parseFollowEvent(value: unknown): FanslyFollowEvent | null {
 export function parseSocketTapStatus(value: unknown): SocketTapStatus | null {
   if (!isRecord(value) || value.v !== 1) return null;
   const { socket, framesSeen, messagesParsed, droppedByType } = value;
-  const followsParsed = value.followsParsed ?? 0;
+  const followsParsed = value.followsParsed ?? null;
   if (!SOCKET_STATES.includes(socket as FanslySocketState)) return null;
-  if (!isCount(framesSeen) || !isCount(messagesParsed) || !isCount(droppedByType) || !isCount(followsParsed)) {
+  if (
+    !isCount(framesSeen) || !isCount(messagesParsed) || !isCount(droppedByType) ||
+    (followsParsed !== null && !isCount(followsParsed))
+  ) {
     return null;
   }
   return { v: 1, socket: socket as FanslySocketState, framesSeen, messagesParsed, followsParsed, droppedByType };
