@@ -567,7 +567,7 @@ export const COPY = {
 
   /** E145: the incoming-message sound. */
   sound: {
-    cardTitle: 'Звук входящих',
+    cardTitle: 'Звук',
     toggleTitle: 'Звук входящих',
     toggleHint: 'Короткий сигнал, когда фан пишет в чат, который сейчас не открыт. Чаевые — без сигнала, как в приложении для OnlyFans.',
     toneLabel: 'Звук',

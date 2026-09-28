@@ -2576,11 +2576,9 @@ input[type='checkbox'] {
   cursor: pointer;
 }
 
+/* Narrow cabinet: rows already stack label over control (see the global
+   `.chatgoose-row` rule); the controls then take the full line. */
 @media (max-width: 560px) {
-  .chatgoose-sound-card .chatgoose-row {
-    flex-wrap: wrap;
-  }
-
   .chatgoose-sound-tone,
   .chatgoose-sound-volume {
     width: 100%;
