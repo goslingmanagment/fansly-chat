@@ -64,7 +64,8 @@ from prose when checking what is installed or live; verify the signed update fee
   freshness, per-model mute, 2 s throttle) and plays it. Tone, volume and the
   switch live in «Вид», the per-model switch in «Аккаунты». Since 2.7.1 (E146)
   a new follower rings too (FollowerService `type 2` on the same socket), with
-  its own switch and tone; the per-model switch silences both.
+  its own switch and tone; the per-model switch silences both. Eight tones;
+  the message default is Fansly's `chime`, the OnlyFans app's `blip` a choice.
 - **Settings cabinet** — seven panes for status, Hub, personas, accounts,
   generation, hotkeys, and appearance; includes sign-out and a support report.
 

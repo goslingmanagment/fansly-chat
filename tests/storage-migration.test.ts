@@ -217,7 +217,7 @@ describe('migrateState', () => {
     expect(legacy.settings).toMatchObject({
       uiTheme: 'dark',
       messageSoundEnabled: true,
-      messageSoundTone: 'blip',
+      messageSoundTone: 'chime',
       messageSoundVolume: 50,
       messageSoundMutedAccountIds: [],
     });
@@ -254,6 +254,18 @@ describe('migrateState', () => {
       .toBe('double');
   });
 
+  it('v19 (E146): a 2.7.0 install on the OnlyFans blip adopts Fansly\'s chime; a choice survives', () => {
+    expect(migrateState({ schemaVersion: 18, settings: { messageSoundTone: 'blip' } }).settings.messageSoundTone)
+      .toBe('chime');
+    expect(migrateState({ schemaVersion: 18, settings: { messageSoundTone: 'soft' } }).settings.messageSoundTone)
+      .toBe('soft');
+    // Chosen again after the update: a v19 blip is deliberate.
+    expect(migrateState({ schemaVersion: 19, settings: { messageSoundTone: 'blip' } }).settings.messageSoundTone)
+      .toBe('blip');
+    expect(migrateState({ schemaVersion: 19, settings: { messageSoundTone: 'knock' } }).settings.messageSoundTone)
+      .toBe('knock');
+  });
+
   it('v18 (E145): normalizes junk sound settings instead of trusting them', () => {
     const junk = migrateState({
       schemaVersion: 18,
@@ -263,7 +275,7 @@ describe('migrateState', () => {
         messageSoundMutedAccountIds: ['111', '111', 'not an id', '', 42, '333', 'legacy-key_1'],
       },
     });
-    expect(junk.settings.messageSoundTone).toBe('blip');
+    expect(junk.settings.messageSoundTone).toBe('chime');
     expect(junk.settings.messageSoundVolume).toBe(100);
     expect(junk.settings.messageSoundMutedAccountIds).toEqual(['111', '333', 'legacy-key_1']);
     expect(migrateState({ schemaVersion: 18, settings: { messageSoundVolume: 'x' } }).settings.messageSoundVolume)
@@ -555,7 +567,7 @@ describe('sanitizeSettings', () => {
   it('E145: sanitizes the sound settings the options page saves', () => {
     expect(storage.sanitizeSettings({})).toMatchObject({
       messageSoundEnabled: true,
-      messageSoundTone: 'blip',
+      messageSoundTone: 'chime',
       messageSoundVolume: 50,
       messageSoundMutedAccountIds: [],
     });

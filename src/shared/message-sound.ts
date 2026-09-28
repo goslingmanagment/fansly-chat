@@ -9,7 +9,9 @@ export const MESSAGE_SOUND_THROTTLE_MS = 2_000;
  * possible redelivery, not news. */
 export const FANSLY_STALE_MESSAGE_MS = 180_000;
 
-export const MESSAGE_SOUND_TONE_DEFAULT: MessageSoundTone = 'blip';
+/** E146: Fansly's own chime — `blip` (the OnlyFans app's sound) stays a choice,
+ * but a chatter working both clients must hear which one is ringing. */
+export const MESSAGE_SOUND_TONE_DEFAULT: MessageSoundTone = 'chime';
 /** E146: a follow sounds different from a message by default. */
 export const FOLLOW_SOUND_TONE_DEFAULT: MessageSoundTone = 'double';
 /** 50 % is exactly the desktop blip's peak (0.06); the slider goes up to +12 dB. */

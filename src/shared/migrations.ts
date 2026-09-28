@@ -99,7 +99,9 @@ function migrateSettingsRecord(
   // (desktop parity: the chatters asked for it), desktop tone and loudness, no
   // model muted.
   // v19 (E146): followSound* ADDED — a sound for a new follower, its own switch
-  // (on, like the message sound) and tone (`double`, to tell it apart).
+  // (on, like the message sound) and tone (`double`, to tell it apart). Five
+  // Fansly tones join; the message default becomes `chime` (a v18 `blip` is
+  // re-defaulted by adoptFanslyMessageToneDefault before this normalizer).
   return {
     // v17: an EMPTY address is the pre-E123 default nobody chose — the fleet has
     // one hub, so it is filled in rather than left blank for the chatter to
@@ -186,6 +188,25 @@ export function bumpLegacyDeepMessageCountDefault(
   return { ...rawSettings, deepMessageCount: DEEP_DEFAULT_MESSAGE_COUNT };
 }
 
+/**
+ * v19 (E146) RAW transform. 2.7.0 (v18) stored the OnlyFans app's `blip` as
+ * every install's message tone — the default nobody chose, released hours
+ * earlier — and a chatter working both clients could not tell which one rang.
+ * A v18 record still on `blip` adopts Fansly's own default; a v19+ `blip` is a
+ * deliberate choice and stays. Anchored on the FIXED version, like the v15 bump.
+ */
+export const FANSLY_TONE_DEFAULT_SCHEMA_VERSION = 18;
+
+export function adoptFanslyMessageToneDefault(
+  rawSettings: Record<string, unknown>,
+  incomingSchemaVersion: number,
+): Record<string, unknown> {
+  if (incomingSchemaVersion !== FANSLY_TONE_DEFAULT_SCHEMA_VERSION) return rawSettings;
+  if (rawSettings.messageSoundTone !== 'blip') return rawSettings;
+  const { messageSoundTone: _desktopDefault, ...rest } = rawSettings;
+  return rest;
+}
+
 export class UnsupportedFutureStorageSchemaError extends Error {
   constructor(readonly storedVersion: number) {
     super(
@@ -240,8 +261,11 @@ function normalizePersistedRecord(
     typeof record.schemaVersion === 'number' ? record.schemaVersion : 0;
   const rawSettings =
     record.settings && typeof record.settings === 'object'
-      ? bumpLegacyDeepMessageCountDefault(
-          record.settings as Record<string, unknown>,
+      ? adoptFanslyMessageToneDefault(
+          bumpLegacyDeepMessageCountDefault(
+            record.settings as Record<string, unknown>,
+            incomingSchemaVersion,
+          ),
           incomingSchemaVersion,
         )
       : null;

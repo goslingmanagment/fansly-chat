@@ -136,7 +136,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E143 | 2026-09-28 | Re-vendor the SDK from deployed Core `89134bb2` (core #267, OFAPI desktop media: `ofapiMediaResolve`, `ofapiMediaReports`, collection registry); production serves `abf87a65…`; the extension uses no OFAPI operation; unblocks the 2.5.1 release gate, no version bump |
 | E144 | 2026-09-28 | AI image notes: the kernel transcript numbers the kept window's describable media (`[Photo #n]`, ` [Photo #n]` after a bundle label, ` (preview #n)` after a PPV label) and `clientContext.media` lists them by id (groupRef, message, sender, kind, accountMedia id, paid) — never a URL or bytes; label-like text in messages is neutralized; the hub restores plain labels while its describer is off; 2.6.0 |
 | E145 | 2026-09-28 | Incoming-message sound (desktop parity): a MAIN-world `document_start` tap listens passively on Fansly's OWN wsv3 socket (Proxy over `window.WebSocket`, native object, no send/frame of ours), a text-free projection crosses an isolated relay, the background decides (own/automated/tip/stale 180 s/muted/open chat/2 s throttle) and plays a synthesized blip; settings v18 with a per-model mute list; no hub, no Fansly request, no new permission; 2.7.0 |
-| E146 | 2026-09-28 | New-follower sound on the E145 path: the tap also forwards FollowerService (`serviceId 3`) `type 2` follows (`{id, accountId, followerId}`, no createdAt), the background rings a follow of one of our models (`accountId` ours, `followerId` not) with its own switch and tone (`double`), shared volume, throttle and player, per-model mute on the model the event names; settings v19; 2.7.1 |
+| E146 | 2026-09-28 | New-follower sound on the E145 path: the tap also forwards FollowerService (`serviceId 3`) `type 2` follows (`{id, accountId, followerId}`, no createdAt), the background rings a follow of one of our models (`accountId` ours, `followerId` not) with its own switch and tone (`double`), shared volume, throttle and player, per-model mute on the model the event names; five Fansly tones (message default `chime`, the OnlyFans `blip` a choice; a v18 `blip` re-defaulted); settings v19; 2.7.1 |
 
 ## Entries
 
@@ -5131,3 +5131,10 @@ notification, straight to everyone).
   told apart from the message blip); volume and the per-model mute are shared.
   The card gains «Звук новых фоловеров», «Сигнал фоловеров» and «Проверить звук
   фоловеров»; both switches ride into the sign-in form. Released as 2.7.1.
+- **Fansly sounds unlike the OnlyFans app** (owner, same day: identical
+  sounds on both clients mislead a chatter working both). Five synthesized
+  tones join — `chime`, `drop`, `bell`, `arpeggio`, `knock` — for eight in all;
+  the message default becomes `chime`, and the desktop `blip` stays as «Как в
+  OnlyFans». A v18 record still on `blip` (2.7.0's default, hours old) adopts
+  `chime` via a raw transform anchored on v18; a v19+ `blip` is kept.
+

@@ -17,10 +17,16 @@ import type {
 } from '../shared/message-sound-protocol.js';
 import type { Settings } from '../shared/types.js';
 
+/** In the order the picker shows them; `blip` — the OnlyFans app's — last. */
 const TONE_LABELS: Record<MessageSoundTone, string> = {
-  blip: COPY.sound.toneBlip,
+  chime: COPY.sound.toneChime,
+  drop: COPY.sound.toneDrop,
+  bell: COPY.sound.toneBell,
+  arpeggio: COPY.sound.toneArpeggio,
+  knock: COPY.sound.toneKnock,
   double: COPY.sound.toneDouble,
   soft: COPY.sound.toneSoft,
+  blip: COPY.sound.toneBlip,
 };
 
 function formatClock(at: number): string {

@@ -109,7 +109,7 @@ describe('«Звук входящих» in the cabinet (E145)', () => {
       followSoundEnabled: false,
       followSoundTone: 'soft',
       messageSoundEnabled: true,
-      messageSoundTone: 'blip',
+      messageSoundTone: 'chime',
     });
     q<HTMLButtonElement>(page, '[data-role="follow-sound-preview"]').click();
     await page.flushAsync();
@@ -242,7 +242,7 @@ describe('message sound status wording (E145)', () => {
       outcomes: { ...status().outcomes, played: 3, own: 5 },
     }), { ...createDefaultSettings(), messageSoundMutedAccountIds: ['1'] });
     const report = lines.join('\n');
-    expect(report).toContain('on · blip · 50% · muted 1 · follows on double');
+    expect(report).toContain('on · chime · 50% · muted 1 · follows on double');
     expect(report).toContain('tab 4: open · frames 10 · parsed 2 · follows 1 · dropped 1');
     expect(report).toContain('follows: invalid=0');
     expect(report).toContain('played=3');

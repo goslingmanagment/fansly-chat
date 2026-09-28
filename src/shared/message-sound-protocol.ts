@@ -35,8 +35,27 @@ export interface SocketTapStatus {
   droppedByType: number;
 }
 
-export type MessageSoundTone = 'blip' | 'double' | 'soft';
-export const MESSAGE_SOUND_TONES: readonly MessageSoundTone[] = ['blip', 'double', 'soft'];
+/** `blip` is the OnlyFans desktop app's sound; E146 adds five of Fansly's own
+ * so the two clients need not sound alike. */
+export type MessageSoundTone =
+  | 'chime'
+  | 'drop'
+  | 'bell'
+  | 'arpeggio'
+  | 'knock'
+  | 'double'
+  | 'soft'
+  | 'blip';
+export const MESSAGE_SOUND_TONES: readonly MessageSoundTone[] = [
+  'chime',
+  'drop',
+  'bell',
+  'arpeggio',
+  'knock',
+  'double',
+  'soft',
+  'blip',
+];
 
 /** One Fansly tab as the background saw it — in memory since `since`. */
 export interface MessageSoundTabDiagnostics {
