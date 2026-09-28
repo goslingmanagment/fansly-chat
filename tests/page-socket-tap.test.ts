@@ -1,6 +1,6 @@
 import { JSDOM } from 'jsdom';
-import { afterEach, describe, expect, it } from 'vitest';
-import { installPageSocketTap } from '../src/content/page-socket-tap.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { TAP_STATS_INTERVAL_MS, installPageSocketTap } from '../src/content/page-socket-tap.js';
 import {
   SOUND_BRIDGE_ARM_EVENT,
   SOUND_BRIDGE_MESSAGE_EVENT,
@@ -101,8 +101,58 @@ function bridge(window: TestWindow, name: string): unknown[] {
 
 describe('page socket tap (E145)', () => {
   afterEach(() => {
+    vi.useRealTimers();
     dom?.window.close();
     dom = null;
+  });
+
+  it('registers through the addEventListener captured at document_start, not a later page patch', () => {
+    // zone.js patches EventTarget.prototype.addEventListener after document_start;
+    // a listener registered through the patch would run inside Angular's zone.
+    const { window } = mountPage();
+    installPageSocketTap(window);
+    const patched = vi.fn();
+    const original = window.EventTarget.prototype.addEventListener;
+    window.EventTarget.prototype.addEventListener = function (this: EventTarget, ...args: Parameters<EventTarget['addEventListener']>) {
+      patched(args[0]);
+      return original.apply(this, args);
+    } as EventTarget['addEventListener'];
+    const messages = bridge(window, SOUND_BRIDGE_MESSAGE_EVENT);
+    patched.mockClear();
+    const con = new (window.WebSocket as unknown as FakeSocketClass)('wss://wsv3.fansly.com?v=3');
+    con.receive(FAN_FRAME);
+    expect(patched).not.toHaveBeenCalled();
+    expect(messages).toHaveLength(1);
+  });
+
+  it("reports only the newest socket: the old one's late close does not mask the new one", () => {
+    const { window } = mountPage();
+    const statuses = bridge(window, SOUND_BRIDGE_TAP_EVENT) as Array<{ socket: string }>;
+    installPageSocketTap(window);
+    const Wrapped = window.WebSocket as unknown as FakeSocketClass;
+    const old = new Wrapped('wss://wsv3.fansly.com?v=3');
+    old.open();
+    const next = new Wrapped('wss://wsv3.fansly.com?v=3');
+    next.open();
+    old.close();
+    expect(statuses.at(-1)?.socket).toBe('open');
+  });
+
+  it('refreshes the frame counters at most every 5 s while frames flow', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(1_000_000);
+    const { window } = mountPage();
+    const statuses = bridge(window, SOUND_BRIDGE_TAP_EVENT) as Array<{ framesSeen: number }>;
+    installPageSocketTap(window);
+    const con = new (window.WebSocket as unknown as FakeSocketClass)('wss://wsv3.fansly.com?v=3');
+    const reported = statuses.length;
+    con.receive('{"t":2,"d":"{}"}');
+    con.receive('{"t":2,"d":"{}"}');
+    expect(statuses).toHaveLength(reported);
+    vi.setSystemTime(1_000_000 + TAP_STATS_INTERVAL_MS);
+    con.receive('{"t":2,"d":"{}"}');
+    expect(statuses).toHaveLength(reported + 1);
+    expect(statuses.at(-1)?.framesSeen).toBe(3);
   });
 
   it('replays Fansly setUpConnection exactly: the page keeps its native socket and every frame', () => {

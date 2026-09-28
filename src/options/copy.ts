@@ -570,7 +570,7 @@ export const COPY = {
     cardTitle: 'Звук',
     toggleTitle: 'Звук входящих',
     toggleHint: 'Короткий сигнал, когда фан пишет в чат, который сейчас не открыт. Чаевые — без сигнала, как в приложении для OnlyFans.',
-    toneLabel: 'Звук',
+    toneLabel: 'Сигнал',
     toneBlip: 'Как в приложении',
     toneDouble: 'Двойной',
     toneSoft: 'Мягкий',

@@ -2526,7 +2526,8 @@ input[type='checkbox'] {
   display: grid;
 }
 
-.chatgoose-sound-tone {
+/* `.chatgoose-row .chatgoose-select` would otherwise win (E67's trap). */
+.chatgoose-row .chatgoose-sound-tone {
   width: 220px;
   flex: none;
 }
@@ -2579,7 +2580,7 @@ input[type='checkbox'] {
 /* Narrow cabinet: rows already stack label over control (see the global
    `.chatgoose-row` rule); the controls then take the full line. */
 @media (max-width: 560px) {
-  .chatgoose-sound-tone,
+  .chatgoose-row .chatgoose-sound-tone,
   .chatgoose-sound-volume {
     width: 100%;
   }

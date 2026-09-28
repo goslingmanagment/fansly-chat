@@ -179,6 +179,18 @@ describe('message sound status wording (E145)', () => {
     expect(messageSoundHealthText(status({ fanslyTabs: 3 }), true)).toBe(COPY.sound.healthReload.replace('{n}', '2'));
   });
 
+  it('does not count a tab whose tap came after the page socket (socket none) as listening', () => {
+    const late = status({
+      fanslyTabs: 2,
+      tabs: [
+        { ...status().tabs[0]!, tabId: 4, socket: 'open' },
+        { ...status().tabs[0]!, tabId: 5, socket: 'none' },
+      ],
+    });
+    expect(messageSoundStatusRowView(late, true).fact).toBe(COPY.sound.statusReload.replace('{n}', '1'));
+    expect(messageSoundHealthText(late, true)).toBe(COPY.sound.healthReload.replace('{n}', '1'));
+  });
+
   it('names no tabs, a dead audio context and the off switch plainly', () => {
     expect(messageSoundStatusRowView(status({ fanslyTabs: 0, tabs: [] }), true).fact).toBe(COPY.sound.statusNoTabs);
     const broken = status({

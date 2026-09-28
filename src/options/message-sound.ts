@@ -186,6 +186,13 @@ export function createMessageSoundCard(settings: Settings, onOpenAccounts: () =>
   };
 }
 
+/** A tab listens only while its newest Fansly socket is up or coming up. A tap
+ * that arrived after the page's socket (a tab left open across the update)
+ * reports `none` and needs a reload. */
+function listeningTabs(status: MessageSoundStatus): MessageSoundStatus['tabs'] {
+  return status.tabs.filter((tab) => tab.socket === 'open' || tab.socket === 'connecting');
+}
+
 export function messageSoundHealthText(status: MessageSoundStatus | null, enabled: boolean): string {
   if (!enabled) return COPY.sound.healthOff;
   if (status === null) return COPY.sound.healthUnavailable;
@@ -193,7 +200,8 @@ export function messageSoundHealthText(status: MessageSoundStatus | null, enable
     return COPY.sound.healthAudioError.replace('{error}', status.audio.lastError);
   }
   if (status.fanslyTabs === 0) return COPY.sound.healthNoTabs;
-  const missing = status.fanslyTabs === null ? 0 : status.fanslyTabs - status.tabs.length;
+  const listening = listeningTabs(status);
+  const missing = (status.fanslyTabs ?? listening.length) - listening.length;
   if (missing > 0) return COPY.sound.healthReload.replace('{n}', String(missing));
   const lastIncoming = status.tabs.reduce<number | null>(
     (latest, tab) => (tab.lastIncomingAt !== null && (latest === null || tab.lastIncomingAt > latest)
@@ -201,10 +209,10 @@ export function messageSoundHealthText(status: MessageSoundStatus | null, enable
       : latest),
     null,
   );
-  const listening = COPY.sound.healthListening.replace('{n}', String(status.tabs.length));
+  const line = COPY.sound.healthListening.replace('{n}', String(listening.length));
   return lastIncoming === null
-    ? listening
-    : `${listening} ${COPY.sound.healthLastIncoming.replace('{time}', formatClock(lastIncoming))}`;
+    ? line
+    : `${line} ${COPY.sound.healthLastIncoming.replace('{time}', formatClock(lastIncoming))}`;
 }
 
 export function messageSoundStatusRowView(status: MessageSoundStatus | null, enabled: boolean): StatusRowView {
@@ -215,15 +223,16 @@ export function messageSoundStatusRowView(status: MessageSoundStatus | null, ena
     return { tone: 'bad', fact: COPY.sound.statusAudioError, detail };
   }
   if (status.fanslyTabs === 0) return { tone: 'neutral', fact: COPY.sound.statusNoTabs, detail };
-  const total = status.fanslyTabs ?? status.tabs.length;
-  const missing = total - status.tabs.length;
+  const listening = listeningTabs(status).length;
+  const total = status.fanslyTabs ?? listening;
+  const missing = total - listening;
   if (missing > 0) {
     return { tone: 'amber', fact: COPY.sound.statusReload.replace('{n}', String(missing)), detail };
   }
   return {
     tone: 'green',
     fact: COPY.sound.statusListening
-      .replace('{n}', String(status.tabs.length))
+      .replace('{n}', String(listening))
       .replace('{total}', String(total)),
     detail,
   };

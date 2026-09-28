@@ -225,12 +225,13 @@ export class MessageSoundService {
     // One synchronous section: no await between the throttle and the start.
     const at = this.deps.monotonic();
     if (at - this.lastRingAt < MESSAGE_SOUND_THROTTLE_MS) return 'throttled';
-    this.lastRingAt = at;
     try {
       this.deps.player.start(fresh.settings.messageSoundTone, fresh.settings.messageSoundVolume);
     } catch {
       return 'audio-error';
     }
+    // Reserved only for a sound that actually started — still no await between.
+    this.lastRingAt = at;
     this.lastPlayedAt = this.deps.now();
     return 'played';
   }

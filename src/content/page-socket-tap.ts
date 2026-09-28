@@ -25,6 +25,8 @@ import {
 
 const INSTALLED = Symbol.for('chatgoose.socketTap');
 const FANSLY_SOCKET_HOST = 'wsv3.fansly.com';
+/** The frame counters reach «Статус» at most this often. */
+export const TAP_STATS_INTERVAL_MS = 5_000;
 
 function isFanslyMessageSocket(url: unknown, base: string): boolean {
   try {
@@ -42,8 +44,21 @@ export function installPageSocketTap(target: Window & typeof globalThis = window
   if (typeof Native !== 'function') return false;
   Object.defineProperty(target, INSTALLED, { value: true });
 
+  // Captured NOW, at document_start, before Fansly's zone.js patches it: a
+  // listener registered through the patched method would run inside Angular's
+  // zone and cost the page an extra change-detection pass on every frame.
+  const addListener = target.EventTarget.prototype.addEventListener;
+  const listen = (node: EventTarget, type: string, listener: (event: Event) => void): void => {
+    addListener.call(node, type, listener);
+  };
+
   let armed = true;
   let socket: FanslySocketState = 'none';
+  /** Only the newest socket's lifecycle is reported: Fansly closes the old one
+   * right before creating the next, and its late `close` must not mask the
+   * new socket's `open`. */
+  let current: WebSocket | null = null;
+  let lastStatsAt = Number.NEGATIVE_INFINITY;
   const stats = { framesSeen: 0, messagesParsed: 0, droppedByType: 0 };
 
   const emit = (name: string, payload: unknown): void => {
@@ -54,25 +69,29 @@ export function installPageSocketTap(target: Window & typeof globalThis = window
     }
   };
   const report = (): void => {
+    lastStatsAt = Date.now();
     const status: SocketTapStatus = { v: 1, socket, ...stats };
     emit(SOUND_BRIDGE_TAP_EVENT, status);
   };
 
   const observe = (instance: WebSocket): void => {
+    current = instance;
     socket = 'connecting';
     report();
-    instance.addEventListener('open', () => {
+    listen(instance, 'open', () => {
+      if (current !== instance) return;
       socket = 'open';
       report();
     });
-    instance.addEventListener('close', () => {
+    listen(instance, 'close', () => {
+      if (current !== instance) return;
       socket = 'closed';
       report();
     });
-    instance.addEventListener('message', (event: MessageEvent) => {
+    listen(instance, 'message', (event: Event) => {
       if (!armed) return;
       try {
-        const data: unknown = event.data;
+        const data: unknown = (event as MessageEvent).data;
         if (typeof data !== 'string') return;
         stats.framesSeen += 1;
         const parsed = extractIncomingMessages(data);
@@ -81,6 +100,8 @@ export function installPageSocketTap(target: Window & typeof globalThis = window
           stats.messagesParsed += 1;
           emit(SOUND_BRIDGE_MESSAGE_EVENT, message);
         }
+        // «frames seen, none parsed» is how a changed Fansly format shows up.
+        if (Date.now() - lastStatsAt >= TAP_STATS_INTERVAL_MS) report();
       } catch {
         // the page's own handler already has the frame
       }
@@ -99,8 +120,8 @@ export function installPageSocketTap(target: Window & typeof globalThis = window
     },
   });
 
-  target.addEventListener(SOUND_BRIDGE_RELAY_READY_EVENT, () => report());
-  target.addEventListener(SOUND_BRIDGE_ARM_EVENT, (event: Event) => {
+  listen(target, SOUND_BRIDGE_RELAY_READY_EVENT, () => report());
+  listen(target, SOUND_BRIDGE_ARM_EVENT, (event: Event) => {
     const detail: unknown = (event as CustomEvent).detail;
     if (detail === 'on') armed = true;
     else if (detail === 'off') armed = false;

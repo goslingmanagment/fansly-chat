@@ -99,7 +99,8 @@ registerMessageSoundRuntime(new MessageSoundService({
     }
   },
   focusedConversationGroupId: () => focusedFanslyConversation(browser.windows),
-  listFanslyTabIds: async () => (await browser.tabs.query({ url: '*://fansly.com/*' }))
+  // An unloaded (discarded) tab runs no scripts — it is not «missing a reload».
+  listFanslyTabIds: async () => (await browser.tabs.query({ url: '*://fansly.com/*', discarded: false }))
     .flatMap((tab) => (tab.id === undefined ? [] : [tab.id])),
   player: createMessageSoundPlayer(),
   now: () => Date.now(),

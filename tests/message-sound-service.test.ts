@@ -178,6 +178,21 @@ describe('MessageSoundService (E145)', () => {
     expect(test.played).toHaveLength(1);
   });
 
+  it('does not spend the 2 s pause on a sound that failed to start', async () => {
+    const test = harness();
+    const start = test.service['deps'].player.start;
+    let failNext = true;
+    test.service['deps'].player.start = (tone, volume) => {
+      if (failNext) {
+        failNext = false;
+        throw new Error('graph refused');
+      }
+      return start(tone, volume);
+    };
+    expect(await test.service.handleIncoming(1, message({ id: '1' }))).toBe('audio-error');
+    expect(await test.service.handleIncoming(1, message({ id: '2' }))).toBe('played');
+  });
+
   it('lets a bound tab ring a message an unattributed tab could not decide', async () => {
     const test = harness({
       settings: { messageSoundMutedAccountIds: ['300'] },
