@@ -18,7 +18,10 @@ export const MESSAGE_SOUND_VOLUME_STEP = 5;
 export const MESSAGE_SOUND_MUTED_MAX = 100;
 const MAX_PEAK_GAIN = 0.24;
 
-const FANSLY_ID = /^\d{1,32}$/;
+/** A row id: the canonical Fansly id is numeric, but the legacy key decoded
+ * from the Authorization header is not guaranteed to be — accept any compact
+ * token-like string rather than silently dropping a mute. */
+const ACCOUNT_ID = /^[\w-]{1,64}$/;
 
 export function normalizeMessageSoundTone(raw: unknown): MessageSoundTone {
   return isMessageSoundTone(raw) ? raw : MESSAGE_SOUND_TONE_DEFAULT;
@@ -31,14 +34,14 @@ export function normalizeMessageSoundVolume(raw: unknown): number {
   return Math.min(MESSAGE_SOUND_VOLUME_MAX, Math.max(MESSAGE_SOUND_VOLUME_MIN, stepped));
 }
 
-/** Muted models: Fansly ids only, no repeats, bounded. Stored as whatever id
+/** Muted models: compact ids only, no repeats, bounded. Stored as whatever id
  * the row had when it was muted — canonical or legacy; the decision matches
  * both through `accountAliases`. */
 export function normalizeMutedAccountIds(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   const ids: string[] = [];
   for (const value of raw) {
-    if (typeof value !== 'string' || !FANSLY_ID.test(value) || ids.includes(value)) continue;
+    if (typeof value !== 'string' || !ACCOUNT_ID.test(value) || ids.includes(value)) continue;
     ids.push(value);
     if (ids.length >= MESSAGE_SOUND_MUTED_MAX) break;
   }

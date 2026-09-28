@@ -211,6 +211,54 @@ describe('migrateState', () => {
     ).toBe(false);
   });
 
+  it('v18 (E145): adds the incoming-message sound on by default and preserves explicit choices', () => {
+    const legacy = migrateState({ schemaVersion: 17, settings: { uiTheme: 'dark' } });
+    expect(legacy.schemaVersion).toBe(18);
+    expect(legacy.settings).toMatchObject({
+      uiTheme: 'dark',
+      messageSoundEnabled: true,
+      messageSoundTone: 'blip',
+      messageSoundVolume: 50,
+      messageSoundMutedAccountIds: [],
+    });
+
+    const chosen = migrateState({
+      schemaVersion: 18,
+      settings: {
+        messageSoundEnabled: false,
+        messageSoundTone: 'soft',
+        messageSoundVolume: 85,
+        messageSoundMutedAccountIds: ['111', '222'],
+      },
+    });
+    expect(chosen.settings).toMatchObject({
+      messageSoundEnabled: false,
+      messageSoundTone: 'soft',
+      messageSoundVolume: 85,
+      messageSoundMutedAccountIds: ['111', '222'],
+    });
+  });
+
+  it('v18 (E145): normalizes junk sound settings instead of trusting them', () => {
+    const junk = migrateState({
+      schemaVersion: 18,
+      settings: {
+        messageSoundTone: 'siren',
+        messageSoundVolume: 1000,
+        messageSoundMutedAccountIds: ['111', '111', 'not an id', '', 42, '333', 'legacy-key_1'],
+      },
+    });
+    expect(junk.settings.messageSoundTone).toBe('blip');
+    expect(junk.settings.messageSoundVolume).toBe(100);
+    expect(junk.settings.messageSoundMutedAccountIds).toEqual(['111', '333', 'legacy-key_1']);
+    expect(migrateState({ schemaVersion: 18, settings: { messageSoundVolume: 'x' } }).settings.messageSoundVolume)
+      .toBe(50);
+    expect(migrateState({ schemaVersion: 18, settings: { messageSoundVolume: 1 } }).settings.messageSoundVolume)
+      .toBe(5);
+    expect(migrateState({ schemaVersion: 18, settings: { messageSoundVolume: 62 } }).settings.messageSoundVolume)
+      .toBe(60);
+  });
+
   it('seeds pingMessageCount from quickMessageCount when migrating legacy settings', () => {
     const result = migrateState({
       schemaVersion: 4,
@@ -487,6 +535,26 @@ describe('sanitizeSettings', () => {
     expect(
       storage.sanitizeSettings({ uiTheme: 'neon' as unknown as 'dark' }).uiTheme,
     ).toBe('system');
+  });
+
+  it('E145: sanitizes the sound settings the options page saves', () => {
+    expect(storage.sanitizeSettings({})).toMatchObject({
+      messageSoundEnabled: true,
+      messageSoundTone: 'blip',
+      messageSoundVolume: 50,
+      messageSoundMutedAccountIds: [],
+    });
+    expect(storage.sanitizeSettings({
+      messageSoundEnabled: false,
+      messageSoundTone: 'double',
+      messageSoundVolume: 3,
+      messageSoundMutedAccountIds: ['9', '9', 'x y'],
+    })).toMatchObject({
+      messageSoundEnabled: false,
+      messageSoundTone: 'double',
+      messageSoundVolume: 5,
+      messageSoundMutedAccountIds: ['9'],
+    });
   });
 
   it('defaults toolbar hints on while preserving an explicit disabled value', () => {

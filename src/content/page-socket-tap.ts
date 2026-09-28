@@ -26,9 +26,9 @@ import {
 const INSTALLED = Symbol.for('chatgoose.socketTap');
 const FANSLY_SOCKET_HOST = 'wsv3.fansly.com';
 
-function isFanslyMessageSocket(url: unknown): boolean {
+function isFanslyMessageSocket(url: unknown, base: string): boolean {
   try {
-    const parsed = new URL(String(url), window.location.href);
+    const parsed = new URL(String(url), base);
     return parsed.protocol === 'wss:' && parsed.hostname === FANSLY_SOCKET_HOST;
   } catch {
     return false;
@@ -91,7 +91,7 @@ export function installPageSocketTap(target: Window & typeof globalThis = window
     construct(constructor, args: unknown[], newTarget) {
       const instance = Reflect.construct(constructor, args, newTarget) as WebSocket;
       try {
-        if (isFanslyMessageSocket(args[0])) observe(instance);
+        if (isFanslyMessageSocket(args[0], target.location.href)) observe(instance);
       } catch {
         // observation is optional; the socket is not
       }
