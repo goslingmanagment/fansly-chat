@@ -15,7 +15,11 @@ concurrency:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    # Repo variable CI_POOL=pc routes the first attempt to the self-hosted
+    # runners on the owner's PC; anything else (or a re-run, in case the PC
+    # died mid-run) goes to GitHub-hosted. Keep the job id: it is the
+    # required status check.
+    runs-on: ${{ vars.CI_POOL == 'pc' && github.run_attempt == '1' && fromJSON('["self-hosted","ci-pc"]') || 'ubuntu-24.04' }}
     timeout-minutes: 20
     steps:
       - name: Checkout
@@ -28,7 +32,9 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 22
-          cache: pnpm
+          # The self-hosted pool keeps its pnpm store in $HOME; the Actions
+          # cache only pays off on GitHub-hosted runners.
+          cache: ${{ runner.environment == 'github-hosted' && 'pnpm' || '' }}
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
