@@ -299,11 +299,13 @@ describe('Options page account sections', () => {
       onStorageReadyRequest: () => ready.promise,
     });
 
+    // The first test in the file imports the options page cold; give it the
+    // same budget as the other page-load waits.
     await vi.waitFor(() => {
       expect(vi.mocked(browser.runtime.sendMessage)).toHaveBeenCalledWith({
         type: 'ensureStorageReady',
       });
-    });
+    }, { timeout: 2000 });
     expect(document.querySelector('input')).toBeNull();
     expect(callOrder).not.toContain('snapshot');
 
