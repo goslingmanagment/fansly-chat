@@ -167,6 +167,12 @@ function getSectionByTitle(title: string): HTMLElement {
   return section;
 }
 
+// Loading the options page imports and transforms its module graph; the first
+// load in a worker is cold. On a CI machine busy with other jobs that has taken
+// longer than 2 s, so page-load waits get a wider budget. vi.waitFor returns as
+// soon as the condition holds, so a healthy run is not slower.
+const PAGE_LOAD_TIMEOUT_MS = 10_000;
+
 async function loadOptionsPage(options: {
   state: PersistedState;
   sessions: SessionSnapshotEntry[];
@@ -271,20 +277,22 @@ async function loadOptionsPage(options: {
   if (options.expectStorageFailure) {
     await vi.waitFor(() => {
       expect(document.querySelector('h1')?.textContent).toBe('ChatGoose Settings Unavailable');
-    }, { timeout: 2000 });
+    }, { timeout: PAGE_LOAD_TIMEOUT_MS });
     return;
   }
   await vi.waitFor(() => {
     getAccountsSection();
-  }, { timeout: 2000 });
+  }, { timeout: PAGE_LOAD_TIMEOUT_MS });
   if (options.waitForHydration !== false) {
     await vi.waitFor(() => {
       expect(getAccountsSection().dataset.sessionHydration).toBe('ready');
-    }, { timeout: 2000 });
+    }, { timeout: PAGE_LOAD_TIMEOUT_MS });
   }
 }
 
-describe('Options page account sections', () => {
+// Page-load waits may take up to PAGE_LOAD_TIMEOUT_MS; the suite's tests get
+// room for that on top of their own work.
+describe('Options page account sections', { timeout: 30_000 }, () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
@@ -305,7 +313,7 @@ describe('Options page account sections', () => {
       expect(vi.mocked(browser.runtime.sendMessage)).toHaveBeenCalledWith({
         type: 'ensureStorageReady',
       });
-    }, { timeout: 2000 });
+    }, { timeout: PAGE_LOAD_TIMEOUT_MS });
     expect(document.querySelector('input')).toBeNull();
     expect(callOrder).not.toContain('snapshot');
 
