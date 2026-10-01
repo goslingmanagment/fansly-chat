@@ -81,7 +81,9 @@ jobs:
 
       # PC runners: the same parts of `pnpm check`, read from package.json at
       # run time, with the read-only ones side by side and the rest alone in
-      # chain order (scripts/ci-parallel-check.mjs).
+      # chain order (scripts/ci-parallel-check.mjs). exec: on cancel or
+      # timeout the runner signals only the step's own process, so node must
+      # be that process to stop the parts and print the logs they wrote.
       - name: Check (parts in parallel)
         if: runner.environment == 'self-hosted'
-        run: node scripts/ci-parallel-check.mjs
+        run: exec node scripts/ci-parallel-check.mjs
