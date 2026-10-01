@@ -24,6 +24,11 @@ declare module 'node:child_process' {
     args?: string[],
     options?: { cwd?: string; encoding?: string },
   ): string;
+  export function spawnSync(
+    file: string,
+    args: string[],
+    options: { cwd?: string; encoding: 'utf8'; env?: Record<string, string> },
+  ): { status: number | null; signal: string | null; stdout: string; stderr: string };
 }
 
 declare module 'node:url' {
