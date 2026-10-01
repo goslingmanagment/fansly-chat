@@ -90,7 +90,9 @@ describe('ci-parallel-check', () => {
   it('keeps pnpm check on GitHub-hosted runners and runs the script only on the PC', () => {
     const ci = readRepoFile('.github/workflows/ci.yml');
     expect(ci).toMatch(/if: runner\.environment != 'self-hosted'\n\s+run: pnpm check\n/);
-    expect(ci).toMatch(/if: runner\.environment == 'self-hosted'\n\s+run: node scripts\/ci-parallel-check\.mjs\n/);
+    // exec: the runner signals only the step's own process on cancel or
+    // timeout; without exec node and its parts outlive the step unstopped.
+    expect(ci).toMatch(/if: runner\.environment == 'self-hosted'\n\s+run: exec node scripts\/ci-parallel-check\.mjs\n/);
     expect(ci.match(/run: pnpm check\b/g)).toHaveLength(1);
   });
 });
