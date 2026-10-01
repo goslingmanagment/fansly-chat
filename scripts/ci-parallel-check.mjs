@@ -5,8 +5,9 @@
 // runs alone at its place in the chain, and a stage starts only after every
 // earlier part passed, as with `&&`. Each part logs to its own file; the logs
 // print in chain order when their stage ends. A "check" that is not a plain
-// `pnpm … && pnpm …` chain runs as `pnpm check` itself. GitHub-hosted runners
-// and local runs keep `pnpm check`.
+// `pnpm … && pnpm …` chain, or whose read-only part has another body than the
+// one pinned below, runs as `pnpm check` itself. GitHub-hosted runners and
+// local runs keep `pnpm check`.
 //
 //   node scripts/ci-parallel-check.mjs          run the check
 //   node scripts/ci-parallel-check.mjs --plan   print the stages as JSON, run nothing
@@ -16,12 +17,21 @@ import { closeSync, mkdtempSync, openSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-// Parts that only read the tree: `tsc --noEmit`, `eslint .` and the grep
-// gates. Not `test`: the copy-vocabulary falsifiability cases write a line
-// into real src/ and page files for a moment (tests/copy-vocabulary.test.ts),
-// which a parallel tsc, eslint or grep would read. Not `build`: it writes
-// dist/. A new part runs alone until it is known to only read.
-const READ_ONLY_PARTS = new Set(['typecheck', 'lint', 'gates']);
+// Parts that only read the tree, each pinned to the exact package.json body
+// known to only read: `tsc --noEmit`, `eslint .` and the grep gates. The name
+// alone proves nothing: `eslint . --fix`, `tsc -b` or a gates body that first
+// generates a file into src/ would write what a neighbour reads, and the race
+// can pass a broken tree. A read-only part with any other body (or none)
+// makes the whole check run as `pnpm check`. Not `test`: the copy-vocabulary
+// falsifiability cases write a line into real src/ and page files for a
+// moment (tests/copy-vocabulary.test.ts), which a parallel tsc, eslint or
+// grep would read. Not `build`: it writes dist/. A new part runs alone until
+// it is known to only read.
+const READ_ONLY_PARTS = new Map([
+  ['typecheck', 'tsc --noEmit'],
+  ['lint', 'eslint .'],
+  ['gates', 'node scripts/check-ai-cutover.mjs'],
+]);
 
 // Words no shell splits, quotes or expands, so the argv is exactly what
 // `sh -c` would pass. Anything else in "check" falls back to `pnpm check`.
@@ -47,6 +57,13 @@ function planOf(pkg) {
   for (const part of check.trim().split(/ +&& +/)) {
     const argv = part.split(/ +/);
     const name = argv.length === 2 ? argv[1] : '';
+    const pinned = READ_ONLY_PARTS.get(name);
+    const body = Object.hasOwn(scripts, name) ? scripts[name] : undefined;
+    if (pinned !== undefined && body !== pinned) {
+      return {
+        sequential: `"${name}" is ${JSON.stringify(body ?? null)}, not ${JSON.stringify(pinned)}, the body known to only read`,
+      };
+    }
     const readOnly =
       READ_ONLY_PARTS.has(name) && !Object.hasOwn(scripts, `pre${name}`) && !Object.hasOwn(scripts, `post${name}`);
     if (readOnly && previousReadOnly) stages.at(-1).push(argv);
