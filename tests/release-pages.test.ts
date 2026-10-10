@@ -232,6 +232,35 @@ describe('release page stamping', () => {
     expect(CHANGELOG_URL).not.toContain('#');
   });
 
+  it('keeps one upload host across the three scripts, replaceable from the environment', () => {
+    // The host is one fact written in three scripts. If the copies drift, the
+    // pages go to a server the release never uploads to. CHATGOOSE_VPS_HOST
+    // moves all three at once, so a server move needs no code change.
+    const deploy = readRepoFile('scripts/deploy.sh');
+    const pages = readRepoFile('scripts/deploy-pages.sh');
+    const setup = readRepoFile('scripts/setup-vps-ext.sh');
+
+    const defaults = [deploy, pages, setup].map(
+      (script) => /^readonly VPS_HOST="\$\{CHATGOOSE_VPS_HOST:-([^}"]+)\}"$/m.exec(script)?.[1],
+    );
+    expect(defaults[0]).toMatch(/^root@\d+(\.\d+){3}$/);
+    expect(new Set(defaults).size).toBe(1);
+
+    // setup-vps-ext.sh waits for DNS to show the server's address before it
+    // asks certbot for a certificate. That address is the host's, checked
+    // before connecting and handed to the remote half as its argument — a
+    // second literal there would outlive the next move.
+    expect(setup).toContain('readonly EXPECTED_IP="${VPS_HOST#*@}"');
+    const connect = setup.indexOf(`ssh "$VPS_HOST" "bash -s -- '$EXPECTED_IP'" <<'REMOTE'`);
+    expect(connect).toBeGreaterThan(-1);
+    const formatCheck = setup.indexOf('if [[ ! "$EXPECTED_IP" =~ ');
+    expect(formatCheck).toBeGreaterThan(-1);
+    expect(formatCheck).toBeLessThan(connect);
+    const remote = setup.slice(connect);
+    expect(remote).toContain('readonly EXPECTED_IP="${1:?');
+    expect(remote).not.toMatch(/EXPECTED_IP="\d/);
+  });
+
   it('keeps the guide intentionally versionless', () => {
     const guide = readRepoFile('guide.html');
 

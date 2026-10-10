@@ -16,7 +16,8 @@ set -euo pipefail
 # nothing.
 
 readonly ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-readonly VPS_HOST="root@45.8.230.111"
+# Same host and same CHATGOOSE_VPS_HOST override as deploy.sh.
+readonly VPS_HOST="${CHATGOOSE_VPS_HOST:-root@152.53.191.242}"
 readonly REMOTE_DIR="/var/www/ext"
 readonly BASE_URL="https://ext.gosling-agency.ru"
 readonly EXTENSION_ID="chatgoose@gosling.agency"
