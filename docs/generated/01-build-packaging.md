@@ -153,17 +153,13 @@ Deploys only `install.html` / `guide.html` / `changelog.html` (+ `mascot.png`)
 without rebuilding or re-signing (`scripts/deploy-pages.sh:1-99`); stamps versions
 from `manifest.json` and scps to the same VPS.
 
-### `scripts/setup-vps-ext.sh` — one-time VPS provisioning
+### `scripts/setup-vps-ext.sh` — removed (E147)
 
-Configures nginx on the VPS to serve `/var/www/ext` at `ext.gosling-agency.ru`
-(`scripts/setup-vps-ext.sh`): removes a legacy ChatGoose-extension block from the
-`agency-hub` nginx site and inserts a hard `404` for `/ext/` there
-(`scripts/setup-vps-ext.sh:50-93`), writes an HTTP then HTTPS server block with
-`no-cache` on `updates.json` and `immutable` caching on `.xpi`
-(`scripts/setup-vps-ext.sh:101-179`), waits for DNS, and obtains a Let's Encrypt
-cert via certbot webroot (`scripts/setup-vps-ext.sh:224-245`). The extension feed
-and the kernel/Agency Hub API share the same physical VPS (`152.53.191.242`) but
-distinct nginx sites/hostnames.
+The one-time provisioning script for the nginx site of `ext.gosling-agency.ru`
+was removed in 2026-10: nothing in the repository creates or rewrites that
+site. README «The site on the server» describes the site file. The extension
+feed and the kernel/Agency Hub API share the same physical VPS
+(`152.53.191.242`) but distinct nginx sites/hostnames.
 
 The user-facing HTML pages themselves (`install.html`, `guide.html`,
 `changelog.html`, `README.md`, `changelog.html`) live at the repo root and are
