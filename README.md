@@ -302,12 +302,14 @@ server move copies it across: the move to agency-de in 2026-10 did that with
 `/u/` location. That folder is not a repository, so this section keeps a copy
 of the file.
 
-The deploy scripts need three things from the site:
+The deploy scripts need four things from the site:
 
 - `/updates.json` is served as JSON and is never cached. Firefox polls it for
   updates.
 - Every `*.xpi` is served as `application/x-xpinstall`, so Firefox offers to
   install it. A versioned XPI never changes, so it may be cached for a year.
+- `/chatgoose-latest.xpi` is the exception: the landing's install button
+  downloads it and every release replaces it, so it is never cached.
 - `/` answers with `index.html`; the other pages are plain files.
 
 Two other projects publish into the same site, and an edit has to keep their
@@ -346,7 +348,7 @@ server {
         try_files $uri =404;
     }
 
-    location = /goosemuse-latest.xpi {
+    location = /chatgoose-latest.xpi {
         default_type application/x-xpinstall;
         add_header Cache-Control "no-cache, no-store, must-revalidate" always;
         add_header Pragma "no-cache" always;
@@ -370,19 +372,11 @@ server {
 }
 ```
 
-Two things to know when reading it:
-
-- While the site is being moved between servers, the live file also has four
-  lines that answer 403 to everyone except the previous server:
-  `set_real_ip_from`, `real_ip_header`, `real_ip_recursive` and an `if` on
-  `$realip_remote_addr`. They are removed when DNS is switched and are left
-  out above.
-- The rule for `goosemuse-latest.xpi` is out of date. `chatgoose-latest.xpi`
-  is the file the landing's install button downloads, and every release
-  replaces it. It should not be cached, but the site serves it as cacheable
-  for a year: the no-cache rule still names the alias from before the
-  2026-03-26 rename. Pointing the rule at the current name is an edit on the
-  server.
+While the site is being moved between servers, the live file also has four
+lines that answer 403 to everyone except the previous server:
+`set_real_ip_from`, `real_ip_header`, `real_ip_recursive` and an `if` on
+`$realip_remote_addr`. They are removed when DNS is switched and are left out
+above.
 
 The certificate is from Let's Encrypt; certbot renews it with the webroot
 method over `/var/www/ext`. On a server that has no certificate yet, nginx

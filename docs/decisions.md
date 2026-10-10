@@ -137,7 +137,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E144 | 2026-09-28 | AI image notes: the kernel transcript numbers the kept window's describable media (`[Photo #n]`, ` [Photo #n]` after a bundle label, ` (preview #n)` after a PPV label) and `clientContext.media` lists them by id (groupRef, message, sender, kind, accountMedia id, paid) — never a URL or bytes; label-like text in messages is neutralized; the hub restores plain labels while its describer is off; 2.6.0 |
 | E145 | 2026-09-28 | Incoming-message sound (desktop parity): a MAIN-world `document_start` tap listens passively on Fansly's OWN wsv3 socket (Proxy over `window.WebSocket`, native object, no send/frame of ours), a text-free projection crosses an isolated relay, the background decides (own/automated/tip/stale 180 s/muted/open chat/2 s throttle) and plays a synthesized blip; settings v18 with a per-model mute list; no hub, no Fansly request, no new permission; 2.7.0 |
 | E146 | 2026-09-28 | New-follower sound on the E145 path: the tap also forwards FollowerService (`serviceId 3`) `type 2` follows (`{id, accountId, followerId}`, no createdAt), the background rings a follow of one of our models (`accountId` ours, `followerId` not) with its own switch and tone (`double`), shared volume, throttle and player, per-model mute on the model the event names; five Fansly tones (message default `chime`, the OnlyFans `blip` a choice; a v18 `blip` re-defaulted); settings v19; 2.7.1 |
-| E147 | 2026-10-11 | `scripts/setup-vps-ext.sh` is removed (the owner chose removal over repair): nothing in the repository creates or rewrites the nginx site of `ext.gosling-agency.ru`. The script had not run since 2026-03-24; its templates lacked what the live file had gained (the desktop feed's `/u/`, the latest-XPI no-cache rule), and its edit of the Hub's nginx site looked for markers that site does not carry, so a run against agency-de would have erased those locations and written a second `location ^~ /ext/` into the Hub's site. README «The site on the server» holds where the file lives, what the deploy scripts need from it, who else it serves and a dated copy; nothing changed on a server |
+| E147 | 2026-10-11 | `scripts/setup-vps-ext.sh` is removed (the owner chose removal over repair): nothing in the repository creates or rewrites the nginx site of `ext.gosling-agency.ru`. The script had not run since 2026-03-24; its templates lacked what the live file had gained (the desktop feed's `/u/`, the latest-XPI no-cache rule), and its edit of the Hub's nginx site looked for markers that site does not carry, so a run against agency-de would have erased those locations and written a second `location ^~ /ext/` into the Hub's site. README «The site on the server» holds where the file lives, what the deploy scripts need from it, who else it serves and a dated copy. The same day, on the owner's request, the site's latest-XPI no-cache rule was pointed at `chatgoose-latest.xpi` on both servers |
 
 ## Entries
 
@@ -5189,7 +5189,13 @@ more; the owner chose this over repairing the script.
   from a server that is about to be closed.
 - The upload-host test (`tests/release-pages.test.ts`) covers the two deploy
   scripts; the `EXPECTED_IP` pins added in #140 went with the script.
-- Nothing was changed on a server. Found on the way and left to the owner: the
-  site serves `chatgoose-latest.xpi`, the landing's install link, as immutable
-  for a year, because the no-cache rule still names the pre-rename alias.
+- Removing the script changed nothing on a server. Found on the way: the site
+  served `chatgoose-latest.xpi`, the landing's install link, as immutable for
+  a year, because the no-cache rule still named the pre-rename alias. On the
+  owner's request the rule was pointed at the current name on both servers the
+  same day: one line, `location = /chatgoose-latest.xpi`, with a copy of the
+  previous file next to each (`….bak-before-latest-xpi`). The copy in the
+  README is the file after that edit. A browser that already holds the alias
+  as immutable keeps it for up to a year; auto-update brings such an install
+  forward.
 
