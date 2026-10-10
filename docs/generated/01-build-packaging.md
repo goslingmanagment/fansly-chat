@@ -132,7 +132,8 @@ self-hosted feed. `.env.deploy` / `.env.deploy.example` hold AMO API credentials
 
 ### `scripts/deploy.sh` — full release
 
-Constants (`scripts/deploy.sh:5-22`): VPS `root@45.8.230.111`, remote dir
+Constants (`scripts/deploy.sh:5-22`): VPS `root@152.53.191.242` (the default;
+`CHATGOOSE_VPS_HOST` overrides it), remote dir
 `/var/www/ext`, base URL `https://ext.gosling-agency.ru`, extension id
 `chatgoose@gosling.agency`. Flow (`scripts/deploy.sh:259-410`):
 
@@ -161,7 +162,7 @@ Configures nginx on the VPS to serve `/var/www/ext` at `ext.gosling-agency.ru`
 `no-cache` on `updates.json` and `immutable` caching on `.xpi`
 (`scripts/setup-vps-ext.sh:101-179`), waits for DNS, and obtains a Let's Encrypt
 cert via certbot webroot (`scripts/setup-vps-ext.sh:224-245`). The extension feed
-and the kernel/Agency Hub API share the same physical VPS (`45.8.230.111`) but
+and the kernel/Agency Hub API share the same physical VPS (`152.53.191.242`) but
 distinct nginx sites/hostnames.
 
 The user-facing HTML pages themselves (`install.html`, `guide.html`,
