@@ -679,6 +679,8 @@ export class FanslyClient {
       // Settled before the identity check, like a read (E149). A write never
       // waits for a frame here: send custody is already taken by now.
       const route = await this.transport.route(session, 'POST', queuedSignal);
+      // A Pause that came while the route settled still stops a queued opening.
+      queuedSignal.throwIfAborted();
       if (paced) {
         this.followerSessions.get(session)?.();
         const live = this.sessionStore.getSessionByAccount(session.accountId);

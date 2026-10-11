@@ -211,6 +211,31 @@ describe('E149 FanslyRelayHub', () => {
     expect(frame.commands).toHaveLength(before);
   });
 
+  it('a body nobody reads is released: by a cancel at once, or after the request timeout', async () => {
+    vi.useFakeTimers();
+    const frame = frameOf(5);
+    const route = await routeOf(hubWith(frame), [5]);
+    const unread = route.send(wire());
+    frame.reply({ type: 'head', id: '1', status: 401, headers: [] });
+    await unread;
+    await vi.advanceTimersByTimeAsync(29_000);
+    expect(frame.commands.filter((command) => command.type === 'abort')).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(frame.commands.at(-1)).toEqual({ type: 'abort', id: '1' });
+
+    const cancelled = route.send(wire());
+    frame.reply({ type: 'head', id: '2', status: 429, headers: [] });
+    await (await cancelled).body!.cancel();
+    expect(frame.commands.at(-1)).toEqual({ type: 'abort', id: '2' });
+
+    // A body that does arrive stops the clock: nothing is aborted later.
+    const read = route.send(wire());
+    frame.answer('3', 200, '{}');
+    expect(await (await read).text()).toBe('{}');
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(frame.commands.filter((command) => command.type === 'abort' && command.id === '3')).toEqual([]);
+  });
+
   it('a second frame of a tab never evicts the first: the old one finishes its request, new ones go to the newest', async () => {
     const first = frameOf(5);
     const hub = hubWith(first);
@@ -410,6 +435,17 @@ describe('E149 the identity check stays the last thing before dispatch', () => {
     store.markDisconnected('acc-1');
     open();
     await expect(pending).rejects.toMatchObject({ key: 'chat_changed' });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('a Pause that comes while the route settles still stops a queued chat opening', async () => {
+    const { client, send, open, transport, session } = gated();
+    const admission = new AbortController();
+    const pending = client.createFollowerGroup('2', '1', session, new AbortController().signal, undefined, admission.signal);
+    await vi.waitFor(() => expect(transport.route).toHaveBeenCalledTimes(1));
+    admission.abort(new DOMException('Paused', 'AbortError'));
+    open();
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
     expect(send).not.toHaveBeenCalled();
   });
 

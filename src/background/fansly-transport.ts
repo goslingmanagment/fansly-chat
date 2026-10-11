@@ -1,3 +1,4 @@
+import { FANSLY_REQUEST_TIMEOUT_MS } from '../shared/constants.js';
 import { ChatGooseError } from '../shared/errors.js';
 import {
   FANSLY_RELAY_PAGE,
@@ -156,7 +157,9 @@ export class FanslyRelayHub {
     const id = String(++this.lastId);
     return new Promise<Response>((resolve, reject) => {
       let body: ReadableStreamDefaultController<Uint8Array> | null = null;
+      let bodyTimer: ReturnType<typeof setTimeout> | undefined;
       const finish = (): void => {
+        clearTimeout(bodyTimer);
         relay.pending.delete(id);
         signal.removeEventListener('abort', onAbort);
       };
@@ -173,12 +176,15 @@ export class FanslyRelayHub {
         }
       };
       const post = (command: FanslyRelayCommand): void => relay.port.postMessage(command);
-      const onAbort = (): void => {
+      const abortInFrame = (): void => {
         try {
           post({ type: 'abort', id });
         } catch {
           // the frame is already gone; its request died with it
         }
+      };
+      const onAbort = (): void => {
+        abortInFrame();
         fail(signal.reason);
       };
       relay.pending.set(id, {
@@ -189,6 +195,11 @@ export class FanslyRelayHub {
             start: (controller) => {
               body = controller;
             },
+            // A caller done with the status lets the frame stop reading.
+            cancel: () => {
+              abortInFrame();
+              finish();
+            },
           });
           let response: Response;
           try {
@@ -198,7 +209,17 @@ export class FanslyRelayHub {
             fail(new TypeError('Fansly relay returned an unusable response'));
             return;
           }
-          if (bodiless) finish();
+          if (bodiless) {
+            finish();
+          } else {
+            // A caller that acts on the status alone (401, 429, a retry) never
+            // reads the body and clears its own timeout: a body that stalls
+            // must not hold the frame's request for the rest of the shift.
+            bodyTimer = setTimeout(() => {
+              abortInFrame();
+              fail(new DOMException('The operation timed out.', 'TimeoutError'));
+            }, FANSLY_REQUEST_TIMEOUT_MS);
+          }
           resolve(response);
         },
         body: (text) => {

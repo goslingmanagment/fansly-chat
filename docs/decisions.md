@@ -5330,6 +5330,10 @@ owner: «это нужно не всем, если мы всех будем пу
   breaks. (Both from the review: an earlier draft awaited the setting after
   the check and sent the status only with the full body.) A second frame of a
   tab never evicts the first, which would make them evict each other forever.
+  A body nobody reads (a 401, 429 or retry acted on by status) is released by
+  a cancel or after the request timeout, so a stalled one cannot hold the
+  frame's request; a Pause that lands while a chat opening's route settles
+  still stops it.
 - Session capture skips requests whose document is the extension's own: the
   frame replays the captured session and must not overwrite the page's fresh
   template.
