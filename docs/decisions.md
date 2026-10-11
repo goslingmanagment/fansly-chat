@@ -138,6 +138,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E145 | 2026-09-28 | Incoming-message sound (desktop parity): a MAIN-world `document_start` tap listens passively on Fansly's OWN wsv3 socket (Proxy over `window.WebSocket`, native object, no send/frame of ours), a text-free projection crosses an isolated relay, the background decides (own/automated/tip/stale 180 s/muted/open chat/2 s throttle) and plays a synthesized blip; settings v18 with a per-model mute list; no hub, no Fansly request, no new permission; 2.7.0 |
 | E146 | 2026-09-28 | New-follower sound on the E145 path: the tap also forwards FollowerService (`serviceId 3`) `type 2` follows (`{id, accountId, followerId}`, no createdAt), the background rings a follow of one of our models (`accountId` ours, `followerId` not) with its own switch and tone (`double`), shared volume, throttle and player, per-model mute on the model the event names; five Fansly tones (message default `chime`, the OnlyFans `blip` a choice; a v18 `blip` re-defaulted); settings v19; 2.7.1 |
 | E147 | 2026-10-11 | `scripts/setup-vps-ext.sh` is removed (the owner chose removal over repair): nothing in the repository creates or rewrites the nginx site of `ext.gosling-agency.ru`. The script had not run since 2026-03-24; its templates lacked what the live file had gained (the desktop feed's `/u/`, the latest-XPI no-cache rule), and its edit of the Hub's nginx site looked for markers that site does not carry, so a run against agency-de would have erased those locations and written a second `location ^~ /ext/` into the Hub's site. README «The site on the server» holds where the file lives, what the deploy scripts need from it, who else it serves and a dated copy. The same day, on the owner's request, the site's latest-XPI no-cache rule was pointed at `chatgoose-latest.xpi` on both servers |
+| E148 | 2026-10-11 | Upload-host probe: before `web-ext sign` and before either page upload, the deploy scripts write a one-off marker into `REMOTE_DIR` over SSH, read it back through `BASE_URL` and remove it; the run goes on only if the marker comes back, otherwise it stops and says whether another server answers for the public name, the site refuses, or the name gave no answer; passes under a DNS switch and under forwarding; no skip flag |
 
 ## Entries
 
@@ -5198,4 +5199,82 @@ more; the owner chose this over repairing the script.
   README is the file after that edit. A browser that already holds the alias
   as immutable keeps it for up to a year; auto-update brings such an install
   forward.
+
+**E148 (2026-10-11).** The deploy scripts prove that the upload host is the
+server behind the public name before anything is signed or uploaded.
+`deploy.sh` and `deploy-pages.sh` upload to `VPS_HOST` over SSH and check the
+result through `BASE_URL`; nothing tied the two together. With
+`ext.gosling-agency.ru` moving to another server and the host replaceable
+through `CHATGOOSE_VPS_HOST`, they can differ. Reproduced on 2026-10-11 with
+`ssh`, `scp`, `curl`, `pnpm` and `web-ext` replaced by recorders: `deploy.sh`
+passed every preflight, signed with AMO (the version is spent), uploaded to a
+server nobody reads and failed about five minutes later on the versioned XPI;
+`deploy.sh --pages-only` and `deploy-pages.sh` reported success on the other
+server's old pages. E33 says a deterministic failure stops before the AMO
+request.
+
+- `assert_upload_host_serves_public_site` writes `.upload-host-probe.<32 hex>`
+  into `REMOTE_DIR` over SSH (the content is the same random token), reads it
+  through `BASE_URL`, removes it, and passes only on HTTP 200 with exactly
+  that token. It runs after the Core gate and before `pnpm build` in the
+  release path, after the provenance asserts in `--pages-only`, and after the
+  feed-parity gate in `deploy-pages.sh`.
+- It is not a DNS comparison. The move is planned as forwarding from the old
+  server, with a DNS switch as the other way
+  (`~/code/8-docs/2026-10-10-server-migration-netcup/plan.md` §9; the forward
+  is installed by `migrate/70-ext-feed.sh switch` there). Under forwarding DNS
+  names the old server while the upload host is the new one. The marker passes
+  in both arrangements and fails in the mirror cases: the default host before
+  the switch, a stale `CHATGOOSE_VPS_HOST` after it, the default host after
+  the script's way `back`. So a release or a page publish in a mismatched
+  state stops in preflight, whichever comes first, the host change or the
+  switch.
+- Every other outcome stops the run and says which it was. HTTP 401 or 403 is
+  reported as a refusal, not as another server: the new server answers 403 to
+  everyone but the old one until the name moves to it, and with DNS switched
+  before that fence is lifted the upload host is right and the site still
+  refuses. Any other answer that is not the marker is "served elsewhere", with
+  the upload host and the status. No usable answer (no connection, 5xx) is
+  "could not check". A failed SSH write and a failed removal have messages of
+  their own. There is no skip flag; the host is chosen with
+  `CHATGOOSE_VPS_HOST`.
+- Checked read-only on both servers the same day. The site has no rule against
+  dotfiles: an existing one is served by name from each server, as
+  `application/octet-stream`. Neither nginx has `proxy_cache`,
+  `open_file_cache` or `expires`, and there is no CDN in front. The forward
+  the switch step installs is a whole-name `location /` with
+  `proxy_buffering off`, like the ones already running for the hub and
+  TaskIndex; only `/.well-known/acme-challenge/` on port 80 stays local, which
+  is one reason the marker sits in the root and not under `.well-known/`. The
+  marker name is new on every run, so a cache could not answer for it in any
+  case; it must not end in `.xpi`, which is cached for a year.
+- No way out leaves the marker unattended. It is removed before the verdict.
+  Its name is kept from before the write until a removal has succeeded, and
+  the EXIT trap removes whatever is still named: after Ctrl-C, after a closed
+  terminal, after a failed write (ssh can fail with the file already there)
+  and after a failed removal. The trap says whether the marker is gone. A
+  leftover would matter during the move: `70-ext-feed.sh sync` refuses to run
+  while the new server holds a file newer than its last copy. The probe never
+  creates `REMOTE_DIR`: a host without it does not serve the site.
+- `|| true` after the read sits outside the command substitution. With it
+  inside, bash 5.3 skipped the EXIT trap when a SIGHUP reached the process
+  group while curl ran (10 of 10 runs on the recorder stand; bash 3.2 ran the
+  trap). Two older `$( curl … || true )` in `deploy.sh`, the persona-catalog
+  status and `verify_http_200_with_retry`, have the same shape and were left
+  alone: at those points the trap holds at most temporary files.
+- The function is the same text in both scripts, which stay self-contained.
+  `tests/release-pages.test.ts` pins that identity, the order inside the probe
+  and its place before `web-ext sign` and before any upload.
+- A side effect: an SSH host that cannot be reached now fails before the AMO
+  request as well; it used to surface after signing.
+- What the probe does not prove. The marker travels through `location /`. A
+  forward that kept `/updates.json` or `*.xpi` on the old server's own disk
+  would pass the probe and fail the checks after the upload; the planned
+  forward hands over the whole name. And nothing removes the marker after
+  `kill -9` or a power loss.
+- Not measured end to end: the forward for this site is not installed yet. Its
+  two halves were checked instead. The new server serves a dotfile by name to
+  a request shaped like the forward's (from the old server's address, with
+  `X-Forwarded-For`), and answers 403 to the same request from elsewhere; the
+  forwards the old server already runs hand every path to the new one.
 

@@ -246,6 +246,115 @@ describe('release page stamping', () => {
     expect(new Set(defaults).size).toBe(1);
   });
 
+  it('proves the upload host serves the public name before signing or uploading anything', () => {
+    // The scripts upload to VPS_HOST over SSH and check the result through
+    // BASE_URL. When another server answers for the public name, the release
+    // path spends an AMO version on files nobody reads, and both page paths
+    // report success on the other server's old pages. A marker written into
+    // REMOTE_DIR and read back through BASE_URL ties the two together. It
+    // also holds when another server forwards the name to the upload host,
+    // which a DNS comparison would reject.
+    const deploy = readRepoFile('scripts/deploy.sh');
+    const pages = readRepoFile('scripts/deploy-pages.sh');
+
+    const probeOf = (script: string): string => {
+      const start = script.indexOf('assert_upload_host_serves_public_site() {\n');
+      expect(start).toBeGreaterThan(-1);
+      const end = script.indexOf('\n}\n', start);
+      expect(end).toBeGreaterThan(start);
+      return script.slice(start, end);
+    };
+    const probe = probeOf(deploy);
+    // One check in two self-contained scripts: the copies may not drift.
+    expect(probeOf(pages)).toBe(probe);
+
+    // Write over SSH, read through the public name, remove, then judge. The
+    // removal comes before the verdict, so a failed check leaves nothing in
+    // the public directory.
+    const write = probe.indexOf(
+      `ssh "$VPS_HOST" "printf '%s' '$token' > '$marker_path' && chmod 644 '$marker_path'"`,
+    );
+    const read = probe.indexOf('"${BASE_URL}/${marker_name}"');
+    const remove = probe.indexOf(`ssh "$VPS_HOST" "rm -f '$marker_path'"`);
+    const verdict = probe.indexOf('if [[ "$status" == "200" && "$served" == "$token" ]]; then');
+    expect(write).toBeGreaterThan(-1);
+    expect(read).toBeGreaterThan(write);
+    expect(remove).toBeGreaterThan(read);
+    expect(verdict).toBeGreaterThan(remove);
+    // Only the marker itself passes: the verdict holds the one `return`, there
+    // is no switch that skips the check, and the function ends in a failure.
+    // Each failure names the upload host; a refusal (the 403 a new server
+    // answers until the name moves to it) is not reported as another server.
+    expect(probe.match(/\breturn\b/g)).toHaveLength(1);
+    expect(probe.slice(verdict)).toContain(
+      'The public name is served elsewhere: a marker written to ${VPS_HOST}:${REMOTE_DIR} did not come back through ${BASE_URL}',
+    );
+    expect(probe.slice(verdict)).toContain(
+      'The public name refused the probe marker (HTTP ${status}): a marker written to ${VPS_HOST}:${REMOTE_DIR}',
+    );
+    expect(probe.slice(verdict)).toContain('Could not check that ${BASE_URL} is served from ${VPS_HOST}:${REMOTE_DIR}');
+    expect(probe.trimEnd().split('\n').at(-1)).toMatch(/^ {2}fail "/);
+
+    // The token is random and reaches a remote command and a URL only as 32
+    // hex characters.
+    expect(probe).toContain('randomBytes(16).toString("hex")');
+    const shape = probe.indexOf('if [[ ! "$token" =~ ^[0-9a-f]{32}$ ]]; then');
+    expect(shape).toBeGreaterThan(-1);
+    expect(shape).toBeLessThan(write);
+    // A name that is new on every run, so no cache has an answer for it, and
+    // that matches none of the nginx locations with rules of their own.
+    expect(probe).toContain('local marker_name=".upload-host-probe.${token}"');
+    // An error page is never read as the marker, with or without retries.
+    expect(probe).toContain('      --fail \\\n');
+    // `|| true` outside the substitution: inside it, bash 5.3 skipped the EXIT
+    // trap on a SIGHUP during the read and the marker stayed on the server.
+    expect(probe).toContain('      "${BASE_URL}/${marker_name}"\n  )" || true\n');
+    // A host without REMOTE_DIR does not serve the site: never create it here.
+    expect(probe).not.toContain('mkdir');
+
+    // Release path: with the other preflight asserts, before the build and
+    // before the irreversible AMO request.
+    const main = deploy.indexOf('main() {');
+    const releaseCall = deploy.indexOf('\n  assert_upload_host_serves_public_site\n', main);
+    expect(releaseCall).toBeGreaterThan(deploy.indexOf('\n  assert_core_persona_catalog_ready\n', main));
+    expect(releaseCall).toBeLessThan(deploy.indexOf('  pnpm build', main));
+    expect(releaseCall).toBeLessThan(deploy.indexOf('  web-ext sign \\', main));
+
+    // --pages-only: after the provenance asserts, before the upload.
+    const pagesOnly = deploy.slice(
+      deploy.indexOf('publish_pages_only() {'),
+      deploy.indexOf('assert_pages_only_preconditions() {'),
+    );
+    const pagesOnlyCall = pagesOnly.indexOf('\n  assert_upload_host_serves_public_site\n');
+    expect(pagesOnlyCall).toBeGreaterThan(pagesOnly.indexOf('\n  assert_pages_only_preconditions\n'));
+    expect(pagesOnlyCall).toBeLessThan(pagesOnly.indexOf('ssh "$VPS_HOST"'));
+    expect(pagesOnlyCall).toBeLessThan(pagesOnly.search(/\bscp\b/));
+
+    // deploy-pages.sh: after its own gate, before anything is stamped or sent.
+    const pagesMain = pages.indexOf('main() {');
+    const pagesCall = pages.indexOf('\n  assert_upload_host_serves_public_site\n', pagesMain);
+    expect(pagesCall).toBeGreaterThan(pages.indexOf('  assert_pages_preconditions "$version"', pagesMain));
+    expect(pagesCall).toBeLessThan(pages.indexOf('stamp_version "$INSTALL_PAGE_FILE"'));
+    expect(pagesCall).toBeLessThan(pages.indexOf('ssh "$VPS_HOST" "mkdir -p'));
+    expect(pagesCall).toBeLessThan(pages.indexOf('scp "$INSTALL_PAGE_FILE"'));
+
+    // No way out leaves the marker unattended: the probe names it before the
+    // write, forgets the name in one place only, after a removal succeeded
+    // (a failed write may have left the file all the same), and both EXIT
+    // traps remove the marker they are told about.
+    const named = probe.indexOf('upload_host_probe_marker="$marker_path"');
+    expect(named).toBeGreaterThan(-1);
+    expect(named).toBeLessThan(write);
+    const forgotten = probe.indexOf('upload_host_probe_marker=""');
+    expect(forgotten).toBeGreaterThan(remove);
+    expect(forgotten).toBeLessThan(verdict);
+    expect(probe.lastIndexOf('upload_host_probe_marker=""')).toBe(forgotten);
+    for (const script of [deploy, pages]) {
+      const cleanup = script.slice(script.indexOf('cleanup() {'), script.indexOf('trap cleanup EXIT'));
+      expect(cleanup).toContain(`"rm -f '$upload_host_probe_marker'"`);
+    }
+  });
+
   it('keeps the guide intentionally versionless', () => {
     const guide = readRepoFile('guide.html');
 

@@ -33,6 +33,7 @@ artifacts_dir=""
 updates_file=""
 install_page_backup=""
 changelog_page_backup=""
+upload_host_probe_marker=""
 
 cleanup() {
   local exit_code=$?
@@ -45,6 +46,16 @@ cleanup() {
   fi
   if [[ -n "$updates_file" && -f "$updates_file" ]]; then
     rm -f "$updates_file"
+  fi
+  # Names the upload-host probe's marker from before it is written until a
+  # removal has succeeded. Still set here, the probe was interrupted or one of
+  # its SSH steps failed, and the marker may be in the public directory.
+  if [[ -n "$upload_host_probe_marker" ]]; then
+    if ssh -o ConnectTimeout=10 "$VPS_HOST" "rm -f '$upload_host_probe_marker'"; then
+      log "No probe marker is left on ${VPS_HOST}"
+    else
+      log "WARNING: could not make sure the probe marker is gone: ${VPS_HOST}:${upload_host_probe_marker} — remove it by hand if it is there"
+    fi
   fi
 
   exit "$exit_code"
@@ -357,6 +368,95 @@ assert_core_persona_catalog_ready() {
   log "Production Core contract matches the vendored SDK and persona catalog is auth-protected (401)"
 }
 
+# ── Upload host == serving host (E148) ────────────────────────────────────
+# Everything is uploaded to VPS_HOST over SSH and then checked through
+# BASE_URL, which is whichever server the public name reaches. Nothing else
+# ties the two together: with a stale CHATGOOSE_VPS_HOST, or halfway through
+# a server move, the upload lands on a server nobody reads. So prove it before
+# anything irreversible: a marker written into REMOTE_DIR has to come back
+# through BASE_URL. That holds whether the name points at the host or another
+# server forwards it there, which a DNS comparison would get wrong.
+#
+# The marker's name is new on every run, so no cache has an answer for it, and
+# it stays clear of the nginx locations with rules of their own (*.xpi is
+# cached for a year). REMOTE_DIR is not created here: a host without it does
+# not serve the site.
+#
+# The marker is removed before the verdict. upload_host_probe_marker names it
+# from before the write until a removal has succeeded, and the EXIT trap
+# removes whatever is still named. A failed write keeps the name: ssh can fail
+# with the file already there (Ctrl-C with the session open, a lost
+# connection, a full disk).
+#
+# deploy-pages.sh carries the same function, character for character.
+assert_upload_host_serves_public_site() {
+  local token
+  token="$(node --input-type=module -e '
+    import { randomBytes } from "node:crypto";
+    process.stdout.write(randomBytes(16).toString("hex"));
+  ')" || fail "Could not generate the upload-host probe token"
+  # The token goes into a remote command and a URL: only hex gets there.
+  if [[ ! "$token" =~ ^[0-9a-f]{32}$ ]]; then
+    fail "Upload-host probe token is not 32 hex characters"
+  fi
+
+  local marker_name=".upload-host-probe.${token}"
+  local marker_path="$REMOTE_DIR/$marker_name"
+
+  log "Checking that ${VPS_HOST}:${REMOTE_DIR} is what ${BASE_URL} serves"
+  upload_host_probe_marker="$marker_path"
+  ssh "$VPS_HOST" "printf '%s' '$token' > '$marker_path' && chmod 644 '$marker_path'" \
+    || fail "Could not write a probe marker to ${VPS_HOST}:${REMOTE_DIR} — the upload host is unreachable or does not hold the site. Stopped before anything was signed or uploaded"
+
+  # --fail keeps an error page out of the output, so with --retry the output
+  # is the body of the one attempt that succeeded, then the status line.
+  # `|| true` stays outside the substitution: with it inside, bash 5.3 was
+  # seen to skip the EXIT trap when a SIGHUP reaches the process group while
+  # curl runs (a closed terminal), and the marker stayed on the server.
+  local response
+  response="$(
+    curl \
+      --silent \
+      --show-error \
+      --location \
+      --fail \
+      --retry 3 \
+      --connect-timeout 10 \
+      --max-time 30 \
+      --write-out '\n%{http_code}' \
+      "${BASE_URL}/${marker_name}"
+  )" || true
+  local newline=$'\n'
+  local status="${response##*"$newline"}"
+  local served="${response%"$newline"*}"
+
+  ssh "$VPS_HOST" "rm -f '$marker_path'" \
+    || fail "Could not remove the probe marker ${VPS_HOST}:${marker_path}. Stopped before anything was signed or uploaded"
+  upload_host_probe_marker=""
+
+  if [[ "$status" == "200" && "$served" == "$token" ]]; then
+    log "The marker came back through ${BASE_URL} — ok"
+    return 0
+  fi
+
+  # 401 and 403 are a refusal: an access rule on the site (the fence a new
+  # server keeps until the name moves to it, a rule against dotfiles) or
+  # another server that refuses. Any other answer that is not the marker means
+  # another server, or another directory, is behind the name. No usable answer
+  # means it cannot be told.
+  if [[ "$status" == "401" || "$status" == "403" ]]; then
+    fail "The public name refused the probe marker (HTTP ${status}): a marker written to ${VPS_HOST}:${REMOTE_DIR} was not served through ${BASE_URL}. An access rule on the site blocks it, or another server is behind the name. Stopped before anything was signed or uploaded — check the site's access rules, CHATGOOSE_VPS_HOST and where the public name points"
+  fi
+  if [[ "$status" =~ ^[234][0-9][0-9]$ ]]; then
+    local answer="HTTP ${status}"
+    if [[ "$status" == "200" ]]; then
+      answer="HTTP 200 with other content"
+    fi
+    fail "The public name is served elsewhere: a marker written to ${VPS_HOST}:${REMOTE_DIR} did not come back through ${BASE_URL} (${answer}), so an upload to ${VPS_HOST} would not reach the site. Stopped before anything was signed or uploaded — check CHATGOOSE_VPS_HOST and where the public name points (DNS or forwarding)"
+  fi
+  fail "Could not check that ${BASE_URL} is served from ${VPS_HOST}:${REMOTE_DIR}: the public name gave no usable answer (status ${status:-curl_failed}). Stopped before anything was signed or uploaded — retry when the site answers"
+}
+
 tag_release() {
   local version="$1"
   local sha256="$2"
@@ -432,6 +532,10 @@ verify_http_200_with_retry() {
 # The full release path publishes `start.html` too, so the two cannot diverge.
 publish_pages_only() {
   assert_pages_only_preconditions
+  # Without this the final check passes on the 200 of whichever server holds
+  # the old page. The probe's marker is removed again, so the page is still
+  # the only file this mode leaves behind.
+  assert_upload_host_serves_public_site
 
   local remote_tmp_start
   remote_tmp_start="$REMOTE_DIR/.start.html.upload.$$"
@@ -548,6 +652,11 @@ main() {
     || fail "Changelog announce preflight failed — fix CHANGELOG.md before signing"
 
   assert_core_persona_catalog_ready
+
+  # The upload host has to be the server behind BASE_URL. A mismatch is
+  # deterministic, so it stops here (E33), not after the AMO request in the
+  # public URL checks at the end.
+  assert_upload_host_serves_public_site
 
   log "Building extension"
   pnpm build

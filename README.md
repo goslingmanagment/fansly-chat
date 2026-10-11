@@ -283,6 +283,16 @@ Its address is the `VPS_HOST` default shared by `scripts/deploy.sh` and
 for it. The scripts only put files into `/var/www/ext`; the nginx site that
 serves them is described under [The site on the server](#the-site-on-the-server).
 
+Before anything is signed or uploaded, `scripts/deploy.sh` (the release and
+`--pages-only`) and `scripts/deploy-pages.sh` check that this server is the one
+behind the public name: they write a one-off marker file into the site
+directory over SSH, read it back through `https://ext.gosling-agency.ru` and
+remove it (E148). The run goes on only if the marker comes back. Otherwise it
+stops there and says which case it was: another server answers for the name,
+the site refuses the request, or the name could not be reached. The check
+passes whether DNS points at the server or another server forwards the name
+to it.
+
 The public pages ship together: `install.html` becomes the versionless product
 landing at `index.html`; `start.html` is the shared onboarding page for both
 clients; `whats-new-2.html` is the detailed 2.0 walkthrough; `guide.html`

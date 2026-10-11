@@ -31,6 +31,7 @@ readonly MASCOT_FILE="$ROOT_DIR/mascot.png"
 
 install_page_backup=""
 changelog_page_backup=""
+upload_host_probe_marker=""
 
 cleanup() {
   local exit_code=$?
@@ -38,6 +39,16 @@ cleanup() {
 
   [[ -n "$install_page_backup" && -f "$install_page_backup" ]] && cp "$install_page_backup" "$INSTALL_PAGE_FILE" && rm -f "$install_page_backup"
   [[ -n "$changelog_page_backup" && -f "$changelog_page_backup" ]] && cp "$changelog_page_backup" "$CHANGELOG_PAGE_FILE" && rm -f "$changelog_page_backup"
+  # Names the upload-host probe's marker from before it is written until a
+  # removal has succeeded. Still set here, the probe was interrupted or one of
+  # its SSH steps failed, and the marker may be in the public directory.
+  if [[ -n "$upload_host_probe_marker" ]]; then
+    if ssh -o ConnectTimeout=10 "$VPS_HOST" "rm -f '$upload_host_probe_marker'"; then
+      log "No probe marker is left on ${VPS_HOST}"
+    else
+      log "WARNING: could not make sure the probe marker is gone: ${VPS_HOST}:${upload_host_probe_marker} — remove it by hand if it is there"
+    fi
+  fi
 
   exit "$exit_code"
 }
@@ -104,6 +115,78 @@ assert_pages_preconditions() {
   log "Feed serves ${served_version}, matching the local manifest — ok"
 }
 
+# The upload host has to be the server behind BASE_URL: this script would
+# otherwise upload to one server and take the 200 of another, with its old
+# pages, as success. Same function as in deploy.sh, character for character;
+# the reasoning is written there (E148).
+assert_upload_host_serves_public_site() {
+  local token
+  token="$(node --input-type=module -e '
+    import { randomBytes } from "node:crypto";
+    process.stdout.write(randomBytes(16).toString("hex"));
+  ')" || fail "Could not generate the upload-host probe token"
+  # The token goes into a remote command and a URL: only hex gets there.
+  if [[ ! "$token" =~ ^[0-9a-f]{32}$ ]]; then
+    fail "Upload-host probe token is not 32 hex characters"
+  fi
+
+  local marker_name=".upload-host-probe.${token}"
+  local marker_path="$REMOTE_DIR/$marker_name"
+
+  log "Checking that ${VPS_HOST}:${REMOTE_DIR} is what ${BASE_URL} serves"
+  upload_host_probe_marker="$marker_path"
+  ssh "$VPS_HOST" "printf '%s' '$token' > '$marker_path' && chmod 644 '$marker_path'" \
+    || fail "Could not write a probe marker to ${VPS_HOST}:${REMOTE_DIR} — the upload host is unreachable or does not hold the site. Stopped before anything was signed or uploaded"
+
+  # --fail keeps an error page out of the output, so with --retry the output
+  # is the body of the one attempt that succeeded, then the status line.
+  # `|| true` stays outside the substitution: with it inside, bash 5.3 was
+  # seen to skip the EXIT trap when a SIGHUP reaches the process group while
+  # curl runs (a closed terminal), and the marker stayed on the server.
+  local response
+  response="$(
+    curl \
+      --silent \
+      --show-error \
+      --location \
+      --fail \
+      --retry 3 \
+      --connect-timeout 10 \
+      --max-time 30 \
+      --write-out '\n%{http_code}' \
+      "${BASE_URL}/${marker_name}"
+  )" || true
+  local newline=$'\n'
+  local status="${response##*"$newline"}"
+  local served="${response%"$newline"*}"
+
+  ssh "$VPS_HOST" "rm -f '$marker_path'" \
+    || fail "Could not remove the probe marker ${VPS_HOST}:${marker_path}. Stopped before anything was signed or uploaded"
+  upload_host_probe_marker=""
+
+  if [[ "$status" == "200" && "$served" == "$token" ]]; then
+    log "The marker came back through ${BASE_URL} — ok"
+    return 0
+  fi
+
+  # 401 and 403 are a refusal: an access rule on the site (the fence a new
+  # server keeps until the name moves to it, a rule against dotfiles) or
+  # another server that refuses. Any other answer that is not the marker means
+  # another server, or another directory, is behind the name. No usable answer
+  # means it cannot be told.
+  if [[ "$status" == "401" || "$status" == "403" ]]; then
+    fail "The public name refused the probe marker (HTTP ${status}): a marker written to ${VPS_HOST}:${REMOTE_DIR} was not served through ${BASE_URL}. An access rule on the site blocks it, or another server is behind the name. Stopped before anything was signed or uploaded — check the site's access rules, CHATGOOSE_VPS_HOST and where the public name points"
+  fi
+  if [[ "$status" =~ ^[234][0-9][0-9]$ ]]; then
+    local answer="HTTP ${status}"
+    if [[ "$status" == "200" ]]; then
+      answer="HTTP 200 with other content"
+    fi
+    fail "The public name is served elsewhere: a marker written to ${VPS_HOST}:${REMOTE_DIR} did not come back through ${BASE_URL} (${answer}), so an upload to ${VPS_HOST} would not reach the site. Stopped before anything was signed or uploaded — check CHATGOOSE_VPS_HOST and where the public name points (DNS or forwarding)"
+  fi
+  fail "Could not check that ${BASE_URL} is served from ${VPS_HOST}:${REMOTE_DIR}: the public name gave no usable answer (status ${status:-curl_failed}). Stopped before anything was signed or uploaded — retry when the site answers"
+}
+
 stamp_version() {
   local file="$1" version="$2"
   shift 2
@@ -135,6 +218,7 @@ main() {
   local version
   version="$(read_manifest_version "$ROOT_DIR/manifest.json")"
   assert_pages_preconditions "$version"
+  assert_upload_host_serves_public_site
   log "Deploying pages for ChatGoose $version"
 
   # Backup originals
