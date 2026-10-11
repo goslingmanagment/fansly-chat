@@ -52,6 +52,17 @@ from prose when checking what is installed or live; verify the signed update fee
   results and drafts and checks only the remainder. A run may create empty
   technical chats. Generation and sending still require a human click and
   confirmed history; a listing/search miss never means «Не писали».
+- **Fansly через вкладку** (2.7.2, E149) — an opt-in switch («Генерация» →
+  «Служебное») for a chatter without a system-wide VPN. Firefox gives the
+  background's requests no tab, so Multi-Account Containers' per-container proxy
+  never applies to them and they leave from the chatter's own address (from a
+  Russian line, CloudFront freezes such a connection after ~8–17 KB). With the
+  switch on, the content bootstrap mounts a hidden extension frame
+  (`fansly-relay.html`, in a closed shadow root) in every Fansly tab; the
+  background hands it each ready request (`src/background/fansly-transport.ts`)
+  and the request leaves through that tab's container proxy, per model.
+  Pacing, retries and the one-attempt write rule are unchanged; a send checks
+  the route before it takes any custody. Off by default.
 - **Spenders** — kernel-backed ranking with data freshness and deleted-account labels.
 - **Vault uploader** — on `/creator/vault`, a folder of media goes into the open
   album one file at a time through Fansly's own upload form, each confirmed by

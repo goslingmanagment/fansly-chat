@@ -87,10 +87,16 @@ export function initializeSessionCapture(
     material: boolean,
   ) => void | Promise<void>,
 ): void {
+  const ownOrigin = browser.runtime.getURL('');
   browser.webRequest.onBeforeSendHeaders.addListener(
     (details) => {
       // Ignore non-tab requests (e.g., extension background requests)
       if (details.tabId < 0) {
+        return;
+      }
+      // E149: the relay frame's requests ride the tab but are our own replay
+      // of a captured session, never the page's fresh headers.
+      if (details.documentUrl?.startsWith(ownOrigin) || details.originUrl?.startsWith(ownOrigin)) {
         return;
       }
 

@@ -515,6 +515,8 @@ export const COPY = {
     coachRecapWarning: 'Полный рекап загружает до {n} сообщений — медленно и дорого.',
     debugTitle: 'Режим отладки',
     debugHint: 'подробные логи и журнал проверки новых фоловеров',
+    fanslyViaTabTitle: 'Fansly через вкладку',
+    fanslyViaTabHint: 'для работы без VPN: запросы ChatGoose к Fansly идут через открытую вкладку модели и её прокси',
     savedAs: 'сохранено как {n}',
     /** Under the range: what one −/+ press moves. */
     stepNote: 'шаг {n}',

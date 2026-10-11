@@ -1283,6 +1283,18 @@ async function render(): Promise<void> {
   debugSwitchTrack.className = 'chatgoose-switch-track';
   debugSwitch.append(debugInput, debugSwitchTrack);
 
+  // E149: «Fansly через вкладку» — the same family switch; the route changes
+  // for this browser only, and only where a chatter turns it on.
+  const fanslyViaTabInput = document.createElement('input');
+  fanslyViaTabInput.type = 'checkbox';
+  fanslyViaTabInput.checked = state.settings.fanslyViaTab;
+  fanslyViaTabInput.dataset.role = 'fansly-via-tab-toggle';
+  const fanslyViaTabSwitch = document.createElement('span');
+  fanslyViaTabSwitch.className = 'chatgoose-switch';
+  const fanslyViaTabTrack = document.createElement('span');
+  fanslyViaTabTrack.className = 'chatgoose-switch-track';
+  fanslyViaTabSwitch.append(fanslyViaTabInput, fanslyViaTabTrack);
+
   /**
    * One setting per line: a two-line label (what it is, then what it does) with
    * the control on the right. A DIV by default — a <label> would forward a
@@ -1489,6 +1501,12 @@ async function render(): Promise<void> {
         settingRow(COPY.generation.debugTitle, COPY.generation.debugHint, debugSwitch, {
           asLabel: true,
         }),
+        settingRow(
+          COPY.generation.fanslyViaTabTitle,
+          COPY.generation.fanslyViaTabHint,
+          fanslyViaTabSwitch,
+          { asLabel: true },
+        ),
       ],
       true,
     ),
@@ -3840,6 +3858,7 @@ async function render(): Promise<void> {
     coachHistoryInput.value,
     coachRecapSelect.value,
     debugInput.checked,
+    fanslyViaTabInput.checked,
   ]);
   const collectSettingsPatch = (): Partial<Settings> => {
     const patch: Partial<Settings> = {
@@ -3859,6 +3878,7 @@ async function render(): Promise<void> {
       coachHistoryLimit: Number(coachHistoryInput.value),
       coachAutoRecap: coachRecapSelect.value as Settings['coachAutoRecap'],
       debugMode: debugInput.checked,
+      fanslyViaTab: fanslyViaTabInput.checked,
     };
     // v17 (E123): this page persists NO credential. The sign-in lives in its own
     // custody key, written background-side inside the FIFO — so a stale Options
@@ -3939,6 +3959,9 @@ async function render(): Promise<void> {
       }
       if (document.activeElement !== toolbarHintsInput) {
         toolbarHintsInput.checked = mergedSettings.showToolbarHints;
+      }
+      if (document.activeElement !== fanslyViaTabInput) {
+        fanslyViaTabInput.checked = mergedSettings.fanslyViaTab;
       }
       if (document.activeElement !== messageSound.toggle) {
         messageSound.toggle.checked = mergedSettings.messageSoundEnabled;
@@ -4083,6 +4106,7 @@ async function render(): Promise<void> {
     coachHistoryInput,
     coachRecapSelect,
     debugInput,
+    fanslyViaTabInput,
   ].forEach((element) => {
     element.addEventListener('input', () => {
       scheduleSettingsSave();

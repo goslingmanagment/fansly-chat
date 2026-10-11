@@ -94,7 +94,7 @@ function pause(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 function errorText(error: unknown): string {
-  if (error instanceof Error && ['AbortError', 'TimeoutError'].includes(error.name)) return 'Не успели проверить Fansly. Продолжите проверку или обновите список.';
+  if (error instanceof Error && ['AbortError', 'TimeoutError'].includes(error.name)) return 'Fansly не ответил вовремя. Продолжите проверку или обновите список. Если работаете без VPN, включите «Fansly через вкладку»: Настройки → Генерация → Служебное.';
   return error instanceof ChatGooseError ? toUserError(error).message : error instanceof Error ? error.message : 'Не удалось проверить Fansly.';
 }
 
@@ -402,7 +402,7 @@ export class FollowersService {
           blips = 0;
         } catch (error) {
           const status = error instanceof ChatGooseError ? error.details?.status : undefined;
-          const blip = !signal.aborted && error instanceof ChatGooseError && (error.key === 'network_error' || status === 0 || (status === 404 && !error.details?.refused));
+          const blip = !signal.aborted && error instanceof ChatGooseError && (error.key === 'network_error' || error.key === 'fansly_tab_unavailable' || status === 0 || (status === 404 && !error.details?.refused));
           // A 5xx is not asked again, but a run of them is the same incident.
           const failing = blip || (!signal.aborted && typeof status === 'number' && status >= 500);
           if (failing && ++blips >= RECHECK_FUSE) {
@@ -994,6 +994,9 @@ export class FollowersService {
       // Before anything is reserved: see `assertNotCooling`.
       this.assertNotCooling(scan);
       const signal = AbortSignal.timeout(60_000);
+      // A missing «Fansly через вкладку» route is a plain error before custody,
+      // never an unconfirmed send (E149).
+      await this.options.fansly.assertRoute(scan.session, signal);
       await this.check(scan, row, signal, scope, 'before-send');
       // A re-check that ends the send is an error the chatter sees (E134), not
       // a snapshot that looks like a delivery. The draft stays where it is.
@@ -1126,7 +1129,7 @@ export class FollowersService {
             scan.trace?.event('verification.failed', { fanId, paused: signal.aborted, reason: error instanceof ChatGooseError ? error.key : 'check-failed' });
             const cause = error instanceof Error && error.cause instanceof ChatGooseError ? error.cause : error;
             const status = cause instanceof ChatGooseError ? cause.details?.status : undefined;
-            const failing = !signal.aborted && (cause instanceof TypeError || cause instanceof Error && ['TimeoutError', 'AbortError'].includes(cause.name) || cause instanceof ChatGooseError && (cause.key === 'network_error' || status === 0 || status === 404 || typeof status === 'number' && status >= 500));
+            const failing = !signal.aborted && (cause instanceof TypeError || cause instanceof Error && ['TimeoutError', 'AbortError'].includes(cause.name) || cause instanceof ChatGooseError && (cause.key === 'network_error' || cause.key === 'fansly_tab_unavailable' || status === 0 || status === 404 || typeof status === 'number' && status >= 500));
             failures = failing ? failures + 1 : 0;
             if (status === 429 || (cause instanceof ChatGooseError && cause.key === 'rate_limited')) { view.stopped = 'cooldown'; scan.passController.abort(); }
             else if (failures >= RECHECK_FUSE) {

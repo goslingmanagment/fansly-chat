@@ -19,6 +19,7 @@ import {
   extractOldestMessageId,
 } from '../shared/transcript.js';
 import { recordAccountPresence } from './account-presence.js';
+import { directFanslyTransport, type FanslyTransport } from './fansly-transport.js';
 
 /** Retry-After header → ms (seconds or HTTP-date form). Relocated from the
  * deleted llm-stream-utils (Stage 32) — Fansly rate limits still use it. */
@@ -339,6 +340,12 @@ export class FanslyClient {
     return copy;
   }
 
+  /** Throws `fansly_tab_unavailable` when this session's requests have no
+   * route right now (E149); a send asks before it takes any custody. */
+  async assertRoute(session: SessionTemplate, signal: AbortSignal): Promise<void> {
+    await this.transport.ready?.(session, signal);
+  }
+
   followerReadStatus(session: SessionTemplate): { cooldownUntil: number; intervalMs: number } | undefined {
     return this.followerReads.status(session.resolvedAccountId ?? session.accountId);
   }
@@ -348,7 +355,13 @@ export class FanslyClient {
     return this.followerReads.readyAt(session.resolvedAccountId ?? session.accountId, 'GET', pathname);
   }
 
-  constructor(private readonly sessionStore: SessionStore, pacerStorage?: PacerStorage) {
+  /** `transport` decides where a ready request leaves from (E149); pacing,
+   * headers and retries stay here whatever the route. */
+  constructor(
+    private readonly sessionStore: SessionStore,
+    pacerStorage?: PacerStorage,
+    private readonly transport: FanslyTransport = directFanslyTransport,
+  ) {
     this.followerReads = new FanslyPacer({ storage: pacerStorage });
   }
 
@@ -456,11 +469,13 @@ export class FanslyClient {
           headers.set('fansly-client-check', routeCheck);
         }
 
-        const response = await fetch(requestUrl, {
+        const response = await this.transport({
+          url: requestUrl,
           method: 'GET',
           headers,
           signal: composite,
-          credentials: 'omit',
+          session,
+          onTabRoute: (tabId) => attemptTrace?.event('http.route', { via: 'tab', tabId }),
         });
         attemptTrace?.event('http.response', { status: response.status });
 
@@ -667,9 +682,10 @@ export class FanslyClient {
       }
       headers.set('fansly-client-ts', String(Date.now()));
       attemptTrace = trace?.start('http', { method: 'POST', path: requestUrl.pathname, query: requestUrl.search, attempt: 1, retry: false, timeoutMs: FANSLY_REQUEST_TIMEOUT_MS });
-      const response = await fetch(requestUrl, {
-        method: 'POST', headers, body: JSON.stringify(body), credentials: 'omit',
+      const response = await this.transport({
+        url: requestUrl, method: 'POST', headers, body: JSON.stringify(body), session,
         signal: AbortSignal.any([signal, AbortSignal.timeout(FANSLY_REQUEST_TIMEOUT_MS)]),
+        onTabRoute: (tabId) => attemptTrace?.event('http.route', { via: 'tab', tabId }),
       });
       attemptTrace?.event('http.response', { status: response.status });
       if (!response.ok) {

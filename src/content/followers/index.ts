@@ -239,7 +239,8 @@ export class FollowersWindow {
     const checked = snapshot.rows.filter((row) => canSend(row) || ['contacted', 'sent', 'sending'].includes(row.status)).length;
     const progress = `Проверено ${checked} из ${snapshot.rows.length}`;
     const phases = { welcome: 'Читаем welcome-сообщения…', followers: 'Загружаем фоловеров…', profiles: 'Загружаем профили…', checking: progress, notes: progress };
-    this.node('.progress').textContent = snapshot.scanning ? phases[snapshot.phase ?? 'checking'] : snapshot.rows.length ? progress : 'Новых фоловеров нет';
+    // A failed scan with no rows is an unread list, not an empty period.
+    this.node('.progress').textContent = snapshot.scanning ? phases[snapshot.phase ?? 'checking'] : snapshot.rows.length ? progress : snapshot.error ? 'Список не загружен' : 'Новых фоловеров нет';
     const verification = snapshot.verification;
     this.node('.pause').hidden = !verification?.active && (!snapshot.scanning || !['profiles', 'checking', 'notes'].includes(snapshot.phase ?? ''));
     this.node('.verification').hidden = !verification?.active && !snapshot.canContinue;
@@ -274,7 +275,7 @@ export class FollowersWindow {
       });
       return button;
     }));
-    if (!rows.length) list.append(element('div', 'list-empty', snapshot.scanning ? 'Загружаем…' : 'Очередь пуста'));
+    if (!rows.length) list.append(element('div', 'list-empty', snapshot.scanning ? 'Загружаем…' : snapshot.error && !snapshot.rows.length ? 'Список не загружен' : 'Очередь пуста'));
     if (focused) list.querySelector<HTMLElement>(`[data-fan="${focused}"]`)?.focus();
     const row = snapshot.rows.find((v) => v.id === this.selected);
     // Only changes to the selected fan may rebuild their composer. Queue

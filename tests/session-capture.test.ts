@@ -78,6 +78,7 @@ describe('initializeSessionCapture', () => {
     }
     let listener: ((details: CaptureDetails) => void) | null = null;
     vi.stubGlobal('browser', {
+      runtime: { getURL: (path: string) => `moz-extension://chatgoose-test/${path}` },
       webRequest: {
         onBeforeSendHeaders: {
           addListener: vi.fn((nextListener: typeof listener) => {
@@ -135,5 +136,54 @@ describe('initializeSessionCapture', () => {
     emit('account-2', { sessionId: 'session-3', ts: '123' });
     expect(onCapture.mock.calls.filter((call) => call[2] === true)).toHaveLength(4);
     expect(onCapture).toHaveBeenLastCalledWith(7, 'account-2', true);
+  });
+
+  it('E149: never captures the relay frame\'s own requests as the page\'s session', () => {
+    interface FrameDetails {
+      tabId: number;
+      frameId?: number;
+      url: string;
+      documentUrl?: string;
+      originUrl?: string;
+      requestHeaders: browser.webRequest.HttpHeaders;
+    }
+    let listener: ((details: FrameDetails) => void) | null = null;
+    vi.stubGlobal('browser', {
+      runtime: { getURL: (path: string) => `moz-extension://chatgoose-test/${path}` },
+      webRequest: {
+        onBeforeSendHeaders: {
+          addListener: vi.fn((nextListener: typeof listener) => {
+            listener = nextListener;
+          }),
+        },
+      },
+    });
+    const store = new SessionStore();
+    const onCapture = vi.fn();
+    initializeSessionCapture(store, onCapture);
+    const headers = (check: string): browser.webRequest.HttpHeaders => [
+      { name: 'authorization', value: btoa('account-1:secret') },
+      { name: 'fansly-client-id', value: 'client-1' },
+      { name: 'fansly-session-id', value: 'session-1' },
+      { name: 'fansly-client-ts', value: '100' },
+      { name: 'fansly-client-check', value: check },
+    ];
+    const url = 'https://apiv3.fansly.com/api/v1/message?groupId=g1';
+
+    // The page's own request is the capture.
+    listener!({ tabId: 7, frameId: 0, url, documentUrl: 'https://fansly.com/messages/1', originUrl: 'https://fansly.com/messages/1', requestHeaders: headers('page-check') });
+    expect(onCapture).toHaveBeenCalledTimes(1);
+
+    // The relay frame replays that session from the same tab: same tabId,
+    // an extension document. It must not overwrite the page's fresh template.
+    const frame = 'moz-extension://chatgoose-test/fansly-relay.html';
+    listener!({ tabId: 7, frameId: 42, url, documentUrl: frame, originUrl: frame, requestHeaders: headers('replayed-check') });
+    listener!({ tabId: 7, frameId: 42, url, originUrl: frame, requestHeaders: headers('replayed-check') });
+    expect(onCapture).toHaveBeenCalledTimes(1);
+    expect(store.getSessionForTab(7)).toMatchObject({ latestCheck: 'page-check', routeChecks: { message: 'page-check' } });
+
+    // Another extension's frame in the tab is not ours and is not special-cased.
+    listener!({ tabId: 7, frameId: 43, url, documentUrl: 'moz-extension://someone-else/page.html', requestHeaders: headers('other-check') });
+    expect(onCapture).toHaveBeenCalledTimes(2);
   });
 });

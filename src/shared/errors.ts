@@ -31,6 +31,14 @@ const ERROR_REGISTRY: Record<UserErrorKey, ErrorRegistryEntry> = {
     message: 'Fansly вернул ошибку.',
     description: 'Подождите немного и повторите действие.',
   },
+  fansly_tab_unavailable: {
+    key: 'fansly_tab_unavailable',
+    code: 'CG-FAN-04',
+    // E149: «Fansly через вкладку» is on, and no tab holding this session has
+    // a live relay frame — closed, still loading, or opened before the switch.
+    message: 'Нет связи с вкладкой Fansly.',
+    description: 'Включён режим «Fansly через вкладку»: запросы идут через открытую вкладку Fansly этой модели. Обновите её и повторите действие.',
+  },
   rate_limited: {
     key: 'rate_limited',
     code: 'CG-API-01',
@@ -91,7 +99,7 @@ const ERROR_REGISTRY: Record<UserErrorKey, ErrorRegistryEntry> = {
     key: 'network_error',
     code: 'CG-NET-01',
     message: 'Ошибка сетевого запроса.',
-    description: 'Проверьте подключение и повторите действие.',
+    description: 'Проверьте подключение и повторите действие. Если работаете без VPN, включите «Fansly через вкладку»: Настройки → Генерация → Служебное.',
   },
   timed_out: {
     key: 'timed_out',

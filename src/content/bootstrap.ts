@@ -117,6 +117,37 @@ void readUiThemeSetting()
   .then((setting) => installUiTheme(setting))
   .catch(() => {});
 
+// E149 «Fansly через вкладку»: while the switch is on, an extension frame lives
+// in this tab and carries the background's Fansly requests, so they take the
+// tab's network path (its container proxy). The closed shadow root keeps the
+// frame's moz-extension address, which names this install, out of the page's
+// reach. Off, the tab holds nothing of it.
+let fanslyRelayHost: HTMLElement | null = null;
+function syncFanslyRelay(settings: unknown): void {
+  if ((settings as { fanslyViaTab?: unknown } | undefined)?.fanslyViaTab !== true) {
+    fanslyRelayHost?.remove();
+    fanslyRelayHost = null;
+    return;
+  }
+  if (fanslyRelayHost?.isConnected) {
+    return;
+  }
+  fanslyRelayHost = document.createElement('div');
+  fanslyRelayHost.style.display = 'none';
+  const frame = document.createElement('iframe');
+  frame.src = browser.runtime.getURL('fansly-relay.html');
+  fanslyRelayHost.attachShadow({ mode: 'closed' }).append(frame);
+  document.body.append(fanslyRelayHost);
+}
+void browser.storage.local.get('settings')
+  .then((stored) => syncFanslyRelay(stored.settings))
+  .catch(() => {});
+browser.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === 'local' && changes.settings) {
+    syncFanslyRelay(changes.settings.newValue);
+  }
+});
+
 function loadContentAppModule(): Promise<ContentAppModule> {
   if (!appModulePromise) {
     const baseModuleUrl = browser.runtime.getURL('content-chat.js');

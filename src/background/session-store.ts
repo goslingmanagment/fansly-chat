@@ -92,6 +92,24 @@ export class SessionStore {
     return null;
   }
 
+  /** Every tab whose captured session is this account: the tabs that share its
+   * network path, which «Fansly через вкладку» sends through (E149). */
+  getTabIdsForAccount(accountId: string | null | undefined): number[] {
+    if (!accountId) {
+      return [];
+    }
+    const tabIds: number[] = [];
+    for (const [tabId, mappedAccountId] of this.accountByTabId) {
+      if (
+        mappedAccountId === accountId ||
+        this.sessionsByAccount.get(mappedAccountId)?.resolvedAccountId === accountId
+      ) {
+        tabIds.push(tabId);
+      }
+    }
+    return tabIds;
+  }
+
   /** EVERY tab the capture map can attribute to an account.
    *
    * The accounts view needs the whole mapping, not one tab per row: an account
