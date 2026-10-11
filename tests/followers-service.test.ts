@@ -31,6 +31,7 @@ function harness(debugMode = false, realTransport = false) {
     getMessagePage: vi.fn(async (_group: string, before: string | null) => ({ messages: before ? [] : messages, accountMedia: [], accountMediaBundles: [] })),
     createFollowerGroup: vi.fn(async (_fanId?: string): Promise<{ id: string; lastMessage: FanslyMessage | null }> => ({ id: '3', lastMessage: null })),
     sendFollowerMessage: vi.fn(async () => '99'),
+    assertRoute: vi.fn(async () => undefined),
   };
   const storage = {
     get: vi.fn(async (keys: string | string[]) => Object.fromEntries((Array.isArray(keys) ? keys : [keys]).map((key) => [key, values[key]]))),
@@ -731,7 +732,7 @@ describe('followers scan and one-attempt send', () => {
     h.fansly.getAccountNames.mockResolvedValue([{ id: '2', username: 'fan', notes: [] }]);
     const first = await h.start();
     expect(first.rows[0]).toMatchObject({ status: 'unknown', username: '' });
-    expect(first.rows[0]?.detail).toContain('Не успели');
+    expect(first.rows[0]?.detail).toContain('Fansly не ответил вовремя');
     expect(first.canContinue).toBe(true);
     h.service.resume(7, first.scanId);
     await vi.waitFor(() => expect(h.service.state(7, first.scanId).scanning).toBe(false));
@@ -958,6 +959,18 @@ describe('followers scan and one-attempt send', () => {
     await vi.waitFor(() => expect(h.fansly.sendFollowerMessage).toHaveBeenCalledOnce());
     await expect(h.service.send(8, second.scanId, '2', 'hello')).rejects.toThrow();
     finish('99'); await sending;
+  });
+  it('E149: a missing «Fansly через вкладку» route stops the send before any custody, and it can be sent later', async () => {
+    const h = harness(); const snapshot = await h.start();
+    h.fansly.assertRoute.mockRejectedValueOnce(new ChatGooseError('fansly_tab_unavailable'));
+    await expect(h.service.send(7, snapshot.scanId, '2', 'hello')).rejects.toMatchObject({ key: 'fansly_tab_unavailable' });
+    expect(h.hub.followerOutreachAttempt).not.toHaveBeenCalled();
+    expect(h.fansly.sendFollowerMessage).not.toHaveBeenCalled();
+    expect(Object.keys(h.values).filter((key) => key.includes(':attempt:'))).toEqual([]);
+    expect(h.service.state(7, snapshot.scanId).rows.find((row) => row.id === '2')?.status).not.toBe('uncertain');
+    // Nothing was sent, so nothing is blocked: the next try goes through.
+    await expect(h.service.send(7, snapshot.scanId, '2', 'hello')).resolves.toMatchObject({ scanId: snapshot.scanId });
+    expect(h.fansly.sendFollowerMessage).toHaveBeenCalledOnce();
   });
   it('does not send when storage custody fails', async () => {
     const h = harness(); const snapshot = await h.start();

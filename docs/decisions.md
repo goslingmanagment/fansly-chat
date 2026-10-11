@@ -139,6 +139,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E146 | 2026-09-28 | New-follower sound on the E145 path: the tap also forwards FollowerService (`serviceId 3`) `type 2` follows (`{id, accountId, followerId}`, no createdAt), the background rings a follow of one of our models (`accountId` ours, `followerId` not) with its own switch and tone (`double`), shared volume, throttle and player, per-model mute on the model the event names; five Fansly tones (message default `chime`, the OnlyFans `blip` a choice; a v18 `blip` re-defaulted); settings v19; 2.7.1 |
 | E147 | 2026-10-11 | `scripts/setup-vps-ext.sh` is removed (the owner chose removal over repair): nothing in the repository creates or rewrites the nginx site of `ext.gosling-agency.ru`. The script had not run since 2026-03-24; its templates lacked what the live file had gained (the desktop feed's `/u/`, the latest-XPI no-cache rule), and its edit of the Hub's nginx site looked for markers that site does not carry, so a run against agency-de would have erased those locations and written a second `location ^~ /ext/` into the Hub's site. README «The site on the server» holds where the file lives, what the deploy scripts need from it, who else it serves and a dated copy. The same day, on the owner's request, the site's latest-XPI no-cache rule was pointed at `chatgoose-latest.xpi` on both servers |
 | E148 | 2026-10-11 | Upload-host probe: before `web-ext sign` and before either page upload, the deploy scripts write a one-off marker into `REMOTE_DIR` over SSH, read it back through `BASE_URL` and remove it; the run goes on only if the marker comes back, otherwise it stops and says whether another server answers for the public name, the site refuses, or the name gave no answer; passes under a DNS switch and under forwarding; no skip flag |
+| E149 | 2026-10-11 | «Fansly через вкладку» (opt-in, settings v20): every FanslyClient request rides a hidden extension frame inside a Fansly tab of the same session, so Multi-Account Containers' proxy carries it instead of the chatter's own line; no new permission, no proxy password, per-model route; session capture skips the frame; `fansly_tab_unavailable`; a send checks the route before custody; a failed follower scan no longer reads «Новых фоловеров нет»; 2.7.2 |
 
 ## Entries
 
@@ -5278,3 +5279,79 @@ request.
   `X-Forwarded-For`), and answers 403 to the same request from elsewhere; the
   forwards the old server already runs hand every path to the new one.
 
+**E149 (2026-10-11).** «Fansly через вкладку» — an opt-in route for the
+extension's own Fansly requests, for a chatter without a system-wide VPN. The
+owner: «это нужно не всем, если мы всех будем пускать через прокси у нее
+пропускной способности не хватит», «надо чето опциональное для таких случаев
+как у вани».
+
+- Case: Vanya (ari-1; Firefox 157; Multi-Account Containers with the page proxy
+  per container; no system VPN; a home line in Russia). The follower scan and
+  the recap died on 30 s timeouts with no response headers while the tab itself
+  worked. Firefox gives a background request `tabId −1`; MAC's proxy handler
+  answers `{}` for it, so the request leaves directly from the chatter's
+  address. From a Russian network a direct connection to CloudFront
+  (`apiv3.fansly.com`) freezes after ~8–17 KB downstream, and on one reused
+  connection every later request gets zero bytes (from the RU server on
+  2026-10-11: two 6 KB answers, then six requests with 0 bytes in 40 s). Small
+  reads pass until the connection freezes; large ones never do; a retry rides
+  the same frozen connection, and `fetch` cannot ask for a new one.
+- Decision: with the switch on, both FanslyClient call sites (GET and POST)
+  leave through a hidden extension frame inside a Fansly tab of the same
+  session. Firefox attributes the frame's requests to the tab and its
+  container, so MAC proxies them like the page's own; the frame holds the
+  extension's host permission, so there is no CORS preflight and no Origin —
+  the request shape of the background. Measured first on a Firefox 157 stand
+  that copies MAC's proxy decision.
+- Rejected: a content-script fetch (page-like CORS with a preflight per
+  request, and the page's own JS sees every such URL in its resource timing;
+  the frame's requests it does not see); the `proxy` permission with a proxy
+  line typed into the extension (passwords in the extension, a per-model
+  mapping by hand, pages mixable on one address); follower and history reads
+  from the hub (the extension is the live reader, and a frozen connection
+  kills the small reads too); a retry after a timeout (it cannot leave the
+  frozen connection).
+- Shape: `src/fansly-relay/` — the frame, web-accessible to fansly.com only,
+  mounted by the bootstrap in a closed shadow root only while
+  `fanslyViaTab === true` and removed when it goes off; it reconnects with a
+  0.1 → 5 s backoff. `src/shared/fansly-relay-protocol.ts` — GET/POST to
+  `https://apiv3.fansly.com/api/v1/` only; status, three headers and the body
+  back. `src/background/fansly-transport.ts` — `FanslyRelayHub` takes only our
+  page framed in a tab, the newest frame of a tab wins; a read waits up to 5 s
+  for a loading tab, a write never waits; a lost frame fails its requests like
+  a dropped connection, so a dispatched write stays unconfirmed.
+  `createFanslyTransport` reads the switch per request and never falls back to
+  the direct route. Pacing, retries and the one-attempt write rule are
+  untouched: the transport only decides where a ready request leaves from.
+- The route settles before the identity check, and dispatch posts before it
+  yields: nothing asynchronous sits between the last check and the request,
+  with the switch on or off. The frame answers like `fetch`: status and
+  headers first, then the body, so a 429, 401 or 5xx counts even when its body
+  breaks. (Both from the review: an earlier draft awaited the setting after
+  the check and sent the status only with the full body.) A second frame of a
+  tab never evicts the first, which would make them evict each other forever.
+  A body nobody reads (a 401, 429 or retry acted on by status) is released by
+  a cancel or after the request timeout, so a stalled one cannot hold the
+  frame's request; a Pause that lands while a chat opening's route settles
+  still stops it.
+- Session capture skips requests whose document is the extension's own: the
+  frame replays the captured session and must not overwrite the page's fresh
+  template.
+- Errors: `fansly_tab_unavailable` (CG-FAN-04) when no tab of the session has
+  a frame; the follower fuses count it as an outage. A follower greeting asks
+  for the route before it reserves anything in the hub, so a missing frame is a
+  plain error, never an unconfirmed send. The network-error card and the
+  follower timeout text point to the switch.
+- Follower window: a failed scan with no rows says «Список не загружен» in the
+  header and in the list instead of «Новых фоловеров нет».
+- Settings v20: `fanslyViaTab`, off for every install; only an explicit `true`
+  turns it on. No new permission, so the update prompts nothing.
+- Verified: `pnpm check`, and the built extension on a Firefox 157 stand (MAC's
+  proxy decision, a fake Fansly behind a container proxy, and a «chatter line»
+  that freezes every connection after 12 KB). Off: the scan dies in 32 s with
+  the new texts. On, same tab without a reload: the 41 KB follower page passes
+  through the container proxy in 1 s, without Origin. After a reload the frame
+  mounts at page start and nothing uses the chatter's line. Off again: the
+  frame leaves the page. The page sees no iframe and no `moz-extension`
+  address. Not verified: a real Fansly session, Vanya's line.
+- Version 2.7.2 (patch, E120); published only on the owner's word.

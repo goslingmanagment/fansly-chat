@@ -83,6 +83,7 @@ function makeState(overrides?: Partial<PersistedState>): PersistedState {
       messageSoundMutedAccountIds: [],
       followSoundEnabled: true,
       followSoundTone: 'double',
+      fanslyViaTab: false,
     },
     personalities: [{ id: 'p1', name: 'Closer', content: 'be nice', updatedAt: 1 }],
     personaCatalog: [{
@@ -692,6 +693,25 @@ describe('Options page account sections', { timeout: 30_000 }, () => {
 
     await vi.waitFor(() => {
       expect(currentState.settings.showToolbarHints).toBe(false);
+    }, { timeout: 2000 });
+  });
+
+  it('E149: renders «Fansly через вкладку» off in the service card and saves it', async () => {
+    await loadOptionsPage({ state: makeState(), sessions: [] });
+
+    const section = getSectionByTitle(COPY.generation.title);
+    const toggle = section.querySelector<HTMLInputElement>('[data-role="fansly-via-tab-toggle"]')!;
+    expect(toggle.checked).toBe(false);
+    const row = toggle.closest('.chatgoose-row');
+    expect(row?.textContent).toContain(COPY.generation.fanslyViaTabTitle);
+    expect(row?.textContent).toContain(COPY.generation.fanslyViaTabHint);
+    expect(toggle.closest('[data-setting-group]')?.getAttribute('data-setting-group'))
+      .toBe(COPY.generation.groupService);
+
+    toggle.checked = true;
+    toggle.dispatchEvent(new Event('change', { bubbles: true }));
+    await vi.waitFor(() => {
+      expect(currentState.settings.fanslyViaTab).toBe(true);
     }, { timeout: 2000 });
   });
 

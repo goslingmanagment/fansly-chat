@@ -6,6 +6,7 @@ import {
   startPersonaCatalogRefreshLoop,
 } from './persona-catalog.js';
 import { FanslyClient } from './fansly-client.js';
+import { createFanslyRelayHub, createFanslyTransport } from './fansly-transport.js';
 import { OperationCoordinator } from './operations.js';
 import { registerRuntimeApi } from './runtime-api.js';
 import { initializeSessionCapture } from './session-capture.js';
@@ -25,6 +26,7 @@ import {
   VOICE_CAPABILITY_BUDGET_MS,
 } from '../shared/constants.js';
 import { buildAgencyHubOriginPattern } from '../shared/agency-hub.js';
+import { FANSLY_RELAY_PORT_NAME } from '../shared/fansly-relay-protocol.js';
 import { readStorageState } from '../shared/storage.js';
 import { FollowersService } from './followers-service.js';
 import { WelcomeDefinitionsService } from './welcome-definitions.js';
@@ -39,7 +41,14 @@ const sessionStore = new SessionStore();
 const tabContexts = new TabContextStore();
 const storageCoordinator = new StorageCoordinator();
 const voiceAttempts = new VoiceAttemptRepository();
-const fanslyClient = new FanslyClient(sessionStore, browser.storage.local);
+// E149: «Fansly через вкладку». Off, every request leaves from the background
+// as before; on, it rides the relay frame of a tab holding the same session.
+const fanslyRelays = createFanslyRelayHub();
+const fanslyClient = new FanslyClient(sessionStore, browser.storage.local, createFanslyTransport({
+  viaTab: async () => (await storageCoordinator.getState()).settings.fanslyViaTab,
+  tabsFor: (session) => sessionStore.getTabIdsForAccount(session.accountId),
+  relays: fanslyRelays,
+}));
 const spendersService = new SpendersService(
   fanslyClient,
   {
@@ -156,6 +165,10 @@ browser.runtime.onConnect.addListener((port) => {
     port.onDisconnect.addListener(() => {
       bootstrapKeepalivePorts.delete(port);
     });
+    return;
+  }
+  if (port.name === FANSLY_RELAY_PORT_NAME) {
+    fanslyRelays.register(port);
     return;
   }
   coordinator.registerPort(port);

@@ -59,6 +59,7 @@ function makeState(overrides?: Partial<PersistedState['settings']>): PersistedSt
       messageSoundMutedAccountIds: [],
       followSoundEnabled: true,
       followSoundTone: 'double',
+      fanslyViaTab: false,
       ...overrides,
     },
     personalities: [

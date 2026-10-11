@@ -129,6 +129,7 @@ describe('isDebugEnabled', () => {
       messageSoundMutedAccountIds: [],
       followSoundEnabled: true,
       followSoundTone: 'double',
+      fanslyViaTab: false,
     })).toBe(true);
   });
 
@@ -152,6 +153,7 @@ describe('isDebugEnabled', () => {
       messageSoundMutedAccountIds: [],
       followSoundEnabled: true,
       followSoundTone: 'double',
+      fanslyViaTab: false,
     })).toBe(false);
   });
 

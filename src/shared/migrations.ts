@@ -43,6 +43,7 @@ export function createDefaultSettings(): Settings {
     messageSoundMutedAccountIds: [],
     followSoundEnabled: true,
     followSoundTone: FOLLOW_SOUND_TONE_DEFAULT,
+    fanslyViaTab: false,
   };
 }
 
@@ -102,6 +103,8 @@ function migrateSettingsRecord(
   // (on, like the message sound) and tone (`double`, to tell it apart). Five
   // Fansly tones join; the message default becomes `chime` (a v18 `blip` is
   // re-defaulted by adoptFanslyMessageToneDefault before this normalizer).
+  // v20 (E149): fanslyViaTab ADDED — «Fansly через вкладку», off for everyone:
+  // the request route changes only where a chatter switches it on.
   return {
     // v17: an EMPTY address is the pre-E123 default nobody chose — the fleet has
     // one hub, so it is filled in rather than left blank for the chatter to
@@ -142,6 +145,7 @@ function migrateSettingsRecord(
     messageSoundMutedAccountIds: normalizeMutedAccountIds(raw?.messageSoundMutedAccountIds),
     followSoundEnabled: Boolean(raw?.followSoundEnabled ?? defaults.followSoundEnabled),
     followSoundTone: normalizeMessageSoundTone(raw?.followSoundTone, defaults.followSoundTone),
+    fanslyViaTab: raw?.fanslyViaTab === true,
   };
 }
 

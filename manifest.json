@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ChatGoose",
-  "version": "2.7.1",
+  "version": "2.7.2",
   "description": "AI-powered chat assistant for Fansly.com",
   "permissions": [
     "storage",
@@ -60,7 +60,8 @@
         "content-followers.js",
         "content-vault.js",
         "content.css",
-        "vault.css"
+        "vault.css",
+        "fansly-relay.html"
       ],
       "matches": [
         "*://fansly.com/*"

@@ -425,8 +425,21 @@
 
 <div class="timeline">
 
+  <div class="release" id="v2-7-2">
+    <div class="release-header"><span class="release-version">2.7.2</span><span class="release-badge latest">11 октября 2026</span></div>
+    <div class="release-changes">
+      <div class="release-summary"><p>Гусь работает и без VPN на весь компьютер. Если вкладка Fansly открывается через прокси, а Гусь не загружает фоловеров, рекап или переписку, включите новый режим «Fansly через вкладку».</p></div>
+      <ul class="changes-list">
+        <li><strong>«Fansly через вкладку».</strong> «Настройки» → «Генерация» → «Служебное». Гусь отправляет свои запросы к Fansly из открытой вкладки модели, поэтому они идут через прокси этой вкладки, как и сама вкладка. По умолчанию режим выключен: с VPN на весь компьютер ничего менять не нужно.</li>
+        <li><strong>Каждая модель через свою вкладку.</strong> Если в браузере открыто несколько моделей, запросы каждой идут через её собственную вкладку и её прокси. Вкладка модели должна быть открыта.</li>
+        <li><strong>Окно «Новые» не выдаёт сбой за пустой список.</strong> Если Fansly не ответил, окно пишет «Список не загружен», а не «Новых фоловеров нет», и подсказывает, как включить новый режим.</li>
+      </ul>
+      <p>После обновления перезагрузите открытые вкладки Fansly.</p>
+    </div>
+  </div>
+
   <div class="release" id="v2-7-1">
-    <div class="release-header"><span class="release-version">2.7.1</span><span class="release-badge latest">28 сентября 2026</span></div>
+    <div class="release-header"><span class="release-version">2.7.1</span><span class="release-badge">28 сентября 2026</span></div>
     <div class="release-changes">
       <div class="release-summary"><p>Звук на новых фоловеров и свои сигналы у Fansly. Когда фан подписывается на модель, раздаётся отдельный сигнал, а сообщения звучат не так, как в приложении для OnlyFans.</p></div>
       <ul class="changes-list">

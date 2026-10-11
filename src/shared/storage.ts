@@ -290,6 +290,7 @@ export function sanitizeSettings(input: Partial<Settings>): Settings {
     messageSoundMutedAccountIds: normalizeMutedAccountIds(input.messageSoundMutedAccountIds),
     followSoundEnabled: Boolean(input.followSoundEnabled ?? defaults.followSoundEnabled),
     followSoundTone: normalizeMessageSoundTone(input.followSoundTone, defaults.followSoundTone),
+    fanslyViaTab: input.fanslyViaTab === true,
   };
 }
 

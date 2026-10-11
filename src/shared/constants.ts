@@ -19,7 +19,7 @@ export const DEFAULT_AGENCY_HUB_BASE_URL = 'https://gosling-agency.ru';
 
 // ─── Storage ─────────────────────────────────────────────────────────────
 
-export const STORAGE_SCHEMA_VERSION = 19;
+export const STORAGE_SCHEMA_VERSION = 20;
 /** Full-recap local cache prefix (legacy/unqualified keys read as FULL). */
 export const SUMMARY_CACHE_PREFIX = 'summary:';
 /** Short-recap local cache prefix (spec §5 persistence-collision rule): a short
@@ -351,6 +351,7 @@ export const DEFAULT_SETTINGS: Settings = {
   messageSoundMutedAccountIds: [],
   followSoundEnabled: true,
   followSoundTone: FOLLOW_SOUND_TONE_DEFAULT,
+  fanslyViaTab: false,
 };
 
 // ─── Build ──────────────────────────────────────────────────────────────

@@ -213,7 +213,7 @@ describe('migrateState', () => {
 
   it('v18 (E145): adds the incoming-message sound on by default and preserves explicit choices', () => {
     const legacy = migrateState({ schemaVersion: 17, settings: { uiTheme: 'dark' } });
-    expect(legacy.schemaVersion).toBe(19);
+    expect(legacy.schemaVersion).toBe(20);
     expect(legacy.settings).toMatchObject({
       uiTheme: 'dark',
       messageSoundEnabled: true,
@@ -241,7 +241,7 @@ describe('migrateState', () => {
 
   it('v19 (E146): adds the follower sound on, with its own tone, and preserves explicit choices', () => {
     const v18 = migrateState({ schemaVersion: 18, settings: { messageSoundTone: 'soft' } });
-    expect(v18.schemaVersion).toBe(19);
+    expect(v18.schemaVersion).toBe(20);
     expect(v18.settings).toMatchObject({
       messageSoundEnabled: true,
       messageSoundTone: 'soft',
@@ -270,6 +270,18 @@ describe('migrateState', () => {
       .toBe('blip');
     expect(migrateState({ schemaVersion: 19, settings: { messageSoundTone: 'knock' } }).settings.messageSoundTone)
       .toBe('knock');
+  });
+
+  it('v20 (E149): adds «Fansly через вкладку» off for every install and keeps a choice', () => {
+    const v19 = migrateState({ schemaVersion: 19, settings: { uiTheme: 'dark', followSoundTone: 'bell' } });
+    expect(v19.schemaVersion).toBe(20);
+    expect(v19.settings).toMatchObject({ uiTheme: 'dark', followSoundTone: 'bell', fanslyViaTab: false });
+    expect(migrateState({ schemaVersion: 17, settings: {} }).settings.fanslyViaTab).toBe(false);
+    expect(migrateState({ schemaVersion: 20, settings: { fanslyViaTab: true } }).settings.fanslyViaTab).toBe(true);
+    // The route turns only on an explicit `true`: junk never moves requests.
+    for (const junk of ['true', 1, {}, null]) {
+      expect(migrateState({ schemaVersion: 20, settings: { fanslyViaTab: junk } }).settings.fanslyViaTab).toBe(false);
+    }
   });
 
   it('v18 (E145): normalizes junk sound settings instead of trusting them', () => {

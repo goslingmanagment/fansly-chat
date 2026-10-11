@@ -187,6 +187,16 @@ describe('followers window human actions', () => {
     expect(h.root.querySelector('.progress')?.textContent).toBe('Новых фоловеров нет');
     h.window.close();
   });
+  it('never calls a failed scan with no rows an empty period', async () => {
+    const h = harness(); h.window.close();
+    h.snapshot.rows = []; h.snapshot.error = 'Fansly не ответил вовремя. Продолжите проверку или обновите список.'; h.window.open();
+    await vi.waitFor(() => expect(h.root.querySelector('.progress')?.textContent).toBe('Список не загружен'));
+    expect(h.root.querySelector('.list-empty')?.textContent).toBe('Список не загружен');
+    expect(h.root.querySelector('.detail')?.textContent).toBe('Проверка завершилась не полностью. См. причину выше.');
+    expect(h.root.textContent).not.toContain('Новых фоловеров нет');
+    expect(h.root.textContent).toContain('Fansly не ответил вовремя');
+    h.window.close();
+  });
   it('explains discovery before counts are known and sends pause without restarting a scan', async () => {
     const h = harness(); h.window.close();
     h.snapshot.scanning = true; h.snapshot.phase = 'followers'; h.window.open();

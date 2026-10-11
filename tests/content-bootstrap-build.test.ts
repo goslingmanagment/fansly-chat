@@ -47,6 +47,27 @@ describe('two-stage content bootstrap build contract', () => {
     expect(lazyAssets?.matches).toEqual(['*://fansly.com/*']);
   });
 
+  it('E149: exposes the relay frame to Fansly pages only and mounts it only when the switch is on', () => {
+    const relayAssets = manifest.web_accessible_resources.filter((entry) =>
+      entry.resources.includes('fansly-relay.html'));
+    expect(relayAssets).toHaveLength(1);
+    expect(relayAssets[0]?.matches).toEqual(['*://fansly.com/*']);
+    // The frame needs no new permission: the route is the tab's own.
+    expect(manifest.permissions).toEqual(['storage', 'unlimitedStorage', 'webRequest', 'tabs']);
+
+    const build = readRepoFile('esbuild.config.mjs');
+    expect(build).toContain("'fansly-relay': path.join(root, 'src/fansly-relay/index.ts')");
+    expect(build).toMatch(/writeFile\(path\.join\(outdir, 'fansly-relay\.html'\), fanslyRelayHtml\)/);
+    expect(readRepoFile('src/fansly-relay/index.html')).toContain('<script src="./fansly-relay.js"></script>');
+
+    const bootstrap = readRepoFile('src/content/bootstrap.ts');
+    expect(bootstrap).toContain("browser.runtime.getURL('fansly-relay.html')");
+    // Only an explicit `true` mounts it, and the frame's address stays out of
+    // the page's DOM.
+    expect(bootstrap).toContain('fanslyViaTab !== true');
+    expect(bootstrap).toContain("attachShadow({ mode: 'closed' })");
+  });
+
   it('builds the bootstrap and lazy application as distinct output entries', () => {
     const build = readRepoFile('esbuild.config.mjs');
     const bootstrap = readRepoFile('src/content/bootstrap.ts');

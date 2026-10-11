@@ -52,6 +52,10 @@ export interface Settings {
   /** E146: a sound when a fan follows a model; its own switch and tone. */
   followSoundEnabled: boolean;
   followSoundTone: MessageSoundTone;
+  /** E149: ChatGoose's own Fansly requests leave through the Fansly tab (and
+   * its container proxy) instead of the background. Off by default: a chatter
+   * without a system-wide VPN turns it on. */
+  fanslyViaTab: boolean;
 }
 
 export interface Personality {
@@ -721,6 +725,7 @@ export type UserErrorKey =
   | 'not_connected'
   | 'session_expired'
   | 'fansly_server_error'
+  | 'fansly_tab_unavailable'
   | 'missing_api_key'
   | 'invalid_api_key'
   | 'rate_limited'
