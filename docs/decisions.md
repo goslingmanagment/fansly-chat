@@ -142,6 +142,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E149 | 2026-10-11 | «Fansly через вкладку» (opt-in, settings v20): every FanslyClient request rides a hidden extension frame inside a Fansly tab of the same session, so Multi-Account Containers' proxy carries it instead of the chatter's own line; no new permission, no proxy password, per-model route; session capture skips the frame; `fansly_tab_unavailable`; a send checks the route before custody; a failed follower scan no longer reads «Новых фоловеров нет»; 2.7.2 |
 | E150 | 2026-10-11 | Re-vendor the SDK from deployed Core `2260ef73` (core #552); production serves `b9d4dd07…` and still lists the old `b95b765c…` in `compatibleClientSdks`, but the deploy gate compares `contractHash` exactly; SDK 0.4.0, no source change; unblocks the 2.7.2 release gate, no version bump |
 | E151 | 2026-10-11 | The five public pages wear the agency identity (source: `~/code/1-platform/agency-site`): ChatGoose logo with the gosling, pond and yellow instead of terracotta, Literata + Golos Text, flat outlined mocks, one header and footer on every page; slogan headings rewritten as plain descriptions of what a tool does. Still single files: no new assets, `mascot.png` is the new badge. |
+| E152 | 2026-10-11 | «Регистрация» in Fansly's chat header: a click shows when the fan registered (date and age), decoded from the fan's account id (a snowflake), never fetched; the id is free after a generation in the chat and one attempt of `GET /group/<id>` otherwise (no retries, nothing during a rate-limit cooldown), hence a click and not a read on every opened chat; mounted into Fansly's `.content-header-sub-row` after Gallery, selectors read from Fansly's bundle and not yet seen on a live session; one-to-one chats only; 2.7.3 |
 
 ## Entries
 
@@ -5395,3 +5396,61 @@ agency's identity, on the owner's request. The identity lives in
   badge. Version slots, ids and the pinned 2.0 link are unchanged; `pnpm
   check` passes without touching a test.
 - Not changed: the extension itself, its icons, its texts.
+
+**E152 (2026-10-11).** The owner asked for a way to see when a fan registered:
+a small button next to the fan in the chat header.
+
+- Source of the date: Fansly ids are snowflakes, so `id >> 22` plus Fansly's
+  epoch (`1561494360000`) is the creation time. The owner's check on four
+  accounts matched Fansly's own `createdAt` to the second. The decoder moved
+  to `src/shared/fansly-id-time.ts`; the follower date (`followedAtFromId`)
+  now uses the same one. Nothing is asked about the fan, and the hub is not
+  read: its archive is pull-cadenced and a fresh fan, the case a chatter asks
+  about, may not be in it yet.
+- Cost: the fan's account id. Fansly keeps it in Angular state, not in the
+  DOM. The background answers from the tab context when a generation already
+  resolved the fan for this chat, and otherwise makes the `GET
+  /group/<groupId>` every generation starts with. That is why the date
+  appears on a click and not when a chat opens: an automatic read would add a
+  Fansly request to every opened chat. The read is one attempt (`retry:
+  'none'`, where a generation retries a 429 or a 5xx three times) and is not
+  sent at all while the follower pacer reports a rate-limit cooldown for the
+  account: the click answers `rate_limited` with the time to wait. The
+  creator's id comes from the session's resolved identity; `/account/me` is
+  asked only when the tab's identity is not resolved yet. The answer is kept
+  per chat until the page reloads, so returning to a chat shows it without a
+  request.
+- Never a guess on the read: the fan is the other member of a group of
+  exactly two that contains the authenticated creator; anything else answers
+  CG-APP-02. The tab-context answer trusts the generation that put the fan
+  there (the first member who is not the creator, group size unchecked); it
+  is reachable only from the header row, which Fansly's template renders for
+  exactly one partner. The group read is an optional one for generations, so
+  its failures arrive as `unknown_error`; the handler names them
+  (`network_error` for no HTTP answer, `fansly_server_error` otherwise). The
+  group id is validated as a Fansly id before it reaches the URL path.
+- Place: Fansly's own row under the name, «Last seen … | Gallery |
+  Регистрация», in that row's size and colour; the hover is terracotta. After
+  the click the control reads «28.04.2026 · 5 месяцев назад» (the chatter's
+  time zone, whole calendar units), the exact time is in the tooltip. Not the
+  icon row next to the name: that row is inside the profile link.
+- Lifecycle (`src/content/fan-registration.ts`): Fansly reuses the header
+  across chats and destroys it for the Gallery view. Every sync re-reads the
+  open chat from the URL and re-homes the element; syncs come from the route
+  change, from mutations of the conversation subtree and from a 2 s
+  keep-alive. A previous fan's date cannot stay under a new name, and a click
+  belongs to the chat that is open even inside the 500 ms route poll. A
+  failure is a toast only while that chat is still open. A real account
+  switch in the tab drops every answer, kept or in flight: two agency models
+  share a chat id and see different partners in it. A control left in a
+  reused row by the previous instance of the extension (an update) is removed
+  when the new one takes the row.
+- Selectors come from Fansly's production bundle `main.2e6b96097a4bb73b.js`
+  (2026-10-11): `app-messages-conversation-route .message-content-header-contact
+  .content-header-sub-row`, a row Fansly renders only for a one-to-one chat.
+  If Fansly renames them the control does not appear; nothing else depends on
+  it.
+- Verified: `pnpm check`; the rendering on a stand built from Fansly's own
+  header markup and stylesheets, dark and light. Not verified: a live Fansly
+  session.
+- Version 2.7.3 (patch, E120); published only on the owner's word.

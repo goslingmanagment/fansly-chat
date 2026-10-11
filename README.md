@@ -64,6 +64,15 @@ from prose when checking what is installed or live; verify the signed update fee
   Pacing, retries and the one-attempt write rule are unchanged; a send checks
   the route before it takes any custody. Off by default.
 - **Spenders** — kernel-backed ranking with data freshness and deleted-account labels.
+- **Дата регистрации фана** (2.7.3, E152) — «Регистрация» in Fansly's own chat
+  header row, after Gallery: a click shows when the fan registered and how long
+  ago. The date is decoded from the fan's account id, a snowflake
+  (`src/shared/fansly-id-time.ts`), never fetched. Learning the id is free
+  after a generation in the chat and one attempt of `GET /group/<id>`
+  otherwise (no retries, nothing during a rate-limit cooldown), so nothing is
+  read until the chatter clicks; the answer stays until the page reloads or
+  the tab changes account. One-to-one chats only
+  (`src/content/fan-registration.ts`).
 - **Vault uploader** — on `/creator/vault`, a folder of media goes into the open
   album one file at a time through Fansly's own upload form, each confirmed by
   its album card, with a per-account/per-album checkpoint for resuming; an

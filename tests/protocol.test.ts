@@ -145,6 +145,16 @@ describe('protocol boundary guards', () => {
       }),
     ).toBe('resolveFanChat');
 
+    // E152: the group id goes into a Fansly URL path, so only an id passes.
+    expect(
+      getRuntimeRequestType({ type: 'getFanRegistration', groupId: '818181818181818181' }),
+    ).toBe('getFanRegistration');
+    expect(getRuntimeRequestType({ type: 'getFanRegistration' })).toBeNull();
+    expect(getRuntimeRequestType({ type: 'getFanRegistration', groupId: '' })).toBeNull();
+    expect(
+      getRuntimeRequestType({ type: 'getFanRegistration', groupId: '../account/me' }),
+    ).toBeNull();
+
     expect(getRuntimeRequestType({ type: 'getPopupStatus', tabId: '12' })).toBeNull();
     expect(getRuntimeRequestType({ type: 'unknown' })).toBeNull();
     expect(getRuntimeRequestType(null)).toBeNull();

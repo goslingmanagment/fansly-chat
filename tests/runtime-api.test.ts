@@ -2357,6 +2357,168 @@ describe('runtime-api resolveFanChat', () => {
   });
 });
 
+// ── E152: when the fan of the open chat registered ──────────────────────────
+
+describe('runtime-api getFanRegistration', () => {
+  beforeEach(() => {
+    mockStorage = {};
+    vi.clearAllMocks();
+  });
+
+  // The account id from the owner's cross-check against Fansly's `createdAt`.
+  const fanAccountId = '905593157180223488';
+  const registeredAtMs = Date.parse('2026-04-28T19:29:53.779Z');
+  const groupId = '818181818181818181';
+
+  function makeFanslyClient(group: unknown) {
+    return {
+      getAuthenticatedAccount: vi.fn(async () => undefined),
+      getAuthenticatedAccountId: vi.fn(async () => 'creator-1'),
+      getGroup: vi.fn(async () => group),
+      followerReadStatus: vi.fn<() => { cooldownUntil: number; intervalMs: number } | undefined>(
+        () => undefined,
+      ),
+    };
+  }
+
+  it('answers from the fan a generation already resolved, without a Fansly request', async () => {
+    const fanslyClient = makeFanslyClient({ users: [] });
+    const { sessionStore, tabContexts } = await installRuntimeApiHarness(fanslyClient);
+    sessionStore.registerCapture(7, makeCapture('creator-1'));
+    tabContexts.setRoute(7, groupId, 1);
+    tabContexts.setFan(7, groupId, fanAccountId, 'Alice');
+
+    const response = await onMessageListener?.(
+      { type: 'getFanRegistration', groupId },
+      { tab: { id: 7 } },
+    );
+
+    expect(response).toEqual({ ok: true, fanAccountId, registeredAtMs });
+    expect(fanslyClient.getGroup).not.toHaveBeenCalled();
+    expect(fanslyClient.getAuthenticatedAccountId).not.toHaveBeenCalled();
+  });
+
+  it('otherwise reads the group once, in one attempt, and decodes the date from the partner id', async () => {
+    // The fan listed first: the partner is found by identity, not by position.
+    const fanslyClient = makeFanslyClient({
+      users: [{ userId: fanAccountId }, { userId: 'creator-1' }],
+    });
+    const { sessionStore, tabContexts } = await installRuntimeApiHarness(fanslyClient);
+    // The tab's identity is already resolved: the creator id costs no request.
+    sessionStore.registerCapture(7, makeCapture('legacy-1')).resolvedAccountId = 'creator-1';
+    // The tab's cached fan belongs to ANOTHER chat and must not be used.
+    tabContexts.setRoute(7, 'other-group', 1);
+    tabContexts.setFan(7, 'other-group', '111111111111111111', 'Bob');
+
+    const response = await onMessageListener?.(
+      { type: 'getFanRegistration', groupId },
+      { tab: { id: 7 } },
+    );
+
+    expect(response).toEqual({ ok: true, fanAccountId, registeredAtMs });
+    expect(fanslyClient.getGroup).toHaveBeenCalledTimes(1);
+    // 'none': a 429 or a 5xx is an answer for the chatter, never a retry.
+    expect(fanslyClient.getGroup).toHaveBeenCalledWith(
+      groupId,
+      expect.objectContaining({ resolvedAccountId: 'creator-1' }),
+      expect.any(AbortSignal),
+      undefined,
+      'none',
+    );
+    expect(fanslyClient.getAuthenticatedAccountId).not.toHaveBeenCalled();
+  });
+
+  it('asks who the creator is only when the tab\'s identity is not resolved yet', async () => {
+    const fanslyClient = makeFanslyClient({
+      users: [{ userId: 'creator-1' }, { userId: fanAccountId }],
+    });
+    const { sessionStore } = await installRuntimeApiHarness(fanslyClient);
+    sessionStore.registerCapture(7, makeCapture('legacy-1'));
+
+    const response = await onMessageListener?.(
+      { type: 'getFanRegistration', groupId },
+      { tab: { id: 7 } },
+    );
+
+    expect(response).toEqual({ ok: true, fanAccountId, registeredAtMs });
+    expect(fanslyClient.getAuthenticatedAccountId).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends nothing while Fansly is rate-limiting this account\'s reads', async () => {
+    const fanslyClient = makeFanslyClient({
+      users: [{ userId: 'creator-1' }, { userId: fanAccountId }],
+    });
+    const { sessionStore } = await installRuntimeApiHarness(fanslyClient);
+    sessionStore.registerCapture(7, makeCapture('creator-1'));
+    const cooldownUntil = Date.now() + 60_000;
+    fanslyClient.followerReadStatus.mockReturnValue({ cooldownUntil, intervalMs: 500 });
+
+    const response = await onMessageListener?.(
+      { type: 'getFanRegistration', groupId },
+      { tab: { id: 7 } },
+    );
+
+    expect(response).toEqual({
+      ok: false,
+      error: createUserError('rate_limited', { retryAtMs: cooldownUntil }),
+    });
+    expect(fanslyClient.getGroup).not.toHaveBeenCalled();
+    expect(fanslyClient.getAuthenticatedAccountId).not.toHaveBeenCalled();
+  });
+
+  it('never guesses the fan: a group chat or a group without the creator is unresolved', async () => {
+    for (const users of [
+      [{ userId: 'creator-1' }, { userId: fanAccountId }, { userId: '111111111111111111' }],
+      [{ userId: '222222222222222222' }, { userId: fanAccountId }],
+      [{ userId: 'creator-1' }],
+      [{ userId: 'creator-1' }, { userId: 'not-a-fansly-id' }],
+    ]) {
+      const fanslyClient = makeFanslyClient({ users });
+      const { sessionStore } = await installRuntimeApiHarness(fanslyClient);
+      sessionStore.registerCapture(7, makeCapture('creator-1'));
+
+      const response = await onMessageListener?.(
+        { type: 'getFanRegistration', groupId },
+        { tab: { id: 7 } },
+      );
+
+      expect(response).toEqual({ ok: false, error: createUserError('coach_fan_unresolved') });
+    }
+  });
+
+  it('names the failure of the group read instead of the optional read\'s unknown_error', async () => {
+    for (const [status, key] of [[0, 'network_error'], [500, 'fansly_server_error']] as const) {
+      const fanslyClient = makeFanslyClient(null);
+      const { sessionStore } = await installRuntimeApiHarness(fanslyClient);
+      const { ChatGooseError } = await import('../src/shared/errors.js');
+      fanslyClient.getGroup.mockRejectedValue(
+        new ChatGooseError('unknown_error', undefined, { status }),
+      );
+      sessionStore.registerCapture(7, makeCapture('creator-1'));
+
+      const response = await onMessageListener?.(
+        { type: 'getFanRegistration', groupId },
+        { tab: { id: 7 } },
+      );
+
+      expect(response).toEqual({ ok: false, error: createUserError(key) });
+    }
+  });
+
+  it('returns not_connected when the sender tab has no session', async () => {
+    const fanslyClient = makeFanslyClient({ users: [] });
+    await installRuntimeApiHarness(fanslyClient);
+
+    const response = await onMessageListener?.(
+      { type: 'getFanRegistration', groupId },
+      { tab: { id: 999 } },
+    );
+
+    expect(response).toEqual({ ok: false, error: createUserError('not_connected') });
+    expect(fanslyClient.getGroup).not.toHaveBeenCalled();
+  });
+});
+
 describe('runtime-api getRecapStatus', () => {
   beforeEach(() => {
     mockStorage = {};

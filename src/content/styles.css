@@ -2602,7 +2602,8 @@ body.chatgoose-voice-studio-lock {
 .chatgoose-close:focus-visible,
 .chatgoose-board-action:focus-visible,
 .chatgoose-board-chip:focus-visible,
-.chatgoose-launcher:focus-visible {
+.chatgoose-launcher:focus-visible,
+.chatgoose-fan-registration-button:focus-visible {
   outline: 2px solid var(--chatgoose-clay);
   outline-offset: 2px;
 }
@@ -3209,6 +3210,63 @@ body.chatgoose-voice-studio-lock {
   opacity: 1;
   transform: translateY(-1px);
   border-color: var(--chatgoose-green-line);
+}
+
+/* ─── Fan registration date (E152) ───────────────────────────────────────────
+   Sits in Fansly's own header row («Last seen … | Gallery»), so it wears that
+   row's size and colours, not the panel's; only the hover is ours. */
+
+.chatgoose-fan-registration {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--dark-blue-1, #637395);
+  font-size: 0.75em;
+  font-weight: normal;
+  line-height: 1.1em;
+  white-space: nowrap;
+}
+
+.chatgoose-fan-registration-divider {
+  margin: 0 0.5em;
+}
+
+.chatgoose-fan-registration-button,
+.chatgoose-fan-registration-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+}
+
+.chatgoose-fan-registration-button {
+  appearance: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.chatgoose-fan-registration-button:hover:not(:disabled) {
+  color: var(--chatgoose-clay);
+}
+
+.chatgoose-fan-registration-button:disabled {
+  cursor: progress;
+}
+
+.chatgoose-fan-registration-icon {
+  width: 1.15em;
+  height: 1.15em;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 /* ─── Voice (лента) ──────────────────────────────────────────────

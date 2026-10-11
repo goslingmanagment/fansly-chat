@@ -144,6 +144,8 @@ export const SPENDERS_BUILD_TIMEOUT_MS = 120_000;
 export const SPENDERS_BUILD_TIMEOUT_REASON = 'spenders-build-timeout';
 /** Budget for lazily resolving a fan's chat via one inbox search on open. */
 export const SPENDERS_RESOLVE_TIMEOUT_MS = 15_000;
+/** Budget for the one group read behind a fan's registration date (E152). */
+export const FAN_REGISTRATION_TIMEOUT_MS = 15_000;
 /** How long the Fansly SPA router gets to react to a board chat-open before
  * the extension falls back to a full page load. */
 export const SPENDERS_SPA_NAV_VERIFY_MS = 2_000;

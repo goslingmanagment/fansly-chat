@@ -2,6 +2,7 @@ import {
   AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_REVOKE_TIMEOUT_MS,
   AGENCY_HUB_PREFETCH_TIMEOUT_MS,
+  FAN_REGISTRATION_TIMEOUT_MS,
   LAST_SEEN_VERSION_STORAGE_KEY,
   ONBOARDING_STORAGE_KEY,
   SPENDERS_BUILD_TIMEOUT_MS,
@@ -16,6 +17,7 @@ import {
 } from './hub-custody.js';
 import { getCompareDraftCount, resolveMappedPersonalityId } from '../shared/compare-cards.js';
 import { createUserError, toUserError } from '../shared/errors.js';
+import { fanslyIdTimestampMs } from '../shared/fansly-id-time.js';
 import {
   getRuntimeRequestType,
   isAgencyHubConnectionTestSettings,
@@ -35,6 +37,8 @@ import type {
   AccountsViewEntry,
   AgencyHubDeviceTokenMeta,
   AgencyHubSignOutResponse,
+  FanRegistrationResponse,
+  FanslyGroup,
   LastSeenVersionSnapshot,
   OnboardingSnapshot,
   PopupStatus,
@@ -281,6 +285,17 @@ function buildAccountRowLabel(
     formatSessionAccountName({ resolvedUsername: username, resolvedDisplayName: displayName }) ??
     shortenAccountId(accountId)
   );
+}
+
+/** The fan of a one-to-one chat: the one member who is not the creator. Null
+ * for anything else (a group chat, a group the creator is not in) — a guess
+ * would show somebody else's registration date. */
+function soleFanOfGroup(group: FanslyGroup, creatorId: string): string | null {
+  const userIds = (group.users ?? []).map((user) => user?.userId);
+  const fanId = userIds.find((userId) => userId !== creatorId);
+  return userIds.length === 2 && userIds.includes(creatorId) && typeof fanId === 'string' && fanId
+    ? fanId
+    : null;
 }
 
 /** Every fansly.com tab, however deep the route. Matches the manifest's own
@@ -1334,6 +1349,79 @@ export function registerRuntimeApi({
           ok: false,
           error: timedOut ? createUserError('timed_out') : toUserError(error),
         };
+      } finally {
+        globalThis.clearTimeout(timeout);
+      }
+    }
+
+    if (requestType === 'getFanRegistration') {
+      const tabId = sender.tab?.id;
+      const session = tabId !== undefined ? sessionStore.getSessionForTab(tabId) : null;
+      if (!session || !session.connected) {
+        return { ok: false, error: createUserError('not_connected') };
+      }
+
+      // Shape already validated by getRuntimeRequestType.
+      const { groupId } = message as unknown as { groupId: string };
+      const unresolved: FanRegistrationResponse = {
+        ok: false,
+        error: createUserError('coach_fan_unresolved'),
+      };
+      // The date is read off the fan's account id; nothing is asked about the fan.
+      const registration = (fanAccountId: string): FanRegistrationResponse => {
+        const registeredAtMs = fanslyIdTimestampMs(fanAccountId);
+        return registeredAtMs === null
+          ? unresolved
+          : { ok: true, fanAccountId, registeredAtMs };
+      };
+
+      // A generation in this chat already resolved the fan: no request at all.
+      // It takes the first member that is not the creator; the header row this
+      // request comes from exists only in a one-to-one chat.
+      const cachedContext = tabId !== undefined ? tabContexts.get(tabId) : null;
+      if (cachedContext?.groupId === groupId && cachedContext.fanAccountId) {
+        return registration(cachedContext.fanAccountId);
+      }
+
+      const controller = new AbortController();
+      const timeout = globalThis.setTimeout(
+        () => controller.abort(),
+        FAN_REGISTRATION_TIMEOUT_MS,
+      );
+      try {
+        // Otherwise the group read every generation starts with: on the
+        // chatter's click only, one attempt, and none at all while Fansly is
+        // rate-limiting this account's reads.
+        const cooldownUntil = fanslyClient.followerReadStatus(session)?.cooldownUntil ?? 0;
+        if (cooldownUntil > Date.now()) {
+          return { ok: false, error: createUserError('rate_limited', { retryAtMs: cooldownUntil }) };
+        }
+        const creatorId = session.resolvedAccountId ??
+          await fanslyClient.getAuthenticatedAccountId(session, controller.signal);
+        const group = await fanslyClient.getGroup(
+          groupId,
+          session,
+          controller.signal,
+          undefined,
+          'none',
+        );
+        const fanAccountId = soleFanOfGroup(group, creatorId);
+        return fanAccountId ? registration(fanAccountId) : unresolved;
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          return { ok: false, error: createUserError('timed_out') };
+        }
+        // The group read is an optional one for generations, so its failures
+        // arrive as `unknown_error`; here it is the whole action.
+        if (error instanceof ChatGooseError && error.key === 'unknown_error') {
+          return {
+            ok: false,
+            error: error.details?.status === 0
+              ? createUserError('network_error')
+              : createUserError('fansly_server_error'),
+          };
+        }
+        return { ok: false, error: toUserError(error) };
       } finally {
         globalThis.clearTimeout(timeout);
       }

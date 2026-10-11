@@ -1115,6 +1115,7 @@ export interface RuntimeRequestMap {
   openOptions: OpenOptionsRequest;
   getSpendersList: GetSpendersListRequest | undefined;
   resolveFanChat: ResolveFanChatRequest;
+  getFanRegistration: FanRegistrationRequest;
   getRecapStatus: RecapStatusRequest;
   openDebugPrompt: DebugPromptTokenRequest;
   getDebugPromptSnapshot: DebugPromptTokenRequest;
@@ -1148,6 +1149,7 @@ export interface RuntimeResponseMap {
   openOptions: OpenOptionsResponse;
   getSpendersList: SpendersListResponse;
   resolveFanChat: ResolveFanChatResponse;
+  getFanRegistration: FanRegistrationResponse;
   getRecapStatus: RecapStatusResponse;
   openDebugPrompt: OpenDebugPromptResponse;
   getDebugPromptSnapshot: DebugPromptSnapshotResponse;
@@ -1418,6 +1420,16 @@ export interface ResolveFanChatRequest {
 /** ok with groupId null = the search ran but found no conversation. */
 export type ResolveFanChatResponse =
   | { ok: true; groupId: string | null }
+  | { ok: false; error: UserFacingError };
+
+/** When the fan of an open one-to-one chat registered on Fansly (E152). */
+export interface FanRegistrationRequest {
+  groupId: string;
+}
+
+/** `registeredAtMs` is decoded from the fan's account id, never fetched. */
+export type FanRegistrationResponse =
+  | { ok: true; fanAccountId: string; registeredAtMs: number }
   | { ok: false; error: UserFacingError };
 
 export interface AgencyHubConnectionTestRequest {

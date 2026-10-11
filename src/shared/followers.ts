@@ -1,3 +1,4 @@
+import { fanslyIdTimestampMs } from './fansly-id-time.js';
 import type { FanslyAccountResponse, FanslyMessage } from './types.js';
 
 export const FOLLOWER_HOURS = [1, 3, 6, 12, 24, 48, 72, 168, 336, 720] as const;
@@ -55,11 +56,8 @@ export interface FollowersSnapshot {
 export type FollowersResponse = { ok: true; snapshot?: FollowersSnapshot; text?: string } | { ok: false; error: string; debug?: { traceId: string } };
 
 export function followedAtFromId(value: string, now = Date.now()): number {
-  if (!/^\d{1,24}$/.test(value)) throw new Error('Некорректная дата подписки Fansly.');
-  const ms = Number(BigInt(value) >> 22n) + 1561494360000;
-  if (!Number.isSafeInteger(ms) || ms <= 1561494360000 || ms > now + 60_000) {
-    throw new Error('Некорректная дата подписки Fansly.');
-  }
+  const ms = fanslyIdTimestampMs(value, now);
+  if (ms === null) throw new Error('Некорректная дата подписки Fansly.');
   return ms;
 }
 
