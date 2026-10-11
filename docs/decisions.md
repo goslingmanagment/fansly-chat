@@ -143,6 +143,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E150 | 2026-10-11 | Re-vendor the SDK from deployed Core `2260ef73` (core #552); production serves `b9d4dd07…` and still lists the old `b95b765c…` in `compatibleClientSdks`, but the deploy gate compares `contractHash` exactly; SDK 0.4.0, no source change; unblocks the 2.7.2 release gate, no version bump |
 | E151 | 2026-10-11 | The five public pages wear the agency identity (source: `~/code/1-platform/agency-site`): ChatGoose logo with the gosling, pond and yellow instead of terracotta, Literata + Golos Text, flat outlined mocks, one header and footer on every page; slogan headings rewritten as plain descriptions of what a tool does. Still single files: no new assets, `mascot.png` is the new badge. |
 | E152 | 2026-10-11 | «Регистрация» in Fansly's chat header: a click shows when the fan registered (date and age), decoded from the fan's account id (a snowflake), never fetched; the id is free after a generation in the chat and one attempt of `GET /group/<id>` otherwise (no retries, nothing during a rate-limit cooldown), hence a click and not a read on every opened chat; mounted into Fansly's `.content-header-sub-row` after Gallery, selectors read from Fansly's bundle and not yet seen on a live session; one-to-one chats only; 2.8.0 |
+| E154 | 2026-10-11 | The public pages lead to the common ChatGoose home: the header logo of all five links to `../` (it was the top of the landing on `install.html` and the landing on the other four), and `start.html` links to the desktop page as `../desktop/` instead of `https://ext.gosling-agency.ru/desktop/`. Relative, because the pages are read at `chatgoose.gosling-agency.ru/fansly/`, one level below the home (the site is `~/code/1-platform/agency-site`'s); the XPI link stays on `ext.`. Footer logo, texts, deploy scripts and tests untouched; no release. E153 is the icon change (PR #147), open when this was written |
 
 ## Entries
 
@@ -5455,3 +5456,48 @@ a small button next to the fan in the chat header.
   session.
 - Version 2.8.0: the owner named the number and ordered the release
   («2.8 выпускай», 2026-10-11).
+
+**E154 (2026-10-11).** The public pages lead to the common home of the
+ChatGoose clients. Since 2026-10-11 chatters have one site,
+`https://chatgoose.gosling-agency.ru`: `/` is a home page with the three
+clients and the account, `/fansly/` is these pages, `/chatspace/` is the
+ChatSpace extension's site, `/desktop/` is the desktop download page. The site
+is `~/code/1-platform/agency-site`'s (its README, «Addresses», and
+`deploy/server-nginx.sh`): its nginx serves the files this repository
+publishes into `/var/www/ext`, and the page addresses on
+`ext.gosling-agency.ru` redirect to it. The pages had no link to that home,
+and one link still named a neighbour by its old address.
+
+- The logo in the header of `install.html`, `start.html`, `guide.html`,
+  `whats-new-2.html` and `changelog.html` links to `../` and is labelled
+  `aria-label="ChatGoose — все клиенты"`. It was `#main` on the landing and
+  `index.html` on the other four; three of the five had no label on the link.
+- «Скачать приложение» on `start.html` links to `../desktop/`. It was
+  `https://ext.gosling-agency.ru/desktop/`.
+- Relative on purpose: a page names no host for a neighbour, so the links
+  hold under any name that serves this folder one level below the home.
+  Opened from the root of a name, the way `ext.` served the pages until that
+  day, `../` is that root and `../desktop/` is its `/desktop/`.
+- The install link stays `https://ext.gosling-agency.ru/chatgoose-latest.xpi`:
+  `/fansly/` serves only the pages and `mascot.png`; the XPI and
+  `updates.json` answer on `ext.` alone.
+- Not changed: the footer logo (still the landing), «Установить» in the
+  header (the landing's install block), the sentence on `start.html` that
+  spells `ext.gosling-agency.ru/desktop/` (the address redirects to the
+  page), the addresses the extension opens (`src/shared/constants.ts`; they
+  redirect as well), the deploy scripts and their `BASE_URL` (they read back
+  through `ext.` and follow redirects). README «The site on the server»
+  still holds the copy of the `ext.` site read before the redirect was
+  added; the server was not read for this change.
+- Verified: `pnpm check`, no test touched. The pages of the three clients
+  served from one local folder laid out like the site (`/` a stub,
+  `/fansly/`, `/chatspace/`, `/desktop/`): every header logo resolves to `/`
+  and a click lands there, «Скачать приложение» lands on `/desktop/`. Read
+  from the live site the same day: `/`, `/fansly/`, `/chatspace/` and
+  `/desktop/` answer 200, `/fansly/start.html` is `start.html` of `main`
+  before this change byte for byte, the old page addresses answer 302 to the
+  new ones, `/fansly/chatgoose-latest.xpi` answers 404. Not verified: the
+  links on the live pages; they are there once the pages are published.
+- No release and no version change. The pages go out with
+  `scripts/deploy-pages.sh` or with the next release, on the owner's word.
+- The number: E153 is the icon change, PR #147, open when this was written.

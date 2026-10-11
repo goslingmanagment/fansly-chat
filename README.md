@@ -327,6 +327,18 @@ The extension links to both the walkthrough and archive from Settings and the
 popup. Both deploy scripts publish the walkthrough before any new entry point
 links to it. Keep the fixed 2.0 title and URL independent of future version stamps.
 
+Chatters read the pages at `https://chatgoose.gosling-agency.ru/fansly/`, one
+level below the common home of the ChatGoose clients (E154). That site belongs
+to `~/code/1-platform/agency-site` (its README, «Addresses»): its nginx serves
+the files this repository publishes, and the page addresses on
+`ext.gosling-agency.ru` redirect there. The header logo of every page links to
+the home as `../`, and `start.html` links to the desktop page as `../desktop/`.
+Keep a link to a neighbouring page relative, with no host in it. The install
+link is the exception: `/fansly/` serves only the pages and `mascot.png`, so
+the XPI keeps its `ext.gosling-agency.ru` address. The copy of the `ext.` site
+in the next section was read before that redirect was added and does not show
+it.
+
 ### The site on the server
 
 Nothing in this repository creates or rewrites the nginx site for
