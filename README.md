@@ -64,7 +64,7 @@ from prose when checking what is installed or live; verify the signed update fee
   Pacing, retries and the one-attempt write rule are unchanged; a send checks
   the route before it takes any custody. Off by default.
 - **Spenders** — kernel-backed ranking with data freshness and deleted-account labels.
-- **Дата регистрации фана** (2.7.3, E152) — «Регистрация» in Fansly's own chat
+- **Дата регистрации фана** (2.8.0, E152) — «Регистрация» in Fansly's own chat
   header row, after Gallery: a click shows when the fan registered and how long
   ago. The date is decoded from the fan's account id, a snowflake
   (`src/shared/fansly-id-time.ts`), never fetched. Learning the id is free
@@ -198,6 +198,12 @@ Important references:
   architecture.
 
 ## Release
+
+Release 2.8.0 (E152) adds the fan's registration date to the chat header: a
+click on «Регистрация» decodes it from the fan's account id. At most one
+attempt of `GET /group/<id>` per click, none after a generation in the chat.
+No new permission, no settings change, SDK and Core contracts unchanged. Tabs
+opened before the update need a reload.
 
 Release 2.7.1 (E146) adds the new-follower sound on the same page-socket path:
 the tap also forwards `serviceId 3 / type 2` follows, the background rings a

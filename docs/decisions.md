@@ -142,7 +142,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E149 | 2026-10-11 | «Fansly через вкладку» (opt-in, settings v20): every FanslyClient request rides a hidden extension frame inside a Fansly tab of the same session, so Multi-Account Containers' proxy carries it instead of the chatter's own line; no new permission, no proxy password, per-model route; session capture skips the frame; `fansly_tab_unavailable`; a send checks the route before custody; a failed follower scan no longer reads «Новых фоловеров нет»; 2.7.2 |
 | E150 | 2026-10-11 | Re-vendor the SDK from deployed Core `2260ef73` (core #552); production serves `b9d4dd07…` and still lists the old `b95b765c…` in `compatibleClientSdks`, but the deploy gate compares `contractHash` exactly; SDK 0.4.0, no source change; unblocks the 2.7.2 release gate, no version bump |
 | E151 | 2026-10-11 | The five public pages wear the agency identity (source: `~/code/1-platform/agency-site`): ChatGoose logo with the gosling, pond and yellow instead of terracotta, Literata + Golos Text, flat outlined mocks, one header and footer on every page; slogan headings rewritten as plain descriptions of what a tool does. Still single files: no new assets, `mascot.png` is the new badge. |
-| E152 | 2026-10-11 | «Регистрация» in Fansly's chat header: a click shows when the fan registered (date and age), decoded from the fan's account id (a snowflake), never fetched; the id is free after a generation in the chat and one attempt of `GET /group/<id>` otherwise (no retries, nothing during a rate-limit cooldown), hence a click and not a read on every opened chat; mounted into Fansly's `.content-header-sub-row` after Gallery, selectors read from Fansly's bundle and not yet seen on a live session; one-to-one chats only; 2.7.3 |
+| E152 | 2026-10-11 | «Регистрация» in Fansly's chat header: a click shows when the fan registered (date and age), decoded from the fan's account id (a snowflake), never fetched; the id is free after a generation in the chat and one attempt of `GET /group/<id>` otherwise (no retries, nothing during a rate-limit cooldown), hence a click and not a read on every opened chat; mounted into Fansly's `.content-header-sub-row` after Gallery, selectors read from Fansly's bundle and not yet seen on a live session; one-to-one chats only; 2.8.0 |
 
 ## Entries
 
@@ -5453,4 +5453,5 @@ a small button next to the fan in the chat header.
 - Verified: `pnpm check`; the rendering on a stand built from Fansly's own
   header markup and stylesheets, dark and light. Not verified: a live Fansly
   session.
-- Version 2.7.3 (patch, E120); published only on the owner's word.
+- Version 2.8.0: the owner named the number and ordered the release
+  («2.8 выпускай», 2026-10-11).

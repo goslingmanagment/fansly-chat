@@ -1,6 +1,6 @@
 {
   "name": "chatgoose",
-  "version": "2.7.3",
+  "version": "2.8.0",
   "description": "ChatGoose — Fansly chat workspace extension with kernel-served AI assistance",
   "private": true,
   "type": "module",
