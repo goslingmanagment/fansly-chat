@@ -5,7 +5,7 @@ readonly ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly ENV_FILE="$ROOT_DIR/.env.deploy"
 # The server that serves BASE_URL (agency-de). CHATGOOSE_VPS_HOST in the
 # environment names another one, so the next server move needs no code change.
-# deploy-pages.sh and setup-vps-ext.sh carry the same default.
+# deploy-pages.sh carries the same default.
 readonly VPS_HOST="${CHATGOOSE_VPS_HOST:-root@152.53.191.242}"
 readonly REMOTE_DIR="/var/www/ext"
 readonly BASE_URL="https://ext.gosling-agency.ru"

@@ -175,7 +175,7 @@ served only from the self-hosted feed `https://ext.gosling-agency.ru/updates.jso
 version, `update_link`, and `update_hash: sha256:<sha>`, uploads to VPS
 `152.53.191.242:/var/www/ext`, and asserts the served feed version matches the
 release. `strict_min_version: 142.0` (Gecko). The feed shares the VPS with the
-kernel API but is a distinct nginx site (`scripts/setup-vps-ext.sh`).
+kernel API but is a distinct nginx site (README, «The site on the server»).
 
 ## Boundary 7 — Internal IPC (Port protocol + runtime messaging)
 

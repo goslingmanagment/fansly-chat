@@ -277,10 +277,11 @@ Use `SKIP_ANNOUNCE=1 scripts/deploy.sh` to publish without a Telegram announceme
 the local changelog validation still runs before signing.
 
 The scripts upload over SSH to the server that serves `ext.gosling-agency.ru`.
-Its address is the `VPS_HOST` default shared by `scripts/deploy.sh`,
-`scripts/deploy-pages.sh` and `scripts/setup-vps-ext.sh`. To upload to another
-server, set `CHATGOOSE_VPS_HOST=user@host` in the environment; `.env.deploy` is
-not read for it.
+Its address is the `VPS_HOST` default shared by `scripts/deploy.sh` and
+`scripts/deploy-pages.sh`. To upload to another server, set
+`CHATGOOSE_VPS_HOST=user@host` in the environment; `.env.deploy` is not read
+for it. The scripts only put files into `/var/www/ext`; the nginx site that
+serves them is described under [The site on the server](#the-site-on-the-server).
 
 The public pages ship together: `install.html` becomes the versionless product
 landing at `index.html`; `start.html` is the shared onboarding page for both
@@ -289,3 +290,98 @@ explains everyday use; `changelog.html` retains version history.
 The extension links to both the walkthrough and archive from Settings and the
 popup. Both deploy scripts publish the walkthrough before any new entry point
 links to it. Keep the fixed 2.0 title and URL independent of future version stamps.
+
+### The site on the server
+
+Nothing in this repository creates or rewrites the nginx site for
+`ext.gosling-agency.ru` (E147). The site is one file on the server,
+`/etc/nginx/sites-available/ext.gosling-agency.ru`. It is edited there, and a
+server move copies it across: the move to agency-de in 2026-10 did that with
+`migrate/70-ext-feed.sh` from
+`~/code/8-docs/2026-10-10-server-migration-netcup/`, which also added the
+`/u/` location. That folder is not a repository, so this section keeps a copy
+of the file.
+
+The deploy scripts need four things from the site:
+
+- `/updates.json` is served as JSON and is never cached. Firefox polls it for
+  updates.
+- Every `*.xpi` is served as `application/x-xpinstall`, so Firefox offers to
+  install it. A versioned XPI never changes, so it may be cached for a year.
+- `/chatgoose-latest.xpi` is the exception: the landing's install button
+  downloads it and every release replaces it, so it is never cached.
+- `/` answers with `index.html`; the other pages are plain files.
+
+Two other projects publish into the same site, and an edit has to keep their
+paths: chat-extension under `chat-extension/`, and onlyfans-chat under
+`desktop/` plus the Windows update feed, which the site serves from
+`/srv/chatgoose-updates` under `/u/`.
+
+The file as read from agency-de on 2026-10-11:
+
+```nginx
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ext.gosling-agency.ru;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name ext.gosling-agency.ru;
+    root /var/www/ext;
+    location /u/ { root /srv/chatgoose-updates; try_files $uri =404; }
+    index index.html;
+
+    ssl_certificate /etc/letsencrypt/live/ext.gosling-agency.ru/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/ext.gosling-agency.ru/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    location = /updates.json {
+        default_type application/json;
+        add_header Cache-Control "no-cache, no-store, must-revalidate" always;
+        add_header Pragma "no-cache" always;
+        add_header Expires "0" always;
+        try_files $uri =404;
+    }
+
+    location = /chatgoose-latest.xpi {
+        default_type application/x-xpinstall;
+        add_header Cache-Control "no-cache, no-store, must-revalidate" always;
+        add_header Pragma "no-cache" always;
+        add_header Expires "0" always;
+        try_files $uri =404;
+    }
+
+    location ~ \.xpi$ {
+        default_type application/x-xpinstall;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        try_files $uri =404;
+    }
+
+    location = / {
+        try_files /index.html =404;
+    }
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+}
+```
+
+While the site is being moved between servers, the live file also has four
+lines that answer 403 to everyone except the previous server:
+`set_real_ip_from`, `real_ip_header`, `real_ip_recursive` and an `if` on
+`$realip_remote_addr`. They are removed when DNS is switched and are left out
+above.
+
+The certificate is from Let's Encrypt; certbot renews it with the webroot
+method over `/var/www/ext`. On a server that has no certificate yet, nginx
+cannot load the HTTPS block: serve `/var/www/ext` over plain HTTP first, issue
+the certificate, then install the file above.
+
+If the server and this section disagree, the server is right: correct the
+section.

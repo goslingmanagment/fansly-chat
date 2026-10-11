@@ -137,6 +137,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E144 | 2026-09-28 | AI image notes: the kernel transcript numbers the kept window's describable media (`[Photo #n]`, ` [Photo #n]` after a bundle label, ` (preview #n)` after a PPV label) and `clientContext.media` lists them by id (groupRef, message, sender, kind, accountMedia id, paid) — never a URL or bytes; label-like text in messages is neutralized; the hub restores plain labels while its describer is off; 2.6.0 |
 | E145 | 2026-09-28 | Incoming-message sound (desktop parity): a MAIN-world `document_start` tap listens passively on Fansly's OWN wsv3 socket (Proxy over `window.WebSocket`, native object, no send/frame of ours), a text-free projection crosses an isolated relay, the background decides (own/automated/tip/stale 180 s/muted/open chat/2 s throttle) and plays a synthesized blip; settings v18 with a per-model mute list; no hub, no Fansly request, no new permission; 2.7.0 |
 | E146 | 2026-09-28 | New-follower sound on the E145 path: the tap also forwards FollowerService (`serviceId 3`) `type 2` follows (`{id, accountId, followerId}`, no createdAt), the background rings a follow of one of our models (`accountId` ours, `followerId` not) with its own switch and tone (`double`), shared volume, throttle and player, per-model mute on the model the event names; five Fansly tones (message default `chime`, the OnlyFans `blip` a choice; a v18 `blip` re-defaulted); settings v19; 2.7.1 |
+| E147 | 2026-10-11 | `scripts/setup-vps-ext.sh` is removed (the owner chose removal over repair): nothing in the repository creates or rewrites the nginx site of `ext.gosling-agency.ru`. The script had not run since 2026-03-24; its templates lacked what the live file had gained (the desktop feed's `/u/`, the latest-XPI no-cache rule), and its edit of the Hub's nginx site looked for markers that site does not carry, so a run against agency-de would have erased those locations and written a second `location ^~ /ext/` into the Hub's site. README «The site on the server» holds where the file lives, what the deploy scripts need from it, who else it serves and a dated copy. The same day, on the owner's request, the site's latest-XPI no-cache rule was pointed at `chatgoose-latest.xpi` on both servers |
 
 ## Entries
 
@@ -5144,4 +5145,57 @@ notification, straight to everyone).
   the message default becomes `chime`, and the desktop `blip` stays as «Как в
   OnlyFans». A v18 record still on `blip` (2.7.0's default, hours old) adopts
   `chime` via a raw transform anchored on v18; a v19+ `blip` is kept.
+
+**E147 (2026-10-11).** `scripts/setup-vps-ext.sh` is removed. Nothing in the
+repository creates or rewrites the nginx site of `ext.gosling-agency.ru` any
+more; the owner chose this over repairing the script.
+
+- The script provisioned the site on 2026-03-24, when the extension moved
+  from `gosling-agency.ru/ext/` to its own name. It rewrote
+  `/etc/nginx/sites-available/ext.gosling-agency.ru` from two templates (HTTP,
+  then HTTPS after certbot) and edited the Hub's nginx site
+  (`cleanup_agency_hub`). It has not run since: the site file on the previous
+  server is dated that day.
+- Read on 2026-10-11 from both servers (read-only), the HTTPS template and the
+  live file differ only by what the file gained on the server: `location =
+  /goosemuse-latest.xpi`, there since March and written by no committed
+  version of the script, and on agency-de `location /u/`, the Windows desktop
+  update feed, added by the server move (`migrate/70-ext-feed.sh`) together
+  with a temporary 403 guard. A run would have erased all three.
+- The Hub edit was the worse half. The GooseMuse → ChatGoose rename (94ec263,
+  two days after the run) renamed the markers the script looks for to
+  `CHATGOOSE EXTENSION`, while the Hub's site still carries `GOOSEMUSE
+  EXTENSION HARD CUTOFF`. Run on a copy of the live Hub site, the function's
+  own code adds a second `location ^~ /ext/` to the same `server` block. nginx
+  refuses a duplicate location (known nginx behaviour; no nginx binary was run
+  for this), so `nginx -t` fails after both files are already written: the
+  running nginx keeps its loaded configuration, and the next restart does not
+  come up, for the Hub and every other site on the server. A second run breaks
+  the file even with matching markers: the begin marker is a prefix of the
+  cutoff marker, and the removal leaves ` HARD CUTOFF` behind as a bare line.
+  The script itself asks to be run again when DNS has not propagated.
+- Between its two reloads the script left an HTTP-only site. PR #140 pointed it
+  at agency-de, where all of the above applies.
+- Considered and not taken: keep the script, make the template equal the live
+  file without the guard, drop the Hub edit, refuse to overwrite a live file
+  that differs. The file serves three projects and is changed on the server,
+  by hand and by server moves, so a template here falls behind again (twice
+  since March). The script was last used in March, and the move to agency-de
+  copied the file instead of running it.
+- README «The site on the server» replaces it: where the file lives, what the
+  deploy scripts need from the site, who else publishes into it, and a copy of
+  the file as read on 2026-10-11 without the temporary guard. The copy is there
+  because the server-move scripts are outside any repository and read the file
+  from a server that is about to be closed.
+- The upload-host test (`tests/release-pages.test.ts`) covers the two deploy
+  scripts; the `EXPECTED_IP` pins added in #140 went with the script.
+- Removing the script changed nothing on a server. Found on the way: the site
+  served `chatgoose-latest.xpi`, the landing's install link, as immutable for
+  a year, because the no-cache rule still named the pre-rename alias. On the
+  owner's request the rule was pointed at the current name on both servers the
+  same day: one line, `location = /chatgoose-latest.xpi`, with a copy of the
+  previous file next to each (`….bak-before-latest-xpi`). The copy in the
+  README is the file after that edit. A browser that already holds the alias
+  as immutable keeps it for up to a year; auto-update brings such an install
+  forward.
 
