@@ -276,6 +276,12 @@ self-hosted feed, and verifies served version consistency.
 Use `SKIP_ANNOUNCE=1 scripts/deploy.sh` to publish without a Telegram announcement;
 the local changelog validation still runs before signing.
 
+The scripts upload over SSH to the server that serves `ext.gosling-agency.ru`.
+Its address is the `VPS_HOST` default shared by `scripts/deploy.sh`,
+`scripts/deploy-pages.sh` and `scripts/setup-vps-ext.sh`. To upload to another
+server, set `CHATGOOSE_VPS_HOST=user@host` in the environment; `.env.deploy` is
+not read for it.
+
 The public pages ship together: `install.html` becomes the versionless product
 landing at `index.html`; `start.html` is the shared onboarding page for both
 clients; `whats-new-2.html` is the detailed 2.0 walkthrough; `guide.html`

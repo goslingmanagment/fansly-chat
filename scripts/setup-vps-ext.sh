@@ -1,7 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly VPS_HOST="root@45.8.230.111"
+# One-time provisioning of the nginx site for ext.gosling-agency.ru.
+#
+# It rewrites the site file from the templates below. The live site carries
+# locations these templates never wrote (the desktop update feed under /u/, a
+# no-cache rule for goosemuse-latest.xpi), so on a server that already serves
+# the site, bring the templates up to date first — or those locations are gone.
+
+# Same host and same CHATGOOSE_VPS_HOST override as deploy.sh. DNS has to show
+# this server's address before certbot is asked for a certificate, so the
+# address is read off the host instead of being written a second time.
+readonly VPS_HOST="${CHATGOOSE_VPS_HOST:-root@152.53.191.242}"
+readonly EXPECTED_IP="${VPS_HOST#*@}"
 
 log() {
   printf '[setup-vps-ext] %s\n' "$*"
@@ -16,13 +27,17 @@ if ! command -v ssh >/dev/null 2>&1; then
   fail "Missing required command: ssh"
 fi
 
+if [[ ! "$EXPECTED_IP" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; then
+  fail "CHATGOOSE_VPS_HOST must end in an IPv4 address for this script (got '${VPS_HOST}'): the DNS check compares the site's A record with it"
+fi
+
 log "Configuring nginx extension hosting on ${VPS_HOST}"
-ssh "$VPS_HOST" 'bash -s' <<'REMOTE'
+ssh "$VPS_HOST" "bash -s -- '$EXPECTED_IP'" <<'REMOTE'
 set -euo pipefail
 
 readonly REMOTE_DIR="/var/www/ext"
 readonly DOMAIN="ext.gosling-agency.ru"
-readonly EXPECTED_IP="45.8.230.111"
+readonly EXPECTED_IP="${1:?missing the server address argument}"
 readonly AGENCY_HUB_SITE="/etc/nginx/sites-available/agency-hub"
 readonly EXT_SITE_AVAILABLE="/etc/nginx/sites-available/${DOMAIN}"
 readonly EXT_SITE_ENABLED="/etc/nginx/sites-enabled/${DOMAIN}"

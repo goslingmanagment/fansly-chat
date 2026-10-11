@@ -173,7 +173,7 @@ per-version walk (`src/shared/migrations.ts:101-107`).
 served only from the self-hosted feed `https://ext.gosling-agency.ru/updates.json`
 (`manifest.json:57`). `scripts/deploy.sh` signs, builds `updates.json` with the
 version, `update_link`, and `update_hash: sha256:<sha>`, uploads to VPS
-`45.8.230.111:/var/www/ext`, and asserts the served feed version matches the
+`152.53.191.242:/var/www/ext`, and asserts the served feed version matches the
 release. `strict_min_version: 142.0` (Gecko). The feed shares the VPS with the
 kernel API but is a distinct nginx site (`scripts/setup-vps-ext.sh`).
 
