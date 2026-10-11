@@ -5323,6 +5323,13 @@ owner: «это нужно не всем, если мы всех будем пу
   `createFanslyTransport` reads the switch per request and never falls back to
   the direct route. Pacing, retries and the one-attempt write rule are
   untouched: the transport only decides where a ready request leaves from.
+- The route settles before the identity check, and dispatch posts before it
+  yields: nothing asynchronous sits between the last check and the request,
+  with the switch on or off. The frame answers like `fetch`: status and
+  headers first, then the body, so a 429, 401 or 5xx counts even when its body
+  breaks. (Both from the review: an earlier draft awaited the setting after
+  the check and sent the status only with the full body.) A second frame of a
+  tab never evicts the first, which would make them evict each other forever.
 - Session capture skips requests whose document is the extension's own: the
   frame replays the captured session and must not overwrite the page's fresh
   template.

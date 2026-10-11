@@ -28,22 +28,29 @@ export interface FanslyRelayAbort {
 
 export type FanslyRelayCommand = FanslyRelayRequest | FanslyRelayAbort;
 
-export interface FanslyRelayResponse {
-  type: 'response';
+/** Status and headers, as soon as `fetch` has them: a 429 or 401 counts even
+ * when its body never arrives. */
+export interface FanslyRelayHead {
+  type: 'head';
   id: string;
   status: number;
   headers: Array<[string, string]>;
+}
+
+export interface FanslyRelayBody {
+  type: 'body';
+  id: string;
   body: string;
 }
 
-/** No HTTP answer: the request never left, the network failed or it was aborted. */
+/** The request or its body failed: no answer, a dropped body, or an abort. */
 export interface FanslyRelayFailure {
   type: 'failure';
   id: string;
   aborted: boolean;
 }
 
-export type FanslyRelayReply = FanslyRelayResponse | FanslyRelayFailure;
+export type FanslyRelayReply = FanslyRelayHead | FanslyRelayBody | FanslyRelayFailure;
 
 export function isFanslyRelayTarget(url: unknown): url is string {
   return typeof url === 'string' && url.startsWith(FANSLY_RELAY_TARGET);
@@ -78,8 +85,8 @@ export function parseFanslyRelayReply(raw: unknown): FanslyRelayReply | null {
   const value = raw as Record<string, unknown>;
   if (typeof value.id !== 'string' || !value.id) return null;
   if (value.type === 'failure') return { type: 'failure', id: value.id, aborted: value.aborted === true };
-  if (value.type !== 'response') return null;
-  if (typeof value.status !== 'number' || !Number.isInteger(value.status)) return null;
-  if (!isHeaderList(value.headers) || typeof value.body !== 'string') return null;
-  return { type: 'response', id: value.id, status: value.status, headers: value.headers, body: value.body };
+  if (value.type === 'body') return typeof value.body === 'string' ? { type: 'body', id: value.id, body: value.body } : null;
+  if (value.type !== 'head') return null;
+  if (typeof value.status !== 'number' || !Number.isInteger(value.status) || !isHeaderList(value.headers)) return null;
+  return { type: 'head', id: value.id, status: value.status, headers: value.headers };
 }

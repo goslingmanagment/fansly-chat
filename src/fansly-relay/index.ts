@@ -1,7 +1,8 @@
 // E149: the relay frame of «Fansly через вкладку». An extension page mounted
 // inside the Fansly tab; it holds no session and decides nothing. The
-// background hands it one ready request at a time over a port, it performs the
-// fetch with the extension's own privileges and hands the answer back.
+// background hands it ready requests over a port; it performs each fetch with
+// the extension's own privileges and hands back the status and headers as
+// soon as they arrive, then the body.
 
 import {
   FANSLY_RELAY_PORT_NAME,
@@ -60,17 +61,16 @@ export function startFanslyRelay(dependencies: FanslyRelayDependencies): void {
           credentials: 'omit',
           signal: controller.signal,
         });
-        const body = await response.text();
         reply({
-          type: 'response',
+          type: 'head',
           id: request.id,
           status: response.status,
           headers: FANSLY_RELAY_RESPONSE_HEADERS.flatMap((name): Array<[string, string]> => {
             const value = response.headers.get(name);
             return value === null ? [] : [[name, value]];
           }),
-          body,
         });
+        reply({ type: 'body', id: request.id, body: await response.text() });
       } catch {
         reply({ type: 'failure', id: request.id, aborted: controller.signal.aborted });
       } finally {

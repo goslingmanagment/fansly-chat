@@ -343,7 +343,7 @@ export class FanslyClient {
   /** Throws `fansly_tab_unavailable` when this session's requests have no
    * route right now (E149); a send asks before it takes any custody. */
   async assertRoute(session: SessionTemplate, signal: AbortSignal): Promise<void> {
-    await this.transport.ready?.(session, signal);
+    await this.transport.route(session, 'GET', signal);
   }
 
   followerReadStatus(session: SessionTemplate): { cooldownUntil: number; intervalMs: number } | undefined {
@@ -445,11 +445,13 @@ export class FanslyClient {
       const controller = new AbortController();
       const timeout = globalThis.setTimeout(() => controller.abort(), FANSLY_REQUEST_TIMEOUT_MS);
       const composite = AbortSignal.any([signal, controller.signal]);
-      const requestTs = String(Date.now());
       const requestUrl = withNgswBypass(url);
       let attemptTrace: ReturnType<TraceScope['start']> | undefined;
 
       try {
+        // The route settles first (E149): nothing asynchronous may come
+        // between the identity check below and the dispatch.
+        const route = await this.transport.route(session, 'GET', composite);
         if (permit) {
           signal.throwIfAborted();
           this.followerSessions.get(session)?.();
@@ -457,10 +459,11 @@ export class FanslyClient {
           if (!live?.connected || live.authorization !== session.authorization || live.fanslySessionId !== session.fanslySessionId || live.resolvedAccountId !== session.resolvedAccountId) throw new ChatGooseError('chat_changed');
         }
         attemptTrace = trace?.start('http', { method: 'GET', path: requestUrl.pathname, query: requestUrl.search, attempt: attempt + 1, timeoutMs: FANSLY_REQUEST_TIMEOUT_MS });
+        if (route.tabId !== undefined) attemptTrace?.event('http.route', { via: 'tab', tabId: route.tabId });
         const headers = new Headers({
           authorization: session.authorization,
           'fansly-client-id': session.fanslyClientId,
-          'fansly-client-ts': requestTs,
+          'fansly-client-ts': String(Date.now()),
           'fansly-session-id': session.fanslySessionId,
         });
 
@@ -469,13 +472,11 @@ export class FanslyClient {
           headers.set('fansly-client-check', routeCheck);
         }
 
-        const response = await this.transport({
+        const response = await route.send({
           url: requestUrl,
           method: 'GET',
           headers,
           signal: composite,
-          session,
-          onTabRoute: (tabId) => attemptTrace?.event('http.route', { via: 'tab', tabId }),
         });
         attemptTrace?.event('http.response', { status: response.status });
 
@@ -675,6 +676,9 @@ export class FanslyClient {
     let attemptTrace: ReturnType<TraceScope['start']> | undefined;
     try {
       queuedSignal.throwIfAborted();
+      // Settled before the identity check, like a read (E149). A write never
+      // waits for a frame here: send custody is already taken by now.
+      const route = await this.transport.route(session, 'POST', queuedSignal);
       if (paced) {
         this.followerSessions.get(session)?.();
         const live = this.sessionStore.getSessionByAccount(session.accountId);
@@ -682,10 +686,10 @@ export class FanslyClient {
       }
       headers.set('fansly-client-ts', String(Date.now()));
       attemptTrace = trace?.start('http', { method: 'POST', path: requestUrl.pathname, query: requestUrl.search, attempt: 1, retry: false, timeoutMs: FANSLY_REQUEST_TIMEOUT_MS });
-      const response = await this.transport({
-        url: requestUrl, method: 'POST', headers, body: JSON.stringify(body), session,
+      if (route.tabId !== undefined) attemptTrace?.event('http.route', { via: 'tab', tabId: route.tabId });
+      const response = await route.send({
+        url: requestUrl, method: 'POST', headers, body: JSON.stringify(body),
         signal: AbortSignal.any([signal, AbortSignal.timeout(FANSLY_REQUEST_TIMEOUT_MS)]),
-        onTabRoute: (tabId) => attemptTrace?.event('http.route', { via: 'tab', tabId }),
       });
       attemptTrace?.event('http.response', { status: response.status });
       if (!response.ok) {

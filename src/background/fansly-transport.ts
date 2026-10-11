@@ -7,37 +7,47 @@ import {
 import type { SessionTemplate } from '../shared/types.js';
 
 /** One ready Fansly request: headers, pacing and identity checks are done. */
-export interface FanslyTransportRequest {
+export interface FanslyWireRequest {
   url: URL;
   method: 'GET' | 'POST';
   headers: Headers;
   body?: string;
   signal: AbortSignal;
-  session: SessionTemplate;
-  /** Called before dispatch when the request leaves through a tab's relay. */
-  onTabRoute?: (tabId: number) => void;
+}
+
+/** Where a request of one session leaves from. `send` dispatches before it
+ * yields, like `fetch`, so the caller's last identity check stays the last
+ * thing before the request leaves. */
+export interface FanslyRoute {
+  /** Set when the request rides a tab's relay frame. */
+  tabId?: number;
+  send: (request: FanslyWireRequest) => Promise<Response>;
 }
 
 export interface FanslyTransport {
-  (request: FanslyTransportRequest): Promise<Response>;
-  /** Settles when a request of this session could leave right now; throws
-   * `fansly_tab_unavailable` when its route is missing. A write checks this
-   * before taking custody, so a missing route is never an unconfirmed send. */
-  ready?: (session: SessionTemplate, signal: AbortSignal) => Promise<void>;
+  /** Settles the route of a session before its identity check. Throws
+   * `fansly_tab_unavailable` when the route is missing; only a read waits for
+   * a tab that is still loading its frame. */
+  route: (session: SessionTemplate, method: 'GET' | 'POST', signal: AbortSignal) => Promise<FanslyRoute>;
 }
 
 /** The extension's own background request. Firefox gives it no tab, so a
  * per-container proxy never applies and it leaves from the chatter's address. */
-export const directFanslyTransport: FanslyTransport = ({ url, method, headers, body, signal }) =>
-  fetch(url, { method, headers, ...(body !== undefined ? { body } : {}), signal, credentials: 'omit' });
+export const DIRECT_FANSLY_ROUTE: FanslyRoute = {
+  send: ({ url, method, headers, body, signal }) =>
+    fetch(url, { method, headers, ...(body !== undefined ? { body } : {}), signal, credentials: 'omit' }),
+};
+
+export const directFanslyTransport: FanslyTransport = { route: async () => DIRECT_FANSLY_ROUTE };
 
 /** How long a read waits for the frame of a tab that is still loading. */
 export const FANSLY_RELAY_WAIT_MS = 5_000;
 const BODILESS_STATUS = new Set([204, 205, 304]);
 
 interface PendingReply {
-  resolve: (response: Response) => void;
-  reject: (error: unknown) => void;
+  head: (status: number, headers: Array<[string, string]>) => void;
+  body: (text: string) => void;
+  fail: (error: unknown) => void;
 }
 
 interface Relay {
@@ -54,14 +64,16 @@ interface RelayHubDependencies {
  * A frame's request is attributed by Firefox to its tab and container, so the
  * container's proxy carries it — the page's own address, not the chatter's. */
 export class FanslyRelayHub {
-  private readonly relays = new Map<number, Relay>();
+  /** Live frames per tab, oldest first. A second frame never evicts the first:
+   * evicting would make the evicted frame reconnect and evict back, forever. */
+  private readonly relays = new Map<number, Relay[]>();
   private readonly waiters = new Set<() => void>();
   private lastId = 0;
 
   constructor(private readonly dependencies: RelayHubDependencies) {}
 
-  /** Only our relay page, framed inside a tab, is taken; the newest frame of a
-   * tab replaces the previous one. */
+  /** Only our relay page, framed inside a tab, is taken. New requests go to the
+   * newest frame of a tab; an older one finishes what it holds. */
   register(port: browser.runtime.Port): void {
     const sender = port.sender;
     const tabId = sender?.tab?.id;
@@ -70,28 +82,19 @@ export class FanslyRelayHub {
       return;
     }
     const relay: Relay = { port, pending: new Map() };
-    const previous = this.relays.get(tabId);
-    this.relays.set(tabId, relay);
-    if (previous) {
-      this.fail(previous);
-      previous.port.disconnect();
-    }
+    this.relays.set(tabId, [...(this.relays.get(tabId) ?? []), relay]);
     port.onMessage.addListener((raw: unknown) => {
       const reply = parseFanslyRelayReply(raw);
       const pending = reply ? relay.pending.get(reply.id) : undefined;
       if (!reply || !pending) return;
-      if (reply.type === 'failure') {
-        pending.reject(new TypeError('Fansly relay request failed'));
-        return;
-      }
-      try {
-        pending.resolve(new Response(BODILESS_STATUS.has(reply.status) ? null : reply.body, { status: reply.status, headers: reply.headers }));
-      } catch {
-        pending.reject(new TypeError('Fansly relay returned an unusable response'));
-      }
+      if (reply.type === 'head') pending.head(reply.status, reply.headers);
+      else if (reply.type === 'body') pending.body(reply.body);
+      else pending.fail(new TypeError('Fansly relay request failed'));
     });
     port.onDisconnect.addListener(() => {
-      if (this.relays.get(tabId) === relay) this.relays.delete(tabId);
+      const rest = (this.relays.get(tabId) ?? []).filter((entry) => entry !== relay);
+      if (rest.length) this.relays.set(tabId, rest);
+      else this.relays.delete(tabId);
       this.fail(relay);
     });
     for (const wake of [...this.waiters]) wake();
@@ -100,12 +103,12 @@ export class FanslyRelayHub {
   /** A frame that went away answers nothing: its requests end like a dropped
    * connection, so a dispatched write stays unconfirmed for its caller. */
   private fail(relay: Relay): void {
-    for (const pending of [...relay.pending.values()]) pending.reject(new TypeError('Fansly relay frame disconnected'));
+    for (const pending of [...relay.pending.values()]) pending.fail(new TypeError('Fansly relay frame disconnected'));
   }
 
   private pick(tabIds: readonly number[]): [number, Relay] | null {
     for (const tabId of tabIds) {
-      const relay = this.relays.get(tabId);
+      const relay = this.relays.get(tabId)?.at(-1);
       if (relay) return [tabId, relay];
     }
     return null;
@@ -135,27 +138,39 @@ export class FanslyRelayHub {
     });
   }
 
-  /** Settles once one of `tabIds` has a frame, waiting as long as a read would. */
-  async whenReady(tabIds: () => readonly number[], signal: AbortSignal): Promise<void> {
+  /** The frame of one of `tabIds` as a route. Only a read waits for a frame;
+   * a write goes now or not at all. */
+  async route(tabIds: () => readonly number[], method: 'GET' | 'POST', signal: AbortSignal): Promise<FanslyRoute> {
     signal.throwIfAborted();
-    await this.ready(tabIds, signal, true);
+    const [tabId, relay] = await this.ready(tabIds, signal, method === 'GET');
+    return { tabId, send: (request) => this.dispatch(relay, request) };
   }
 
-  /** Sends through the frame of one of `tabIds`. Answers like `fetch`: an HTTP
-   * status is a Response, no answer is a TypeError, an abort is the signal's
-   * reason. Only a read waits for a frame; a write goes now or not at all. */
-  async send(tabIds: () => readonly number[], request: Omit<FanslyTransportRequest, 'session'>): Promise<Response> {
+  /** Answers like `fetch`: the response settles on the status and headers, its
+   * body arrives after them; no answer is a TypeError; an abort is the
+   * signal's reason, on the response or on its unread body. The command is
+   * posted before this returns. */
+  private dispatch(relay: Relay, request: FanslyWireRequest): Promise<Response> {
     const { signal } = request;
-    signal.throwIfAborted();
-    const [tabId, relay] = await this.ready(tabIds, signal, request.method === 'GET');
-    signal.throwIfAborted();
-    request.onTabRoute?.(tabId);
+    if (signal.aborted) return Promise.reject(signal.reason);
     const id = String(++this.lastId);
     return new Promise<Response>((resolve, reject) => {
-      const finish = (settle: () => void): void => {
+      let body: ReadableStreamDefaultController<Uint8Array> | null = null;
+      const finish = (): void => {
         relay.pending.delete(id);
         signal.removeEventListener('abort', onAbort);
-        settle();
+      };
+      const fail = (error: unknown): void => {
+        finish();
+        if (!body) {
+          reject(error);
+          return;
+        }
+        try {
+          body.error(error);
+        } catch {
+          // the body was already complete
+        }
       };
       const post = (command: FanslyRelayCommand): void => relay.port.postMessage(command);
       const onAbort = (): void => {
@@ -164,11 +179,35 @@ export class FanslyRelayHub {
         } catch {
           // the frame is already gone; its request died with it
         }
-        finish(() => reject(signal.reason));
+        fail(signal.reason);
       };
       relay.pending.set(id, {
-        resolve: (response) => finish(() => resolve(response)),
-        reject: (error) => finish(() => reject(error)),
+        head: (status, headers) => {
+          if (body) return;
+          const bodiless = BODILESS_STATUS.has(status);
+          const stream = bodiless ? null : new ReadableStream<Uint8Array>({
+            start: (controller) => {
+              body = controller;
+            },
+          });
+          let response: Response;
+          try {
+            response = new Response(stream, { status, headers });
+          } catch {
+            body = null;
+            fail(new TypeError('Fansly relay returned an unusable response'));
+            return;
+          }
+          if (bodiless) finish();
+          resolve(response);
+        },
+        body: (text) => {
+          if (!body) return;
+          body.enqueue(new TextEncoder().encode(text));
+          body.close();
+          finish();
+        },
+        fail,
       });
       signal.addEventListener('abort', onAbort, { once: true });
       try {
@@ -181,7 +220,7 @@ export class FanslyRelayHub {
           ...(request.body !== undefined ? { body: request.body } : {}),
         });
       } catch {
-        finish(() => reject(new TypeError('Fansly relay frame disconnected')));
+        fail(new TypeError('Fansly relay frame disconnected'));
       }
     });
   }
@@ -199,28 +238,22 @@ interface FanslyTransportOptions {
   viaTab: () => Promise<boolean>;
   /** Tabs whose captured session is this one, in no particular order. */
   tabsFor: (session: SessionTemplate) => readonly number[];
-  relays: Pick<FanslyRelayHub, 'send' | 'whenReady'>;
+  relays: Pick<FanslyRelayHub, 'route'>;
 }
 
 /** Off (the default) keeps the background request. On, the request rides the
  * frame of a tab that holds the same session and never falls back to the
  * direct route: that route is the one this mode exists to avoid. */
 export function createFanslyTransport(options: FanslyTransportOptions): FanslyTransport {
-  const viaTab = async (): Promise<boolean> => {
-    try {
-      return await options.viaTab();
-    } catch {
-      // unreadable settings keep the route every install has had so far
-      return false;
-    }
+  return {
+    route: async (session, method, signal) => {
+      let viaTab = false;
+      try {
+        viaTab = await options.viaTab();
+      } catch {
+        // unreadable settings keep the route every install has had so far
+      }
+      return viaTab ? options.relays.route(() => options.tabsFor(session), method, signal) : DIRECT_FANSLY_ROUTE;
+    },
   };
-  const transport: FanslyTransport = async (request) => {
-    if (!await viaTab()) return directFanslyTransport(request);
-    const { session, ...wire } = request;
-    return options.relays.send(() => options.tabsFor(session), wire);
-  };
-  transport.ready = async (session, signal) => {
-    if (await viaTab()) await options.relays.whenReady(() => options.tabsFor(session), signal);
-  };
-  return transport;
 }

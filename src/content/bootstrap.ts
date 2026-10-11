@@ -133,7 +133,7 @@ function syncFanslyRelay(settings: unknown): void {
     return;
   }
   fanslyRelayHost = document.createElement('div');
-  fanslyRelayHost.style.display = 'none';
+  fanslyRelayHost.style.setProperty('display', 'none', 'important');
   const frame = document.createElement('iframe');
   frame.src = browser.runtime.getURL('fansly-relay.html');
   fanslyRelayHost.attachShadow({ mode: 'closed' }).append(frame);

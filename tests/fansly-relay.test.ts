@@ -82,13 +82,15 @@ describe('E149 relay protocol', () => {
   });
 
   it('reads replies strictly', () => {
-    expect(parseFanslyRelayReply({ type: 'response', id: '1', status: 200, headers: [['content-type', 'application/json']], body: '{}' }))
-      .toEqual({ type: 'response', id: '1', status: 200, headers: [['content-type', 'application/json']], body: '{}' });
+    expect(parseFanslyRelayReply({ type: 'head', id: '1', status: 200, headers: [['content-type', 'application/json']] }))
+      .toEqual({ type: 'head', id: '1', status: 200, headers: [['content-type', 'application/json']] });
+    expect(parseFanslyRelayReply({ type: 'body', id: '1', body: '{}' })).toEqual({ type: 'body', id: '1', body: '{}' });
     expect(parseFanslyRelayReply({ type: 'failure', id: '1', aborted: true })).toEqual({ type: 'failure', id: '1', aborted: true });
     expect(parseFanslyRelayReply({ type: 'failure', id: '1' })).toEqual({ type: 'failure', id: '1', aborted: false });
     for (const broken of [
-      null, {}, { type: 'response', id: '1', status: '200', headers: [], body: '' }, { type: 'response', id: '1', status: 200.5, headers: [], body: '' },
-      { type: 'response', id: '1', status: 200, headers: [], body: null }, { type: 'response', id: '', status: 200, headers: [], body: '' },
+      null, {}, { type: 'head', id: '1', status: '200', headers: [] }, { type: 'head', id: '1', status: 200.5, headers: [] },
+      { type: 'head', id: '1', status: 200, headers: 'x' }, { type: 'head', id: '', status: 200, headers: [] },
+      { type: 'body', id: '1', body: null }, { type: 'response', id: '1', status: 200, headers: [], body: '' },
     ]) {
       expect(parseFanslyRelayReply(broken)).toBeNull();
     }
@@ -109,11 +111,10 @@ describe('E149 relay frame', () => {
     expect(url).toBe(URL_OK);
     expect(init).toMatchObject({ method: 'GET', credentials: 'omit', headers: [['authorization', 'auth'], ['fansly-client-id', 'cid']] });
     expect(init).not.toHaveProperty('body');
-    expect(relay.ports[0]!.posted).toEqual([{
-      type: 'response', id: '7', status: 200,
-      headers: [['content-type', 'application/json'], ['retry-after', '3']],
-      body: '{"success":true}',
-    }]);
+    expect(relay.ports[0]!.posted).toEqual([
+      { type: 'head', id: '7', status: 200, headers: [['content-type', 'application/json'], ['retry-after', '3']] },
+      { type: 'body', id: '7', body: '{"success":true}' },
+    ]);
   });
 
   it('passes a POST body through unchanged and reports an HTTP refusal as a response', async () => {
@@ -122,7 +123,10 @@ describe('E149 relay frame', () => {
     await flush();
 
     expect(relay.fetchMock.mock.calls[0]![1]).toMatchObject({ method: 'POST', body: '{"content":"hi"}', credentials: 'omit' });
-    expect(relay.ports[0]!.posted).toEqual([expect.objectContaining({ type: 'response', id: '8', status: 429, body: 'Too Many Requests' })]);
+    expect(relay.ports[0]!.posted).toEqual([
+      { type: 'head', id: '8', status: 429, headers: [['content-type', 'text/plain;charset=UTF-8']] },
+      { type: 'body', id: '8', body: 'Too Many Requests' },
+    ]);
   });
 
   it('never fetches anything outside the Fansly API, whatever the port says', async () => {
@@ -155,6 +159,19 @@ describe('E149 relay frame', () => {
 
     expect(signals.map((signal) => signal.aborted)).toEqual([true, false]);
     expect(relay.ports[0]!.posted).toEqual([{ type: 'failure', id: '1', aborted: true }]);
+  });
+
+  it('sends the head before the body, so a status survives a body that breaks', async () => {
+    const broken = new ReadableStream<Uint8Array>({ pull: (controller) => controller.error(new TypeError('connection reset')) });
+    const relay = mount(async () => new Response(broken, { status: 429, headers: { 'retry-after': '600' } }));
+    relay.ports[0]!.deliver({ type: 'request', id: '9', method: 'GET', url: URL_OK, headers: [] });
+    await flush();
+    await flush();
+
+    expect(relay.ports[0]!.posted).toEqual([
+      { type: 'head', id: '9', status: 429, headers: [['retry-after', '600']] },
+      { type: 'failure', id: '9', aborted: false },
+    ]);
   });
 
   it('reports a request that got no HTTP answer as a plain failure', async () => {
