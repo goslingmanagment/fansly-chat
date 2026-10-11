@@ -1696,3 +1696,105 @@ describe('E138: automatic identity-verification queue', () => {
     expect(h.service.traces.get(state.scanId)!.read().events.some((event) => event.name === 'verification.fuse')).toBe(false);
   });
 });
+
+// RS RS on @itsaribae, 2026-10-11 (E155): a creator with a paid DM ($1.70 per
+// message). Fansly hid its own composer; ChatGoose showed «Не писали», sent,
+// Fansly refused, and the Hub kept the attempt `dispatching` for good.
+describe('a fan Fansly will not let the model DM', () => {
+  afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+  const paidDm = { dmPermissionFlags: [{ flags: 1, metadata: JSON.stringify({ 1: JSON.stringify({ price: 1700 }) }), verificationFlags: 0, verificationMetadata: '{}' }], accountDmPermissionFlags: { flags: 16, metadata: '{}' } };
+  const closed = (h: ReturnType<typeof harness>) => h.fansly.getGroup.mockResolvedValue({ users: [{ userId: '1' }, { userId: '2' }], ...paidDm });
+
+  it('is «closed» with the price, and neither a draft nor a send reaches the AI, the Hub or Fansly', async () => {
+    const h = harness(); closed(h);
+    const snapshot = await h.start();
+    expect(snapshot.rows[0]).toMatchObject({ status: 'closed', detail: 'Платная личка: $1.70 за сообщение.', evidence: 'history', groupId: '3' });
+    await expect(h.service.generate(7, snapshot.scanId, '2')).rejects.toThrow('Сначала дождитесь проверки');
+    await expect(h.service.send(7, snapshot.scanId, '2', 'hello')).rejects.toThrow('Отправка этому фоловеру сейчас недоступна');
+    expect(h.gateway.streamFeature).not.toHaveBeenCalled();
+    expect(h.hub.followerOutreachAttempt).not.toHaveBeenCalled();
+    expect(h.fansly.sendFollowerMessage).not.toHaveBeenCalled();
+  });
+  it('stops a send whose pre-send read finds the DM closed, before any reservation', async () => {
+    const h = harness(); const snapshot = await h.start();
+    expect(snapshot.rows[0]?.status).toBe('ready');
+    closed(h);
+    await expect(h.service.send(7, snapshot.scanId, '2', 'hello')).rejects.toThrow('Сообщение не отправлено: Fansly не даёт написать этому фану. Платная личка: $1.70 за сообщение.');
+    expect(h.service.state(7, snapshot.scanId).rows[0]?.status).toBe('closed');
+    expect(h.hub.followerOutreachAttempt).not.toHaveBeenCalled();
+    expect(h.fansly.sendFollowerMessage).not.toHaveBeenCalled();
+  });
+  it('reads the rules from a listing that verified the pair, without GET /group', async () => {
+    const h = harness();
+    h.fansly.listInboxPrefix.mockResolvedValue([chat('2', '3', { verified: true, ...paidDm })]);
+    const snapshot = await h.start();
+    expect(snapshot.rows[0]?.status).toBe('closed');
+    expect(h.fansly.getGroup).not.toHaveBeenCalled();
+  });
+  it('a personal DM already in the chat still wins: the fan is «contacted»', async () => {
+    const h = harness(); closed(h); h.setMessages([msg()]);
+    expect((await h.start()).rows[0]?.status).toBe('contacted');
+  });
+  it('says «closed» over an unconfirmed send Fansly refused for the same reason', async () => {
+    const h = harness(); closed(h);
+    h.values['chatgoose:followers:v1:attempt:1:2'] = { state: 'sending', groupId: '3', text: 'hello' };
+    expect((await h.start()).rows[0]?.status).toBe('closed');
+  });
+  it('excludes only a closed fan, in this browser, and the DMs opening again ends the exclusion', async () => {
+    const h = harness();
+    let snapshot = await h.start();
+    await expect(h.service.exclude(7, snapshot.scanId, '2', true)).rejects.toThrow('Исключить можно только');
+    closed(h);
+    snapshot = await h.start();
+    expect(snapshot.rows[0]?.excluded).toBeUndefined();
+    expect((await h.service.exclude(7, snapshot.scanId, '2', true)).rows[0]).toMatchObject({ status: 'closed', excluded: true });
+    expect(h.values['chatgoose:followers:v1:excluded:1:2']).toMatchObject({ at: expect.any(Number) });
+    expect(h.fansly.sendFollowerMessage).not.toHaveBeenCalled();
+    expect(h.hub.followerOutreachAttempt).not.toHaveBeenCalled();
+    // Remembered across scans, and undone by «Вернуть в очередь».
+    snapshot = await h.start();
+    expect(snapshot.rows[0]).toMatchObject({ status: 'closed', excluded: true });
+    expect((await h.service.exclude(7, snapshot.scanId, '2', false)).rows[0]?.excluded).toBeUndefined();
+    expect(h.values['chatgoose:followers:v1:excluded:1:2']).toBeNull();
+    await h.service.exclude(7, snapshot.scanId, '2', true);
+    // The fan drops the price: the row is workable again and the record is gone.
+    h.fansly.getGroup.mockResolvedValue({ users: [{ userId: '1' }, { userId: '2' }], dmPermissionFlags: [], accountDmPermissionFlags: { flags: 16, metadata: '{}' } });
+    snapshot = await h.start();
+    expect(snapshot.rows[0]).toMatchObject({ status: 'ready' });
+    expect(snapshot.rows[0]?.excluded).toBeUndefined();
+    expect(h.values['chatgoose:followers:v1:excluded:1:2']).toBeNull();
+  });
+  it('keeps the rules a POST /group answer named for a later scan-time check', async () => {
+    const h = harness();
+    h.fansly.listInboxPrefix.mockResolvedValue([]);
+    h.fansly.createFollowerGroup.mockResolvedValue({ id: '3', lastMessage: null, ...paidDm });
+    closed(h);
+    h.fansly.getMessagePage.mockRejectedValueOnce(new ChatGooseError('fansly_server_error', undefined, { status: 500 }));
+    const first = await h.start();
+    expect(first.rows[0]?.status).toBe('unknown');
+    expect(h.fansly.createFollowerGroup).toHaveBeenCalledOnce();
+    // Continue reads at scan time: the POST answer verified the pair, so no GET /group.
+    const calls = h.fansly.getGroup.mock.calls.length;
+    h.service.resume(7, first.scanId);
+    await vi.waitFor(() => { const state = h.service.state(7, first.scanId); expect(state.scanning || state.verification?.active).toBeFalsy(); });
+    expect(h.fansly.getGroup).toHaveBeenCalledTimes(calls);
+    expect(h.service.state(7, first.scanId).rows[0]?.status).toBe('closed');
+  });
+  it('keeps an exclusion when an answer comes without the rules', async () => {
+    const h = harness(); closed(h);
+    const snapshot = await h.start();
+    await h.service.exclude(7, snapshot.scanId, '2', true);
+    h.fansly.listInboxPrefix.mockResolvedValue([chat('2', '3', { verified: true })]);
+    expect((await h.start()).rows[0]?.status).toBe('ready');
+    expect(h.values['chatgoose:followers:v1:excluded:1:2']).toMatchObject({ at: expect.any(Number) });
+  });
+  it('names the Hub custody state when a reservation is refused', async () => {
+    const h = harness();
+    for (const [state, text] of [['dispatching', 'Прошлая отправка этому фану не подтверждена'], ['sent', 'Этому фану уже отправили приветствие'], ['reserved', 'Другой чаттер сейчас отправляет']] as const) {
+      const snapshot = await h.start();
+      h.hub.followerOutreachAttempt.mockResolvedValueOnce({ owned: false, state });
+      await expect(h.service.send(7, snapshot.scanId, '2', 'hello')).rejects.toThrow(text);
+    }
+    expect(h.fansly.sendFollowerMessage).not.toHaveBeenCalled();
+  });
+});

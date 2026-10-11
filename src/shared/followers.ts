@@ -3,7 +3,7 @@ import type { FanslyAccountResponse, FanslyMessage } from './types.js';
 
 export const FOLLOWER_HOURS = [1, 3, 6, 12, 24, 48, 72, 168, 336, 720] as const;
 export type { FollowersRequest } from './followers-protocol.js';
-export type FollowerStatus = 'checking' | 'pending' | 'ready' | 'reply' | 'contacted' | 'unknown' | 'sending' | 'uncertain' | 'sent';
+export type FollowerStatus = 'checking' | 'pending' | 'ready' | 'reply' | 'contacted' | 'closed' | 'unknown' | 'sending' | 'uncertain' | 'sent';
 export interface FollowerDisplayMessage { id: string; own: boolean; automated: boolean; text: string; createdAt?: number }
 export interface FollowerConversation {
   groupId?: string;
@@ -27,6 +27,9 @@ export interface FollowerRow {
   evidence?: 'history';
   /** A chat with this fan is known, whether or not its history could be read. */
   chatKnown?: boolean;
+  /** `closed` only: the chatter took this fan out of «К обработке» in this
+   * browser (E155). Fansly opening the DMs again brings the fan back. */
+  excluded?: boolean;
   /** Published only after this run has confirmed the two participants. */
   groupId?: string;
   historyRevision: string;

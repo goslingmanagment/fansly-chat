@@ -52,6 +52,11 @@ from prose when checking what is installed or live; verify the signed update fee
   results and drafts and checks only the remainder. A run may create empty
   technical chats. Generation and sending still require a human click and
   confirmed history; a listing/search miss never means «Не писали».
+  A fan Fansly will not let the model DM (a paid DM, or rules the model does
+  not meet: Fansly's own check of the chat's `dmPermissionFlags`,
+  `src/shared/fansly-dm-permissions.ts`) is «Нельзя написать» with the reason,
+  and nothing is generated or sent; the chatter may exclude such a fan from
+  «К обработке» in this browser (2.8.1, E155).
 - **Fansly через вкладку** (2.7.2, E149) — an opt-in switch («Генерация» →
   «Служебное») for a chatter without a system-wide VPN. Firefox gives the
   background's requests no tab, so Multi-Account Containers' per-container proxy

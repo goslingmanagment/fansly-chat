@@ -36,6 +36,7 @@ export function registerFollowersRuntime(service: FollowersService): void {
           case 'scan': return { ok: true, snapshot: await service.start(tabId, value.hours) };
           case 'resume': return { ok: true, snapshot: service.resume(tabId, value.scanId) };
           case 'prioritize': return { ok: true, snapshot: service.prioritize(tabId, value.scanId, value.fanId) };
+          case 'exclude': return { ok: true, snapshot: await service.exclude(tabId, value.scanId, value.fanId, value.excluded) };
           case 'pause': return { ok: true, snapshot: service.pause(tabId, value.scanId) };
           case 'conversation': return { ok: true, snapshot: service.conversation(tabId, value.scanId, value.fanId, value.older) };
           case 'state': return { ok: true, snapshot: service.state(tabId, value.scanId) };
