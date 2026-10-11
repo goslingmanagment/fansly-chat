@@ -3,43 +3,550 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<meta name="theme-color" content="#f6f2ea" />
+<meta name="theme-color" content="#f7f3ea" />
 <meta name="description" content="Как начать работать в ChatGoose: один логин и пароль на расширение для Fansly и приложение для OnlyFans." />
 <title>ChatGoose — как начать</title>
+<link rel="icon" type="image/png" href="mascot.png" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=Source+Serif+4:ital,wght@0,600;1,600&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400..700&family=Literata:opsz,wght@7..72,700..800&display=swap" rel="stylesheet" />
 <style>
-:root{--paper:#f6f2ea;--white:#fffdf8;--tint:#eee8de;--ink:#2b251f;--soft:#6d6256;--line:#dcd3c6;--clay:#a74d32;--clay-hover:#893a25;--peach:#f1dfd2;--green:#346349;--sans:"Hanken Grotesk",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--serif:"Source Serif 4",Georgia,serif;--mono:ui-monospace,SFMono-Regular,Consolas,monospace}
+/* ChatGoose public pages in the Gosling identity.
+   Everything down to the "This page" mark is the same block on all five pages
+   (install, start, guide, whats-new-2, changelog): change it in all of them at once.
+   Each page is deployed as one self-contained file, so there is no shared stylesheet. */
 
-*,*::before,*::after{box-sizing:border-box}
-*{margin:0}
-body{background:var(--paper);color:var(--ink);font:400 16px/1.6 var(--sans);-webkit-font-smoothing:antialiased}
-a{color:inherit}
-button{font:inherit;cursor:pointer}
-a:focus-visible,button:focus-visible{outline:3px solid var(--clay);outline-offset:4px}
-[hidden]{display:none!important}
-img{display:block;max-width:100%}
+:root {
+  /* Colour */
+  --paper: #f7f3ea; /* page */
+  --shade: #e7dfcf; /* quiet bands and chips */
+  --line: #d9d0be; /* hairlines on paper */
+  --line-2: #cfc6b4; /* hairlines on shade */
+  --ink: #1c1b17; /* text, buttons, outlines */
+  --ink-2: #3a372f; /* body text */
+  --ink-3: #5a564c; /* secondary text on paper, shade and white */
+  --white: #fffdf8; /* surfaces of mocks and fields */
+  --pond: #8db8d4; /* the stage: first screen, closing install block */
+  --down: #f4c845; /* ChatGoose's own colour: news, highlight panels */
+  --beak: #eb6a2c; /* tiny accents, never text */
+  --focus: #d0501a; /* focus ring on paper, shade and white */
+  --night-line: #3d3a33; /* hairlines on ink */
+  --night-text: #cfc8b8; /* secondary text on ink */
 
-.wrap{width:min(860px,calc(100% - 40px));margin:auto}
-.topbar{border-bottom:1px solid var(--line)}
-.nav{min-height:78px;display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap}
-.brand{display:flex;align-items:center;gap:11px;font-size:23px;font-weight:700;letter-spacing:-1px;text-decoration:none}
-.brand em{font-style:normal;color:var(--clay)}
-.nav-version{font:500 12px/1.5 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--soft)}
+  /* Type */
+  --font-display: 'Literata', Georgia, 'Times New Roman', serif;
+  --font-text: 'Golos Text', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, monospace; /* key caps and code only */
+  --fs-h1: clamp(2.25rem, 1.2rem + 4.6vw, 5.25rem);
+  --fs-h2: clamp(1.875rem, 1.35rem + 2.3vw, 3rem);
+  --fs-h3: clamp(1.3125rem, 1.2rem + 0.5vw, 1.5625rem);
+  --fs-lead: clamp(1.125rem, 1.05rem + 0.4vw, 1.3125rem);
+  --fs-body: 1.0625rem;
+  --fs-small: 0.9375rem;
 
-.hero{padding:52px 0 26px}
-.eyebrow{display:inline-flex;align-items:center;gap:11px;font:500 12px/1.5 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--clay)}
-.dot{height:7px;width:7px;border-radius:100%;background:var(--clay)}
-h1{font:600 clamp(34px,6vw,54px)/1.1 var(--serif);letter-spacing:-.045em;margin:18px 0 16px}
-.lede{font-size:18px;line-height:1.65;color:var(--soft);max-width:560px}
+  /* Layout */
+  --container: 75rem;
+  --gutter: clamp(1.125rem, 4.5vw, 3.5rem);
+  --section: clamp(3.5rem, 7vw, 6.5rem);
+  --radius: 8px; /* buttons, fields, chips */
+  --radius-mock: 16px; /* interface mocks */
+  --radius-panel: 28px; /* big panels; the curve of the illustration tiles */
+  --logo-h: clamp(3rem, 2.4rem + 1.6vw, 3.875rem);
+}
 
-.tabs{display:flex;gap:8px;margin:36px 0 0;flex-wrap:wrap}
-.tab{background:none;border:1px solid var(--line);border-radius:6px;padding:11px 20px;font-weight:600;color:var(--soft);transition:border-color .16s,color .16s,background .16s}
-.tab:hover{border-color:var(--clay);color:var(--clay)}
-.tab[aria-selected="true"]{background:var(--ink);border-color:var(--ink);color:#fff9f2}
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
 
-.panel{background:var(--white);border:1px solid var(--line);border-radius:12px;padding:clamp(22px,4vw,34px);margin:18px 0 44px}
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-text);
+  font-size: var(--fs-body);
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+img,
+svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-variation-settings: 'opsz' 24;
+  font-variant-numeric: lining-nums;
+  text-wrap: balance;
+}
+
+h1 {
+  font-size: var(--fs-h1);
+  line-height: 1.02;
+  letter-spacing: -0.022em;
+}
+
+h2 {
+  font-size: var(--fs-h2);
+  line-height: 1.06;
+  letter-spacing: -0.018em;
+}
+
+h3 {
+  font-size: var(--fs-h3);
+  line-height: 1.18;
+  letter-spacing: -0.008em;
+}
+
+h4 {
+  margin: 0;
+  font: 600 1.0625rem/1.35 var(--font-text);
+}
+
+p,
+ul,
+ol,
+dl,
+dd,
+figure,
+blockquote {
+  margin: 0;
+}
+
+ul,
+ol {
+  padding: 0;
+  list-style: none;
+}
+
+a {
+  color: inherit;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 0.22em;
+}
+
+a:hover {
+  text-decoration-thickness: 3px;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+[id] {
+  scroll-margin-top: 1.5rem;
+}
+
+::selection {
+  background: var(--down);
+  color: var(--ink);
+}
+
+/* Focus: orange on paper, shade and white; ink on pond and yellow; yellow on ink. */
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+.stage :focus-visible,
+.sun :focus-visible {
+  outline-color: var(--ink);
+}
+
+.night :focus-visible {
+  outline-color: var(--down);
+}
+
+/* A tab panel fills its mock edge to edge: draw its ring inside, where nothing clips it. */
+[role='tabpanel']:focus-visible {
+  outline-offset: -3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+.wrap {
+  width: min(100% - 2 * var(--gutter), var(--container));
+  margin-inline: auto;
+}
+
+.skip {
+  position: absolute;
+  top: -5rem;
+  left: 1rem;
+  z-index: 30;
+  padding: 0.75rem 1.25rem;
+  border-radius: var(--radius);
+  background: var(--ink);
+  color: var(--paper);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+/* The skip link lands on any of the page colours: its ring sits inside the ink box. */
+.skip:focus {
+  top: 1rem;
+  outline: 3px solid var(--down);
+  outline-offset: -5px;
+}
+
+/* Surfaces */
+.stage {
+  background: var(--pond);
+}
+
+.band {
+  background: var(--shade);
+}
+
+.sun {
+  background: var(--down);
+  color: var(--ink);
+}
+
+.night {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.lead {
+  font-size: var(--fs-lead);
+  line-height: 1.45;
+  color: var(--ink-2);
+}
+
+/* Buttons: ink, no arrows. The secondary action is an underlined link. */
+.btn {
+  display: inline-block;
+  padding: 0.95rem 1.5rem;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--ink);
+  color: var(--paper);
+  font: 600 1.0625rem/1.2 var(--font-text);
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.btn:hover {
+  background: #000;
+}
+
+.btn-small {
+  padding: 0.7rem 1.1rem;
+  font-size: 1rem;
+}
+
+.text-link {
+  font-weight: 600;
+}
+
+/* Key caps and code are the only monospace on the pages. */
+kbd,
+code {
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+}
+
+kbd {
+  display: inline-block;
+  min-width: 1.7em;
+  padding: 0.08em 0.4em;
+  border: 1px solid var(--ink-3);
+  border-radius: 6px;
+  background: var(--white);
+  color: var(--ink);
+  line-height: 1.45;
+  text-align: center;
+  white-space: nowrap;
+}
+
+/* When a long address wraps, each line keeps its own padded, rounded chip. */
+code {
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  background: var(--shade);
+  overflow-wrap: anywhere;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+.band code {
+  background: var(--white);
+}
+
+/* Header: the gosling stands on the product's name; links sit on the wordmark's baseline. */
+.site-header {
+  padding-block: 1rem 1.25rem;
+}
+
+/* On the landing the header and the first screen are two boxes of one colour: overlap them so no seam shows. */
+.site-header.stage {
+  position: relative;
+  margin-bottom: -1px;
+  padding-bottom: calc(1.25rem + 1px);
+}
+
+.header-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.brand-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.9rem;
+  min-width: 0;
+}
+
+/* The drawing keeps 7.65% of its height under the baseline of the word; the negative margin
+   moves the box's baseline up to it, so the flex row aligns text with the wordmark. */
+.logo {
+  display: block;
+  flex: none;
+  border-radius: 6px;
+  font-size: 0;
+  line-height: 0;
+}
+
+.logo svg {
+  display: inline-block;
+  width: auto;
+  max-width: none;
+  height: var(--logo-h);
+  margin-bottom: calc(var(--logo-h) * -0.0765);
+}
+
+.nav-version {
+  font-size: var(--fs-small);
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.site-nav {
+  display: flex;
+  align-items: baseline;
+  gap: clamp(0.9rem, 2.2vw, 1.9rem);
+  font-size: 1rem;
+  font-weight: 500;
+}
+
+.site-nav a:not(.btn) {
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.site-nav a:not(.btn):hover,
+.site-nav [aria-current='page'] {
+  text-decoration: underline;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 0.22em;
+}
+
+.site-nav .btn {
+  white-space: nowrap;
+}
+
+.nav-wide,
+.nav-mid {
+  display: none;
+}
+
+@media (min-width: 46rem) {
+  .nav-mid {
+    display: inline;
+  }
+}
+
+@media (min-width: 66rem) {
+  .nav-wide {
+    display: inline;
+  }
+}
+
+@media (max-width: 30rem) {
+  .nav-version {
+    display: none;
+  }
+}
+
+/* The narrowest phones: the logo gives way so the install button still fits. */
+@media (max-width: 22rem) {
+  :root {
+    --logo-h: 2.5rem;
+  }
+  .site-nav .btn {
+    padding-inline: 0.8rem;
+  }
+}
+
+/* Footer: the night band closes every page. */
+.site-footer {
+  padding-block: clamp(2.25rem, 5vw, 3.25rem) 2.5rem;
+  font-size: var(--fs-small);
+}
+
+.footer-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1.5rem 2.5rem;
+}
+
+.footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.75rem;
+}
+
+.footer-links a {
+  color: var(--paper);
+}
+
+/* Comfortable to tap on a phone. */
+@media (max-width: 46rem) {
+  .footer-links {
+    row-gap: 0;
+  }
+  .footer-links a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 2.75rem;
+  }
+  .site-nav .btn {
+    min-height: 2.75rem;
+    padding-block: 0.8rem;
+  }
+}
+
+.site-footer p {
+  margin-top: 1.75rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--night-line);
+  color: var(--night-text);
+}
+
+/* Interface mocks: flat, white, ink outline. */
+.mock {
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-mock);
+  background: var(--white);
+  overflow: hidden;
+}
+
+/* A plain list of facts: term on the left, value on the right. */
+.facts > div {
+  display: grid;
+  grid-template-columns: fit-content(56%) minmax(0, 1fr);
+  gap: 1.5rem;
+  align-items: baseline;
+  padding-block: 0.8rem;
+  border-top: 1px solid var(--line);
+}
+
+.facts > div:first-child {
+  border-top: 2px solid var(--ink);
+}
+
+.facts > div:last-child {
+  border-bottom: 1px solid var(--line);
+}
+
+.facts dt {
+  color: var(--ink-3);
+}
+
+.facts dd {
+  font-weight: 600;
+  text-align: right;
+}
+
+/* ---------- This page ---------- */
+
+.page-head {
+  padding-block: clamp(1.75rem, 4.5vw, 3.5rem) clamp(1.75rem, 3.5vw, 2.75rem);
+}
+
+.page-head h1 {
+  font-size: clamp(2.25rem, 1.5rem + 3.4vw, 4rem);
+}
+
+.lede {
+  max-width: 40rem;
+  margin-top: 1.25rem;
+  font-size: var(--fs-lead);
+  line-height: 1.45;
+  color: var(--ink-2);
+}
+
+/* Two platforms, one choice at a time */
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.tab {
+  padding: 0.7rem 1.15rem;
+  border: 1px solid var(--ink-3);
+  border-radius: var(--radius);
+  background: var(--white);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.tab:hover {
+  border-color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--ink);
+}
+
+.tab[aria-selected='true'] {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.panel {
+  margin-block: 1rem var(--section);
+  padding: clamp(1.25rem, 3.5vw, 2.5rem);
+  border-radius: var(--radius-panel);
+  background: var(--shade);
+}
+
 /* No-JS fallback. Without a script nothing can toggle [hidden], so the panels
    are driven by :target instead — and a #panel-onlyfans link still opens the
    right half. A sibling combinator cannot express this: #panel-fansly comes
@@ -47,84 +554,219 @@ h1{font:600 clamp(34px,6vw,54px)/1.1 var(--serif);letter-spacing:-.045em;margin:
    :has() on the container can, and it also gives the «nothing targeted yet»
    default. The script stamps data-js on <html> before first paint and takes
    over from there, so the two mechanisms can never fight. */
-html:not([data-js]) .panel{display:none!important}
-html:not([data-js]) .panel:target{display:block!important}
-html:not([data-js]) main:not(:has(.panel:target)) #panel-fansly{display:block!important}
-html:not([data-js]) .tab[aria-selected="true"]{background:none;border-color:var(--line);color:var(--soft)}
+html:not([data-js]) .panel {
+  display: none !important;
+}
+
+html:not([data-js]) .panel:target {
+  display: block !important;
+}
+
+html:not([data-js]) main:not(:has(.panel:target)) #panel-fansly {
+  display: block !important;
+}
+
+html:not([data-js]) .tab[aria-selected='true'] {
+  border-color: var(--ink-3);
+  background: var(--white);
+  color: var(--ink);
+}
+
 html:not([data-js]) .tab:target,
-html:not([data-js]) .tab:hover{border-color:var(--clay);color:var(--clay)}
-.panel h2{font:600 clamp(23px,3vw,29px)/1.2 var(--serif);letter-spacing:-.03em;margin-bottom:8px}
-.panel-sub{color:var(--soft);font-size:15px;margin-bottom:26px}
+html:not([data-js]) .tab:hover {
+  border-color: var(--ink);
+}
 
-ol.steps{list-style:none;counter-reset:s;padding:0;display:grid;gap:20px}
-ol.steps li{counter-increment:s;display:grid;grid-template-columns:34px 1fr;gap:16px;align-items:start}
-ol.steps li::before{content:counter(s);display:grid;place-items:center;width:34px;height:34px;border-radius:50%;background:var(--peach);color:var(--clay);font:600 15px var(--mono)}
-.step-title{font-weight:600;font-size:17px;margin-bottom:5px}
-.step-body{color:var(--soft);font-size:15px}
-.step-body code{font:500 13px var(--mono);background:var(--tint);border-radius:4px;padding:2px 6px;word-break:break-all}
+.panel h2 {
+  font-size: clamp(1.625rem, 1.4rem + 1vw, 2.125rem);
+}
 
-.cta{display:inline-flex;align-items:center;gap:14px;background:var(--clay);color:#fff9f2;padding:13px 20px;border-radius:6px;font-weight:600;text-decoration:none;margin-top:12px;transition:background .18s}
-.cta:hover{background:var(--clay-hover)}
-.cta-ghost{display:inline-block;margin-top:12px;font-size:14px;border-bottom:1px solid var(--line);padding:6px 0;text-decoration:none}
-.cta-ghost:hover{border-color:var(--clay);color:var(--clay)}
+.panel-sub {
+  max-width: 40rem;
+  margin-top: 0.6rem;
+  color: var(--ink-2);
+}
 
-.note{margin-top:26px;border-left:3px solid var(--peach);padding:2px 0 2px 16px;color:var(--soft);font-size:15px}
-.note b{color:var(--ink)}
+/* The four steps are a real sequence, so they are numbered. */
+ol.steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13.5rem, 1fr));
+  gap: 0 2rem;
+  margin-top: clamp(1.5rem, 3vw, 2.25rem);
+  counter-reset: s;
+}
 
-.faq{border-top:1px solid var(--line);padding:34px 0 0}
-.faq h2{font:600 24px/1.2 var(--serif);letter-spacing:-.03em;margin-bottom:18px}
-details{border-bottom:1px solid var(--line);padding:14px 0}
-summary{cursor:pointer;font-weight:600;list-style:none}
-summary::-webkit-details-marker{display:none}
-summary::after{content:"+";float:right;color:var(--clay);font:600 18px var(--mono)}
-details[open] summary::after{content:"–"}
-details p{color:var(--soft);font-size:15px;margin-top:10px}
+ol.steps li {
+  padding-block: 1.1rem 1.75rem;
+  border-top: 2px solid var(--ink);
+  counter-increment: s;
+}
 
-footer{border-top:1px solid var(--line);margin-top:44px;padding:26px 0 40px;color:var(--soft);font-size:13px;display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
-footer a{text-decoration:none}
-footer a:hover{color:var(--clay)}
+ol.steps li::before {
+  content: counter(s);
+  display: block;
+  margin-bottom: 0.6rem;
+  font: 800 2.75rem/1 var(--font-display);
+  font-variation-settings: 'opsz' 24;
+  font-variant-numeric: lining-nums;
+}
 
-@media (max-width:560px){
-  ol.steps li{grid-template-columns:28px 1fr;gap:12px}
-  ol.steps li::before{width:28px;height:28px;font-size:13px}
-  .tab{flex:1 1 auto;text-align:center}
+.step-title {
+  margin-bottom: 0.4rem;
+  font-size: 1.125rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.step-body {
+  font-size: var(--fs-small);
+  color: var(--ink-2);
+}
+
+.panel code {
+  background: var(--white);
+}
+
+ol.steps .btn {
+  margin-top: 1rem;
+}
+
+.cta-ghost {
+  display: inline-block;
+  margin-top: 1rem;
+  font-size: var(--fs-small);
+  font-weight: 600;
+}
+
+.note {
+  max-width: 52rem;
+  padding: 1rem 1.25rem;
+  border-radius: var(--radius-mock);
+  background: var(--white);
+  font-size: var(--fs-small);
+  color: var(--ink-2);
+}
+
+.note b {
+  color: var(--ink);
+}
+
+/* Short answers */
+.faq {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1.5rem clamp(2rem, 6vw, 5rem);
+  padding-bottom: var(--section);
+}
+
+@media (min-width: 58rem) {
+  .faq {
+    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.6fr);
+  }
+}
+
+details {
+  border-top: 1px solid var(--line);
+}
+
+details:first-child {
+  border-top: 2px solid var(--ink);
+}
+
+details:last-child {
+  border-bottom: 1px solid var(--line);
+}
+
+summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-block: 1rem;
+  font-weight: 600;
+  list-style: none;
+  cursor: pointer;
+}
+
+summary::-webkit-details-marker {
+  display: none;
+}
+
+summary::after {
+  content: '+';
+  flex: none;
+  font-size: 1.25rem;
+  font-weight: 500;
+  line-height: 1;
+}
+
+details[open] summary::after {
+  content: '−';
+}
+
+details p {
+  max-width: 40rem;
+  padding-bottom: 1.25rem;
+  color: var(--ink-2);
+}
+
+@media (max-width: 34rem) {
+  ol.steps li {
+    display: grid;
+    grid-template-columns: 2.25rem minmax(0, 1fr);
+    gap: 0.75rem;
+    align-items: baseline;
+  }
+  ol.steps li::before {
+    margin-bottom: 0;
+    font-size: 2rem;
+  }
+  .tab {
+    flex: 1 1 auto;
+    text-align: center;
+  }
 }
 </style>
 </head>
 <body>
 
-<header class="topbar">
-  <div class="wrap nav">
-    <a class="brand" href="index.html"><span>Chat<em>Goose</em></span></a>
-    <span class="nav-version">Как начать</span>
+<header class="site-header">
+  <div class="wrap header-row">
+    <a class="logo" href="index.html"><svg xmlns="http://www.w3.org/2000/svg" viewBox="-8 -143.14 579 155" width="579" height="155" role="img" aria-label="ChatGoose"><path d="M38.2 1.4Q27.7 1.4 19.95 -2.8Q12.2 -7 8 -15.2Q3.8 -23.4 3.8 -35Q3.8 -43.4 6.25 -50.15Q8.7 -56.9 13.35 -61.8Q18 -66.7 24.45 -69.3Q30.9 -71.9 38.9 -71.9Q44.1 -71.9 47.9 -70.4Q51.7 -68.9 55 -66.5L56.2 -71.9L62.9 -71.9L66.7 -46.9L58.1 -45.3Q56 -51.3 53.4 -54.9Q50.8 -58.5 47.5 -60.1Q44.2 -61.7 40.6 -61.7Q35.3 -61.7 31.9 -58.75Q28.5 -55.8 26.95 -50.4Q25.4 -45 25.4 -37.4Q25.4 -29.8 26.9 -24.75Q28.4 -19.7 30.95 -16.7Q33.5 -13.7 36.8 -12.4Q40.1 -11.1 43.6 -11.1Q47.8 -11.1 51.4 -12.35Q55 -13.6 57.8 -15.55Q60.6 -17.5 62.3 -19.6L67.8 -12.4Q66.1 -10.3 63.55 -7.85Q61 -5.4 57.4 -3.35Q53.8 -1.3 49.05 0.05Q44.3 1.4 38.2 1.4Z M74.08 0L74.08 -7.3L77.48 -7.9Q78.88 -8.1 79.43 -8.95Q79.98 -9.8 79.98 -12.5L79.98 -61.1Q79.98 -64.3 79.33 -65.6Q78.68 -66.9 76.38 -67.2L73.28 -67.6L73.98 -75.5L98.28 -76.8L99.88 -75.8L99.88 -44.1L100.18 -44.1Q102.48 -48.3 106.53 -50.65Q110.58 -53 116.48 -53Q122.58 -53 126.33 -50.8Q130.08 -48.6 131.83 -44.6Q133.58 -40.6 133.58 -35.6L133.58 -11.8Q133.58 -9.7 134.18 -8.85Q134.78 -8 136.68 -7.8L139.48 -7.3L139.48 0L108.88 0L108.88 -7.2L111.08 -7.6Q112.58 -7.9 113.13 -8.75Q113.68 -9.6 113.68 -12L113.68 -31.8Q113.68 -35.2 113.18 -37.25Q112.68 -39.3 111.38 -40.2Q110.08 -41.1 107.88 -41.1Q105.68 -41.1 103.83 -40.05Q101.98 -39 100.93 -36.65Q99.88 -34.3 99.88 -30.3L99.88 -12.2Q99.88 -9.9 100.33 -8.9Q100.78 -7.9 102.38 -7.7L104.78 -7.2L104.78 0Z M160.32 1.4Q152.72 1.4 148.57 -2.3Q144.42 -6 144.42 -12.3Q144.42 -18.4 147.57 -21.8Q150.72 -25.2 157.12 -26.65Q163.52 -28.1 173.52 -28.5L173.52 -36.1Q173.52 -39.6 172.97 -41.85Q172.42 -44.1 170.82 -45.2Q169.22 -46.3 166.22 -46.3Q164.32 -46.3 162.12 -45.7Q159.92 -45.1 158.42 -44.1Q159.62 -42.4 160.37 -41.05Q161.12 -39.7 161.37 -38.8Q161.62 -37.9 161.62 -37Q161.62 -34.8 159.52 -33.15Q157.42 -31.5 153.12 -31.5Q149.22 -31.5 147.37 -33.35Q145.52 -35.2 145.52 -38.1Q145.52 -42.2 148.42 -45.6Q151.32 -49 156.82 -50.95Q162.32 -52.9 169.82 -52.9Q177.92 -52.9 183.12 -50.85Q188.32 -48.8 190.82 -44.45Q193.32 -40.1 193.32 -33.1L193.32 -13.3Q193.32 -11 194.12 -9.9Q194.92 -8.8 196.72 -8.8Q197.72 -8.8 198.62 -9Q199.52 -9.2 200.42 -9.5L201.72 -3.5Q199.42 -1.4 195.77 0Q192.12 1.4 188.02 1.4Q182.62 1.4 179.57 -0.95Q176.52 -3.3 175.52 -6.8Q174.52 -4.7 172.52 -2.85Q170.52 -1 167.52 0.2Q164.52 1.4 160.32 1.4ZM168.12 -7.9Q169.92 -7.9 171.07 -8.65Q172.22 -9.4 172.87 -10.8Q173.52 -12.2 173.52 -14.1L173.52 -21.9Q170.12 -21.9 167.92 -21.15Q165.72 -20.4 164.72 -18.75Q163.72 -17.1 163.72 -14.2Q163.72 -11.3 164.72 -9.6Q165.72 -7.9 168.12 -7.9Z M224.79 1.4Q219.39 1.4 215.54 -0.3Q211.69 -2 209.69 -5.6Q207.69 -9.2 207.69 -14.4L207.69 -42.6L200.99 -42.6L200.99 -50.3Q206.09 -51.1 208.84 -53.1Q211.59 -55.1 212.84 -58.8Q214.09 -62.5 214.89 -67.9L225.69 -69.4L227.59 -68.3L227.59 -51.6L240.79 -51.6L240.79 -42.6L227.59 -42.6L227.59 -18.1Q227.59 -14.8 228.59 -12.8Q229.59 -10.8 232.89 -10.8Q234.79 -10.8 236.74 -11.5Q238.69 -12.2 240.59 -13.3L243.99 -6.8Q240.89 -3.3 236.24 -0.95Q231.59 1.4 224.79 1.4Z M280.13 1.4Q269.73 1.4 262.58 -3.15Q255.43 -7.7 251.78 -15.75Q248.13 -23.8 248.13 -34.5Q248.13 -43.1 250.68 -50Q253.23 -56.9 258.03 -61.85Q262.83 -66.8 269.38 -69.35Q275.93 -71.9 284.03 -71.9Q289.73 -71.9 293.73 -70.45Q297.73 -69 300.73 -66.5L302.13 -71.9L308.73 -71.9L312.63 -46.9L304.13 -45.3Q301.93 -51 299.43 -54.65Q296.93 -58.3 293.53 -60Q290.13 -61.7 285.63 -61.7Q281.73 -61.7 278.68 -60.1Q275.63 -58.5 273.68 -55.4Q271.73 -52.3 270.73 -47.75Q269.73 -43.2 269.73 -37.2Q269.73 -30 270.98 -25Q272.23 -20 274.38 -16.9Q276.53 -13.8 279.48 -12.35Q282.43 -10.9 285.63 -10.9Q287.63 -10.9 289.33 -11.2Q291.03 -11.5 292.48 -12.1Q293.93 -12.7 295.13 -13.5L295.13 -22.5Q295.13 -24.8 294.68 -26.1Q294.23 -27.4 291.83 -27.7L287.83 -28.1L287.83 -35.8L320.13 -35.8L320.13 -28.1L317.13 -27.7Q314.93 -27.3 314.38 -26.2Q313.83 -25.1 313.83 -22.5L313.83 0.2L304.03 0.2L300.03 -6.1Q298.63 -5 296.08 -3.2Q293.53 -1.4 289.48 0Q285.43 1.4 280.13 1.4Z M353.34 1.4Q344.44 1.4 338.04 -1.55Q331.64 -4.5 328.29 -10.35Q324.94 -16.2 324.94 -24.9Q324.94 -34.6 328.74 -40.85Q332.54 -47.1 339.49 -50.05Q346.44 -53 355.54 -53Q363.84 -53 370.09 -50.3Q376.34 -47.6 379.94 -41.85Q383.54 -36.1 383.54 -26.9Q383.54 -17.7 379.99 -11.4Q376.44 -5.1 369.74 -1.85Q363.04 1.4 353.34 1.4ZM354.84 -7.7Q357.84 -7.7 359.54 -9.45Q361.24 -11.2 361.99 -15Q362.74 -18.8 362.74 -24.9Q362.74 -30.6 362.14 -34.35Q361.54 -38.1 360.39 -40.2Q359.24 -42.3 357.64 -43.15Q356.04 -44 353.94 -44Q351.34 -44 349.54 -42.65Q347.74 -41.3 346.74 -37.8Q345.74 -34.3 345.74 -28.1Q345.74 -20.8 346.69 -16.3Q347.64 -11.8 349.59 -9.75Q351.54 -7.7 354.84 -7.7Z M418.12 1.4Q409.22 1.4 402.82 -1.55Q396.42 -4.5 393.07 -10.35Q389.72 -16.2 389.72 -24.9Q389.72 -34.6 393.52 -40.85Q397.32 -47.1 404.27 -50.05Q411.22 -53 420.32 -53Q428.62 -53 434.87 -50.3Q441.12 -47.6 444.72 -41.85Q448.32 -36.1 448.32 -26.9Q448.32 -17.7 444.77 -11.4Q441.22 -5.1 434.52 -1.85Q427.82 1.4 418.12 1.4ZM419.62 -7.7Q422.62 -7.7 424.32 -9.45Q426.02 -11.2 426.77 -15Q427.52 -18.8 427.52 -24.9Q427.52 -30.6 426.92 -34.35Q426.32 -38.1 425.17 -40.2Q424.02 -42.3 422.42 -43.15Q420.82 -44 418.72 -44Q416.12 -44 414.32 -42.65Q412.52 -41.3 411.52 -37.8Q410.52 -34.3 410.52 -28.1Q410.52 -20.8 411.47 -16.3Q412.42 -11.8 414.37 -9.75Q416.32 -7.7 419.62 -7.7Z M456.55 1.5L455.05 -17L463.45 -17.5Q464.95 -13.8 467.15 -11.35Q469.35 -8.9 472 -7.75Q474.65 -6.6 477.85 -6.6Q481.55 -6.6 483.45 -8.1Q485.35 -9.6 485.35 -12.2Q485.35 -14 484.15 -15.05Q482.95 -16.1 480.5 -16.9Q478.05 -17.7 474.25 -18.5Q470.95 -19.3 467.65 -20.45Q464.35 -21.6 461.5 -23.4Q458.65 -25.2 456.95 -28.2Q455.25 -31.2 455.25 -35.8Q455.25 -41.3 457.95 -45.2Q460.65 -49.1 465.3 -51.05Q469.95 -53 476.15 -53Q480.55 -53 483.9 -52.05Q487.25 -51.1 489.65 -49.7L490.45 -53L497.35 -53L498.55 -35.8L490.35 -36.2Q488.25 -41.3 484.85 -43.6Q481.45 -45.9 477.35 -45.9Q474.05 -45.9 472.3 -44.7Q470.55 -43.5 470.55 -41.2Q470.55 -39.3 471.7 -38.3Q472.85 -37.3 475.25 -36.4Q477.65 -35.5 481.45 -34.6Q485.45 -33.7 488.9 -32.5Q492.35 -31.3 495.05 -29.4Q497.75 -27.5 499.2 -24.65Q500.65 -21.8 500.65 -17.4Q500.65 -11.5 498 -7.25Q495.35 -3 490.45 -0.8Q485.55 1.4 479.05 1.4Q474.45 1.4 470.75 0.3Q467.05 -0.8 464.45 -2.3L463.35 1.5Z M533.97 1.4Q524.87 1.4 518.77 -1.8Q512.67 -5 509.57 -10.8Q506.47 -16.6 506.47 -24.4Q506.47 -33.7 510.27 -40.05Q514.07 -46.4 520.72 -49.7Q527.37 -53 535.77 -53Q542.97 -53 548.22 -50.7Q553.47 -48.4 556.37 -43.9Q559.27 -39.4 559.27 -32.9Q559.27 -30.6 559.07 -28.2Q558.87 -25.8 558.47 -23.8L526.97 -23.8Q527.17 -20 528.67 -17.4Q530.17 -14.8 532.82 -13.5Q535.47 -12.2 539.17 -12.2Q544.07 -12.2 547.72 -13.55Q551.37 -14.9 555.07 -17.4L559.97 -11.6Q555.97 -5.9 549.42 -2.25Q542.87 1.4 533.97 1.4ZM526.77 -31.7L540.27 -31.7Q540.47 -33.2 540.57 -34.45Q540.67 -35.7 540.67 -37Q540.67 -40.8 539.22 -42.8Q537.77 -44.8 534.97 -44.8Q532.27 -44.8 530.52 -43.25Q528.77 -41.7 527.87 -38.85Q526.97 -36 526.77 -31.7Z" fill="#1C1B17"/><g transform="translate(331.55 -149.42) scale(1.02)"><path d="M40 80 L40 88" fill="none" stroke="#1C1B17" stroke-width="16" stroke-linecap="round"/><path d="M38 86 L56 94 L34 94 Z" fill="#EB6A2C" stroke="#1C1B17" stroke-width="4" stroke-linejoin="round"/><path d="M40 80 L40 87" fill="none" stroke="#EB6A2C" stroke-width="4" stroke-linecap="round"/><path d="M56 80 L56 88" fill="none" stroke="#1C1B17" stroke-width="16" stroke-linecap="round"/><path d="M54 86 L72 94 L50 94 Z" fill="#EB6A2C" stroke="#1C1B17" stroke-width="4" stroke-linejoin="round"/><path d="M56 80 L56 87" fill="none" stroke="#EB6A2C" stroke-width="4" stroke-linecap="round"/><g transform="translate(70 35)"><path d="M11 -6 C20 -6 27 -2 31 4 C25 8 18 9 10 8 Z" fill="#EB6A2C" stroke="#1C1B17" stroke-width="4" stroke-linejoin="round"/></g><path d="M12 56 C21 61 30 57 38 53 C52 46 72 50 78 63 C82 77 66 85 46 85 C28 85 15 75 12 56 Z" fill="#1C1B17" stroke="#1C1B17" stroke-width="12" stroke-linejoin="round"/><path d="M50 62 C52 50 57 44 59 38 L81 42 C79 52 76 58 78 66 Z" fill="#1C1B17" stroke="#1C1B17" stroke-width="12" stroke-linejoin="round"/><circle cx="70" cy="35" r="16" fill="#1C1B17" stroke="#1C1B17" stroke-width="12" stroke-linejoin="round"/><path d="M12 56 C21 61 30 57 38 53 C52 46 72 50 78 63 C82 77 66 85 46 85 C28 85 15 75 12 56 Z" fill="#F4C845"/><path d="M50 62 C52 50 57 44 59 38 L81 42 C79 52 76 58 78 66 Z" fill="#F4C845"/><circle cx="70" cy="35" r="16" fill="#F4C845"/><path d="M62 64 C62 71 54 76 45 75 C38 74 32 70 28 64 C36 65 42 61 48 59 C55 57 62 59 62 64 Z" fill="#E0AE2B" stroke="#1C1B17" stroke-width="4" stroke-linejoin="round"/><g transform="translate(70 35)"><circle cx="4" cy="-4" r="2.9" fill="#1C1B17"/></g></g></svg></a>
+    <nav class="site-nav" aria-label="Страницы ChatGoose">
+      <span class="nav-wide" aria-current="page">Как начать</span>
+      <a class="nav-mid" href="whats-new-2.html">Что нового в 2.0</a>
+      <a class="nav-mid" href="guide.html">Руководство</a>
+      <a class="nav-wide" href="changelog.html">История версий</a>
+      <a class="btn btn-small" href="index.html#install">Установить</a>
+    </nav>
   </div>
 </header>
 
 <main class="wrap" id="main">
-  <section class="hero">
-    <span class="eyebrow"><span class="dot"></span>Один аккаунт</span>
-    <h1>Один логин и пароль — на всё</h1>
+  <section class="page-head">
+    <h1>Один логин и&nbsp;пароль для расширения и&nbsp;приложения</h1>
     <p class="lede">
-      Владелец присылает вам в Telegram ссылку-приглашение. Вы открываете её, придумываете пароль —
+      Владелец присылает вам в Telegram ссылку-приглашение. Вы открываете её, придумываете пароль&nbsp;—
       и этой парой входите и в расширение для Fansly, и в приложение для OnlyFans.
       Заводить что-то отдельно для каждой программы не нужно.
     </p>
   </section>
 
   <div class="tabs" role="tablist" aria-label="Выберите платформу">
-    <a class="tab" role="tab" id="tab-fansly" href="#panel-fansly" aria-controls="panel-fansly" aria-selected="true">Fansly — расширение</a>
-    <a class="tab" role="tab" id="tab-onlyfans" href="#panel-onlyfans" aria-controls="panel-onlyfans" aria-selected="false">OnlyFans — приложение</a>
+    <a class="tab" role="tab" id="tab-fansly" href="#panel-fansly" aria-controls="panel-fansly" aria-selected="true">Fansly&nbsp;— расширение</a>
+    <a class="tab" role="tab" id="tab-onlyfans" href="#panel-onlyfans" aria-controls="panel-onlyfans" aria-selected="false">OnlyFans&nbsp;— приложение</a>
   </div>
 
   <section class="panel" role="tabpanel" id="panel-fansly" aria-labelledby="tab-fansly" tabindex="0">
     <h2>Fansly: расширение для Firefox</h2>
-    <p class="panel-sub">Работает внутри самого Fansly — панель появляется прямо над полем сообщения.</p>
+    <p class="panel-sub">Работает внутри самого Fansly&nbsp;— панель появляется прямо над полем сообщения.</p>
     <ol class="steps">
       <li>
         <div>
           <div class="step-title">Откройте ссылку от владельца и задайте пароль</div>
           <div class="step-body">
-            В ссылке уже написан ваш логин — придумайте пароль и повторите его. Ссылка одноразовая и живёт 7 дней.
+            В ссылке уже написан ваш логин&nbsp;— придумайте пароль и повторите его. Ссылка одноразовая и живёт 7 дней.
             Если она перестала открываться, попросите владельца прислать новую.
           </div>
         </div>
@@ -135,7 +777,7 @@ footer a:hover{color:var(--clay)}
           <div class="step-body">
             Нужен Firefox. Откройте страницу установки и подтвердите добавление; дальше расширение обновляется само.
           </div>
-          <a class="cta" href="index.html">Установить расширение →</a>
+          <a class="btn btn-small" href="index.html">Установить расширение</a>
         </div>
       </li>
       <li>
@@ -143,7 +785,7 @@ footer a:hover{color:var(--clay)}
           <div class="step-title">Войдите</div>
           <div class="step-body">
             Настройки ChatGoose → раздел <b>«Аккаунт ChatGoose»</b> → логин, пароль, «Войти».
-            Firefox один раз спросит доступ к <code>gosling-agency.ru</code> — подтвердите, без этого вход не пройдёт.
+            Firefox один раз спросит доступ к <code>gosling-agency.ru</code>&nbsp;— подтвердите, без этого вход не пройдёт.
             Пароль на компьютере не сохраняется.
           </div>
         </div>
@@ -152,27 +794,27 @@ footer a:hover{color:var(--clay)}
         <div>
           <div class="step-title">Откройте Fansly</div>
           <div class="step-body">
-            Зайдите на страницу модели и откройте любой диалог. Аккаунт появится в «Аккаунтах» сам — останется назначить персону.
+            Зайдите на страницу модели и откройте любой диалог. Аккаунт появится в «Аккаунтах» сам&nbsp;— останется назначить персону.
           </div>
-          <a class="cta-ghost" href="guide.html">Подробный гайд по функциям →</a>
+          <a class="cta-ghost" href="guide.html">Подробный гайд по функциям</a>
         </div>
       </li>
     </ol>
     <p class="note">
       <b>Вход не проходит?</b> Чаще всего дело в одном из двух: Firefox не дал доступ к адресу агентства
-      (нажмите «Войти» ещё раз и подтвердите) или пароль был изменён. В обоих случаях напишите владельцу — он пришлёт новую ссылку.
+      (нажмите «Войти» ещё раз и подтвердите) или пароль был изменён. В обоих случаях напишите владельцу&nbsp;— он пришлёт новую ссылку.
     </p>
   </section>
 
   <section class="panel" role="tabpanel" id="panel-onlyfans" aria-labelledby="tab-onlyfans" tabindex="0" hidden>
     <h2>OnlyFans: приложение для Windows</h2>
-    <p class="panel-sub">Отдельная программа с рабочим столом для диалогов — ставится один раз.</p>
+    <p class="panel-sub">Отдельная программа с рабочим столом для диалогов&nbsp;— ставится один раз.</p>
     <ol class="steps">
       <li>
         <div>
           <div class="step-title">Откройте ссылку от владельца и задайте пароль</div>
           <div class="step-body">
-            Тот же шаг, что и для Fansly, и тот же логин с паролем. Если вы уже сделали это для расширения — переходите ко второму шагу.
+            Тот же шаг, что и для Fansly, и тот же логин с паролем. Если вы уже сделали это для расширения&nbsp;— переходите ко второму шагу.
           </div>
         </div>
       </li>
@@ -180,17 +822,17 @@ footer a:hover{color:var(--clay)}
         <div>
           <div class="step-title">Скачайте приложение</div>
           <div class="step-body">
-            Установщик лежит на <code>ext.gosling-agency.ru/desktop/</code>. Скачайте, запустите и дождитесь конца установки —
+            Установщик лежит на <code>ext.gosling-agency.ru/desktop/</code>. Скачайте, запустите и дождитесь конца установки&nbsp;—
             дальше приложение обновляется само.
           </div>
-          <a class="cta" href="https://ext.gosling-agency.ru/desktop/">Скачать приложение →</a>
+          <a class="btn btn-small" href="https://ext.gosling-agency.ru/desktop/">Скачать приложение</a>
         </div>
       </li>
       <li>
         <div>
           <div class="step-title">Войдите</div>
           <div class="step-body">
-            При первом запуске приложение сразу просит логин и пароль — те же, что вы задали по ссылке. Пароль на компьютере не сохраняется.
+            При первом запуске приложение сразу просит логин и пароль&nbsp;— те же, что вы задали по ссылке. Пароль на компьютере не сохраняется.
           </div>
         </div>
       </li>
@@ -198,22 +840,23 @@ footer a:hover{color:var(--clay)}
         <div>
           <div class="step-title">Начните смену</div>
           <div class="step-body">
-            Страницы, к которым вас подключил владелец, появятся в приложении сами. Если их нет — значит доступ ещё не выдан, напишите владельцу.
+            Страницы, к которым вас подключил владелец, появятся в приложении сами. Если их нет&nbsp;— значит доступ ещё не выдан, напишите владельцу.
           </div>
         </div>
       </li>
     </ol>
     <p class="note">
-      <b>Работаете и там, и там?</b> Это нормально: логин и пароль общие. В каждой программе вход отдельный —
+      <b>Работаете и там, и там?</b> Это нормально: логин и пароль общие. В каждой программе вход отдельный&nbsp;—
       и выйти из одной можно, не трогая другую.
     </p>
   </section>
 
   <section class="faq">
-    <h2>Короткие ответы</h2>
+    <h2>Частые вопросы</h2>
+    <div class="faq-list">
     <details>
       <summary>Забыл пароль</summary>
-      <p>Напишите владельцу — он пришлёт ссылку для нового пароля. Как только вы зададите его, все прежние входы завершатся, и во всех программах нужно будет войти заново.</p>
+      <p>Напишите владельцу&nbsp;— он пришлёт ссылку для нового пароля. Как только вы зададите его, все прежние входы завершатся, и во всех программах нужно будет войти заново.</p>
     </details>
     <details>
       <summary>Где посмотреть свои устройства</summary>
@@ -221,19 +864,20 @@ footer a:hover{color:var(--clay)}
     </details>
     <details>
       <summary>Сменил компьютер</summary>
-      <p>Просто войдите на новом — старый вход останется жить своей жизнью, пока вы не завершите его в кабинете. Так безопаснее: потерянный ноутбук отключается одной кнопкой.</p>
+      <p>Просто войдите на новом&nbsp;— старый вход останется жить своей жизнью, пока вы не завершите его в кабинете. Так безопаснее: потерянный ноутбук отключается одной кнопкой.</p>
     </details>
     <details>
       <summary>Ссылка-приглашение не открывается</summary>
-      <p>Она одноразовая и действует 7 дней. Если вы уже задали по ней пароль или прошла неделя — попросите у владельца новую.</p>
+      <p>Она одноразовая и действует 7 дней. Если вы уже задали по ней пароль или прошла неделя&nbsp;— попросите у владельца новую.</p>
     </details>
+    </div>
   </section>
 </main>
 
-<footer class="wrap">
-  <span>ChatGoose &middot; Gosling Agency</span>
-  <span><a href="guide.html">Гайд</a> &middot; <a href="changelog.html">История версий</a></span>
-</footer>
+<footer class="site-footer night"><div class="wrap">
+  <div class="footer-row"><a class="logo" href="index.html"><svg xmlns="http://www.w3.org/2000/svg" viewBox="-8 -143.14 579 155" width="579" height="155" role="img" aria-label="ChatGoose"><path d="M38.2 1.4Q27.7 1.4 19.95 -2.8Q12.2 -7 8 -15.2Q3.8 -23.4 3.8 -35Q3.8 -43.4 6.25 -50.15Q8.7 -56.9 13.35 -61.8Q18 -66.7 24.45 -69.3Q30.9 -71.9 38.9 -71.9Q44.1 -71.9 47.9 -70.4Q51.7 -68.9 55 -66.5L56.2 -71.9L62.9 -71.9L66.7 -46.9L58.1 -45.3Q56 -51.3 53.4 -54.9Q50.8 -58.5 47.5 -60.1Q44.2 -61.7 40.6 -61.7Q35.3 -61.7 31.9 -58.75Q28.5 -55.8 26.95 -50.4Q25.4 -45 25.4 -37.4Q25.4 -29.8 26.9 -24.75Q28.4 -19.7 30.95 -16.7Q33.5 -13.7 36.8 -12.4Q40.1 -11.1 43.6 -11.1Q47.8 -11.1 51.4 -12.35Q55 -13.6 57.8 -15.55Q60.6 -17.5 62.3 -19.6L67.8 -12.4Q66.1 -10.3 63.55 -7.85Q61 -5.4 57.4 -3.35Q53.8 -1.3 49.05 0.05Q44.3 1.4 38.2 1.4Z M74.08 0L74.08 -7.3L77.48 -7.9Q78.88 -8.1 79.43 -8.95Q79.98 -9.8 79.98 -12.5L79.98 -61.1Q79.98 -64.3 79.33 -65.6Q78.68 -66.9 76.38 -67.2L73.28 -67.6L73.98 -75.5L98.28 -76.8L99.88 -75.8L99.88 -44.1L100.18 -44.1Q102.48 -48.3 106.53 -50.65Q110.58 -53 116.48 -53Q122.58 -53 126.33 -50.8Q130.08 -48.6 131.83 -44.6Q133.58 -40.6 133.58 -35.6L133.58 -11.8Q133.58 -9.7 134.18 -8.85Q134.78 -8 136.68 -7.8L139.48 -7.3L139.48 0L108.88 0L108.88 -7.2L111.08 -7.6Q112.58 -7.9 113.13 -8.75Q113.68 -9.6 113.68 -12L113.68 -31.8Q113.68 -35.2 113.18 -37.25Q112.68 -39.3 111.38 -40.2Q110.08 -41.1 107.88 -41.1Q105.68 -41.1 103.83 -40.05Q101.98 -39 100.93 -36.65Q99.88 -34.3 99.88 -30.3L99.88 -12.2Q99.88 -9.9 100.33 -8.9Q100.78 -7.9 102.38 -7.7L104.78 -7.2L104.78 0Z M160.32 1.4Q152.72 1.4 148.57 -2.3Q144.42 -6 144.42 -12.3Q144.42 -18.4 147.57 -21.8Q150.72 -25.2 157.12 -26.65Q163.52 -28.1 173.52 -28.5L173.52 -36.1Q173.52 -39.6 172.97 -41.85Q172.42 -44.1 170.82 -45.2Q169.22 -46.3 166.22 -46.3Q164.32 -46.3 162.12 -45.7Q159.92 -45.1 158.42 -44.1Q159.62 -42.4 160.37 -41.05Q161.12 -39.7 161.37 -38.8Q161.62 -37.9 161.62 -37Q161.62 -34.8 159.52 -33.15Q157.42 -31.5 153.12 -31.5Q149.22 -31.5 147.37 -33.35Q145.52 -35.2 145.52 -38.1Q145.52 -42.2 148.42 -45.6Q151.32 -49 156.82 -50.95Q162.32 -52.9 169.82 -52.9Q177.92 -52.9 183.12 -50.85Q188.32 -48.8 190.82 -44.45Q193.32 -40.1 193.32 -33.1L193.32 -13.3Q193.32 -11 194.12 -9.9Q194.92 -8.8 196.72 -8.8Q197.72 -8.8 198.62 -9Q199.52 -9.2 200.42 -9.5L201.72 -3.5Q199.42 -1.4 195.77 0Q192.12 1.4 188.02 1.4Q182.62 1.4 179.57 -0.95Q176.52 -3.3 175.52 -6.8Q174.52 -4.7 172.52 -2.85Q170.52 -1 167.52 0.2Q164.52 1.4 160.32 1.4ZM168.12 -7.9Q169.92 -7.9 171.07 -8.65Q172.22 -9.4 172.87 -10.8Q173.52 -12.2 173.52 -14.1L173.52 -21.9Q170.12 -21.9 167.92 -21.15Q165.72 -20.4 164.72 -18.75Q163.72 -17.1 163.72 -14.2Q163.72 -11.3 164.72 -9.6Q165.72 -7.9 168.12 -7.9Z M224.79 1.4Q219.39 1.4 215.54 -0.3Q211.69 -2 209.69 -5.6Q207.69 -9.2 207.69 -14.4L207.69 -42.6L200.99 -42.6L200.99 -50.3Q206.09 -51.1 208.84 -53.1Q211.59 -55.1 212.84 -58.8Q214.09 -62.5 214.89 -67.9L225.69 -69.4L227.59 -68.3L227.59 -51.6L240.79 -51.6L240.79 -42.6L227.59 -42.6L227.59 -18.1Q227.59 -14.8 228.59 -12.8Q229.59 -10.8 232.89 -10.8Q234.79 -10.8 236.74 -11.5Q238.69 -12.2 240.59 -13.3L243.99 -6.8Q240.89 -3.3 236.24 -0.95Q231.59 1.4 224.79 1.4Z M280.13 1.4Q269.73 1.4 262.58 -3.15Q255.43 -7.7 251.78 -15.75Q248.13 -23.8 248.13 -34.5Q248.13 -43.1 250.68 -50Q253.23 -56.9 258.03 -61.85Q262.83 -66.8 269.38 -69.35Q275.93 -71.9 284.03 -71.9Q289.73 -71.9 293.73 -70.45Q297.73 -69 300.73 -66.5L302.13 -71.9L308.73 -71.9L312.63 -46.9L304.13 -45.3Q301.93 -51 299.43 -54.65Q296.93 -58.3 293.53 -60Q290.13 -61.7 285.63 -61.7Q281.73 -61.7 278.68 -60.1Q275.63 -58.5 273.68 -55.4Q271.73 -52.3 270.73 -47.75Q269.73 -43.2 269.73 -37.2Q269.73 -30 270.98 -25Q272.23 -20 274.38 -16.9Q276.53 -13.8 279.48 -12.35Q282.43 -10.9 285.63 -10.9Q287.63 -10.9 289.33 -11.2Q291.03 -11.5 292.48 -12.1Q293.93 -12.7 295.13 -13.5L295.13 -22.5Q295.13 -24.8 294.68 -26.1Q294.23 -27.4 291.83 -27.7L287.83 -28.1L287.83 -35.8L320.13 -35.8L320.13 -28.1L317.13 -27.7Q314.93 -27.3 314.38 -26.2Q313.83 -25.1 313.83 -22.5L313.83 0.2L304.03 0.2L300.03 -6.1Q298.63 -5 296.08 -3.2Q293.53 -1.4 289.48 0Q285.43 1.4 280.13 1.4Z M353.34 1.4Q344.44 1.4 338.04 -1.55Q331.64 -4.5 328.29 -10.35Q324.94 -16.2 324.94 -24.9Q324.94 -34.6 328.74 -40.85Q332.54 -47.1 339.49 -50.05Q346.44 -53 355.54 -53Q363.84 -53 370.09 -50.3Q376.34 -47.6 379.94 -41.85Q383.54 -36.1 383.54 -26.9Q383.54 -17.7 379.99 -11.4Q376.44 -5.1 369.74 -1.85Q363.04 1.4 353.34 1.4ZM354.84 -7.7Q357.84 -7.7 359.54 -9.45Q361.24 -11.2 361.99 -15Q362.74 -18.8 362.74 -24.9Q362.74 -30.6 362.14 -34.35Q361.54 -38.1 360.39 -40.2Q359.24 -42.3 357.64 -43.15Q356.04 -44 353.94 -44Q351.34 -44 349.54 -42.65Q347.74 -41.3 346.74 -37.8Q345.74 -34.3 345.74 -28.1Q345.74 -20.8 346.69 -16.3Q347.64 -11.8 349.59 -9.75Q351.54 -7.7 354.84 -7.7Z M418.12 1.4Q409.22 1.4 402.82 -1.55Q396.42 -4.5 393.07 -10.35Q389.72 -16.2 389.72 -24.9Q389.72 -34.6 393.52 -40.85Q397.32 -47.1 404.27 -50.05Q411.22 -53 420.32 -53Q428.62 -53 434.87 -50.3Q441.12 -47.6 444.72 -41.85Q448.32 -36.1 448.32 -26.9Q448.32 -17.7 444.77 -11.4Q441.22 -5.1 434.52 -1.85Q427.82 1.4 418.12 1.4ZM419.62 -7.7Q422.62 -7.7 424.32 -9.45Q426.02 -11.2 426.77 -15Q427.52 -18.8 427.52 -24.9Q427.52 -30.6 426.92 -34.35Q426.32 -38.1 425.17 -40.2Q424.02 -42.3 422.42 -43.15Q420.82 -44 418.72 -44Q416.12 -44 414.32 -42.65Q412.52 -41.3 411.52 -37.8Q410.52 -34.3 410.52 -28.1Q410.52 -20.8 411.47 -16.3Q412.42 -11.8 414.37 -9.75Q416.32 -7.7 419.62 -7.7Z M456.55 1.5L455.05 -17L463.45 -17.5Q464.95 -13.8 467.15 -11.35Q469.35 -8.9 472 -7.75Q474.65 -6.6 477.85 -6.6Q481.55 -6.6 483.45 -8.1Q485.35 -9.6 485.35 -12.2Q485.35 -14 484.15 -15.05Q482.95 -16.1 480.5 -16.9Q478.05 -17.7 474.25 -18.5Q470.95 -19.3 467.65 -20.45Q464.35 -21.6 461.5 -23.4Q458.65 -25.2 456.95 -28.2Q455.25 -31.2 455.25 -35.8Q455.25 -41.3 457.95 -45.2Q460.65 -49.1 465.3 -51.05Q469.95 -53 476.15 -53Q480.55 -53 483.9 -52.05Q487.25 -51.1 489.65 -49.7L490.45 -53L497.35 -53L498.55 -35.8L490.35 -36.2Q488.25 -41.3 484.85 -43.6Q481.45 -45.9 477.35 -45.9Q474.05 -45.9 472.3 -44.7Q470.55 -43.5 470.55 -41.2Q470.55 -39.3 471.7 -38.3Q472.85 -37.3 475.25 -36.4Q477.65 -35.5 481.45 -34.6Q485.45 -33.7 488.9 -32.5Q492.35 -31.3 495.05 -29.4Q497.75 -27.5 499.2 -24.65Q500.65 -21.8 500.65 -17.4Q500.65 -11.5 498 -7.25Q495.35 -3 490.45 -0.8Q485.55 1.4 479.05 1.4Q474.45 1.4 470.75 0.3Q467.05 -0.8 464.45 -2.3L463.35 1.5Z M533.97 1.4Q524.87 1.4 518.77 -1.8Q512.67 -5 509.57 -10.8Q506.47 -16.6 506.47 -24.4Q506.47 -33.7 510.27 -40.05Q514.07 -46.4 520.72 -49.7Q527.37 -53 535.77 -53Q542.97 -53 548.22 -50.7Q553.47 -48.4 556.37 -43.9Q559.27 -39.4 559.27 -32.9Q559.27 -30.6 559.07 -28.2Q558.87 -25.8 558.47 -23.8L526.97 -23.8Q527.17 -20 528.67 -17.4Q530.17 -14.8 532.82 -13.5Q535.47 -12.2 539.17 -12.2Q544.07 -12.2 547.72 -13.55Q551.37 -14.9 555.07 -17.4L559.97 -11.6Q555.97 -5.9 549.42 -2.25Q542.87 1.4 533.97 1.4ZM526.77 -31.7L540.27 -31.7Q540.47 -33.2 540.57 -34.45Q540.67 -35.7 540.67 -37Q540.67 -40.8 539.22 -42.8Q537.77 -44.8 534.97 -44.8Q532.27 -44.8 530.52 -43.25Q528.77 -41.7 527.87 -38.85Q526.97 -36 526.77 -31.7Z" fill="#F7F3EA"/><g transform="translate(331.55 -149.42) scale(1.02)"><path d="M40 80 L40 88" fill="none" stroke="#1C1B17" stroke-width="16" stroke-linecap="round"/><path d="M38 86 L56 94 L34 94 Z" fill="#EB6A2C" stroke="#1C1B17" stroke-width="4" stroke-linejoin="round"/><path d="M40 80 L40 87" fill="none" stroke="#EB6A2C" stroke-width="4" stroke-linecap="round"/><path d="M56 80 L56 88" fill="none" stroke="#1C1B17" stroke-width="16" stroke-linecap="round"/><path d="M54 86 L72 94 L50 94 Z" fill="#EB6A2C" stroke="#1C1B17" stroke-width="4" stroke-linejoin="round"/><path d="M56 80 L56 87" fill="none" stroke="#EB6A2C" stroke-width="4" stroke-linecap="round"/><g transform="translate(70 35)"><path d="M11 -6 C20 -6 27 -2 31 4 C25 8 18 9 10 8 Z" fill="#EB6A2C" stroke="#1C1B17" stroke-width="4" stroke-linejoin="round"/></g><path d="M12 56 C21 61 30 57 38 53 C52 46 72 50 78 63 C82 77 66 85 46 85 C28 85 15 75 12 56 Z" fill="#1C1B17" stroke="#1C1B17" stroke-width="12" stroke-linejoin="round"/><path d="M50 62 C52 50 57 44 59 38 L81 42 C79 52 76 58 78 66 Z" fill="#1C1B17" stroke="#1C1B17" stroke-width="12" stroke-linejoin="round"/><circle cx="70" cy="35" r="16" fill="#1C1B17" stroke="#1C1B17" stroke-width="12" stroke-linejoin="round"/><path d="M12 56 C21 61 30 57 38 53 C52 46 72 50 78 63 C82 77 66 85 46 85 C28 85 15 75 12 56 Z" fill="#F4C845"/><path d="M50 62 C52 50 57 44 59 38 L81 42 C79 52 76 58 78 66 Z" fill="#F4C845"/><circle cx="70" cy="35" r="16" fill="#F4C845"/><path d="M62 64 C62 71 54 76 45 75 C38 74 32 70 28 64 C36 65 42 61 48 59 C55 57 62 59 62 64 Z" fill="#E0AE2B" stroke="#1C1B17" stroke-width="4" stroke-linejoin="round"/><g transform="translate(70 35)"><circle cx="4" cy="-4" r="2.9" fill="#1C1B17"/></g></g></svg></a><nav class="footer-links" aria-label="Другие страницы"><a href="index.html">О продукте</a><a href="whats-new-2.html">Что нового в 2.0</a><a href="guide.html">Руководство</a><a href="changelog.html">История версий</a></nav></div>
+  <p>ChatGoose &middot; Gosling Agency</p>
+</div></footer>
 
 <script>
 document.documentElement.setAttribute('data-js', '');
