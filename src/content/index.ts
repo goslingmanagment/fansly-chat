@@ -29,6 +29,7 @@ import { VoiceAttachAdapter } from './voice/attach-adapter.js';
 import { VoicePanel } from './voice/voice-panel.js';
 import { VoiceStudio } from './voice/voice-studio.js';
 import { CheatsheetController } from './cheatsheet-controller.js';
+import { FanRegistrationControl } from './fan-registration.js';
 import { BoardLauncher } from './spenders/board-launcher.js';
 import { SpendersBoardController } from './spenders/spenders-board-controller.js';
 import { parseGroupIdFromPath, startRouteWatcher } from './route-watcher.js';
@@ -720,6 +721,10 @@ export class ChatGooseContentApp {
   private cheatsheetController: CheatsheetController | null = null;
   private boardController: SpendersBoardController | null = null;
   private readonly launcher = new BoardLauncher(() => this.board.toggle());
+  private readonly fanRegistration = new FanRegistrationControl({
+    request: (groupId) => sendRuntimeRequest('getFanRegistration', { groupId }),
+    onError: (error) => this.showUserErrorToast(error, { dedupeKey: 'fan-registration' }),
+  });
 
   constructor() {
     this.root.id = 'chatgoose-root';
@@ -2136,6 +2141,7 @@ export class ChatGooseContentApp {
     this.completedOverlayCache.setActiveGroup(groupId);
     this.completedCompareCache.setActiveGroup(groupId);
     this.mountController.setActiveRoute(groupId);
+    this.fanRegistration.sync();
 
     if (changed) {
       this.pendingCompareFingerprint = null;
@@ -3358,6 +3364,9 @@ export class ChatGooseContentApp {
         }
         if (personaChanged) {
           this.clearPersonaBoundFeatureState();
+        }
+        if (accountChanged) {
+          this.fanRegistration.reset();
         }
         if (personaChanged || accountChanged) {
           // Voice custody is bound to the creator account as well as the group.

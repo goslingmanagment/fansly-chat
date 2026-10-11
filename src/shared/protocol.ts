@@ -480,6 +480,11 @@ export function getRuntimeRequestType(message: unknown): RuntimeRequestType | nu
         isNullableString(message.displayName)
         ? 'resolveFanChat'
         : null;
+    case 'getFanRegistration':
+      // The id goes into a Fansly URL path, so only a Fansly id may pass.
+      return isString(message.groupId) && /^\d{1,24}$/.test(message.groupId)
+        ? 'getFanRegistration'
+        : null;
     case 'getRecapStatus':
       // groupId must be a non-empty conversation id; an empty groupId is a
       // meaningless recap-status query. The exact current persona definition is
