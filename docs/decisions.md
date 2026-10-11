@@ -141,6 +141,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E148 | 2026-10-11 | Upload-host probe: before `web-ext sign` and before either page upload, the deploy scripts write a one-off marker into `REMOTE_DIR` over SSH, read it back through `BASE_URL` and remove it; the run goes on only if the marker comes back, otherwise it stops and says whether another server answers for the public name, the site refuses, or the name gave no answer; passes under a DNS switch and under forwarding; no skip flag |
 | E149 | 2026-10-11 | «Fansly через вкладку» (opt-in, settings v20): every FanslyClient request rides a hidden extension frame inside a Fansly tab of the same session, so Multi-Account Containers' proxy carries it instead of the chatter's own line; no new permission, no proxy password, per-model route; session capture skips the frame; `fansly_tab_unavailable`; a send checks the route before custody; a failed follower scan no longer reads «Новых фоловеров нет»; 2.7.2 |
 | E150 | 2026-10-11 | Re-vendor the SDK from deployed Core `2260ef73` (core #552); production serves `b9d4dd07…` and still lists the old `b95b765c…` in `compatibleClientSdks`, but the deploy gate compares `contractHash` exactly; SDK 0.4.0, no source change; unblocks the 2.7.2 release gate, no version bump |
+| E151 | 2026-10-11 | The five public pages wear the agency identity (source: `~/code/1-platform/agency-site`): ChatGoose logo with the gosling, pond and yellow instead of terracotta, Literata + Golos Text, flat outlined mocks, one header and footer on every page; slogan headings rewritten as plain descriptions of what a tool does. Still single files: no new assets, `mascot.png` is the new badge. |
 
 ## Entries
 
@@ -5372,3 +5373,25 @@ equals production exactly and `sourceCommit` is clean. SDK 0.3.0 → 0.4.0.
 `pnpm check` passes with no source change. No vendored file is edited by hand
 and no release check is bypassed. No version bump: it ships inside 2.7.2,
 which was not yet released.
+
+**E151 (2026-10-11).** The public pages (`install.html`, `start.html`,
+`guide.html`, `whats-new-2.html`, `changelog.html`) are redrawn in the
+agency's identity, on the owner's request. The identity lives in
+`~/code/1-platform/agency-site` (`brand/out`, `src/styles/tokens.css`, its
+`AGENTS.md` lists what the pages must not use). What changed here:
+
+- Look: the ChatGoose logo with the gosling as inline SVG, pond blue for the
+  first screen and the install block, yellow for the 2.0 strip and highlight
+  panels, ink buttons, flat mocks with an ink outline, hairline tables. The
+  terracotta palette, italic accent lines in headings, uppercase mono labels,
+  numbered tabs, arrows in links, card shadows and stat tiles are gone.
+- Type: Literata 800 for headings, Golos Text for the rest, both from the
+  Google Fonts link the pages already used. Monospace only for keys and code.
+- Words: headings and leads that read as slogans now say what the tool does
+  («Держи нить. Веди диалог.» is «Помощник чаттера в Fansly»). Reference text,
+  release notes and every pinned string are untouched.
+- Contract: pages are still single self-contained files and the deploy
+  uploads the same six files. `mascot.png` is a 512 px render of the ChatGoose
+  badge. Version slots, ids and the pinned 2.0 link are unchanged; `pnpm
+  check` passes without touching a test.
+- Not changed: the extension itself, its icons, its texts.
