@@ -147,6 +147,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E155 | 2026-10-12 | «Новые»: a fan Fansly will not let the model DM (paid DM, unmet DM rules) is `closed`, «Нельзя написать» with the reason, read with Fansly's own `verifyNew` over the chat's `dmPermissionFlags`; nothing is generated, reserved or sent. «Исключить из очереди» on such a row only, remembered in this browser, dropped when the DMs open. A refused Hub reservation names the custody state instead of «Другой чаттер…». 2.8.1 |
 | E156 | 2026-10-12 | Re-vendor the SDK from deployed Core `6ee3d627` (core #567): production answers `03012453…` after core #563 added `GET /api/v1/ops/live`; the deploy gate compares `contractHash` exactly; no source change; unblocks the 2.8.1 release gate, no version bump |
 | E157 | 2026-10-12 | Fan notes panel: the fan's native Fansly notes (12000) and custom name (12002) in a ChatGoose panel — «Заметки» in the header row after «Регистрация» and ⌘⇧K / Ctrl+Alt+K (hub hotkey scheme 2, client `fansly`: this extension only). Views «Всегда справа» (docked in Fansly's empty right column, reads each opened chat after 0.7 s), «Справа по кнопке» (default) and «Окно по центру» (read on open); setting `fanNotesView`, storage v21. Reads: group (once per chat) + `/account?ids=`; writes: Fansly's own `POST /notes`, `/notes/edit`, `/notes/delete`; one attempt each, nothing during a cooldown. «+ По шаблону» = the agency questionnaire. Never in a prompt |
+| E158 | 2026-10-12 | Release 2.9.0 = E157 (fan notes panel). The owner ordered the release («да выпускай канеш и релиз») without a number; 2.9.0 because it is a feature, as 2.8.0 was. Vendored SDK equals production (`03012453…`); hotkeys from hub `0a96105d` in all three clients. No new permission |
 
 ## Entries
 
@@ -5697,3 +5698,14 @@ in the session, 2026-10-12).
   built from Fansly's header markup, three views, dark and light. Not
   verified: a live Fansly session — the endpoints and bodies come from the
   bundle, not from captured traffic.
+
+**E158 (2026-10-12).** Release 2.9.0 ships E157, the fan-notes panel. The
+owner ordered it («да выпускай канеш и релиз») without naming a number; it is
+2.9.0 because it is a feature, as 2.8.0 (E152) was, and 2.8.1 was the last
+release. Preflight: the vendored SDK contract hash equals production
+(`03012453…`), the served feed was 2.8.1, `announce-release.mjs --check`
+passes. Settings v21 migrate on update; the hotkey scheme is 2 in all three
+clients (hub `0a96105d`, sha256 `7850406c…`). Not verified before the
+release: a live Fansly session — the note endpoints and bodies come from the
+bundle, not from captured traffic; the first thing to compare if a chatter
+reports a note that does not save.
