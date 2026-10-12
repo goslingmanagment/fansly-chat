@@ -4,6 +4,10 @@ Firefox extension for agency chatters working in Fansly DMs. It adds reply,
 coaching, fan-summary, review, ping, greeting, and spenders-board tools directly
 to the Fansly interface.
 
+For development against Fansly, start with [the Fansly development guide](docs/fansly-development.md):
+Chrome DevTools MCP, the downloaded bundle, chat DOM/lifecycle, API/WebSocket
+research and the relevant source files in this client.
+
 ## Current architecture
 
 ChatGoose is a client of the Agency Hub kernel in `../hub`:
