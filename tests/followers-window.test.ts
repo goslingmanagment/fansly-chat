@@ -446,4 +446,57 @@ describe('followers window human actions', () => {
     expect(h.values['chatgoose:followers:draft:v1:1:2']).toBe('newer draft');
     h.window.close();
   });
+  it('E155: shows why a fan cannot be written to and lets the chatter take them out of the queue and back', async () => {
+    const h = harness(); h.window.close();
+    const row = h.snapshot.rows[0]!;
+    Object.assign(row, { status: 'closed', detail: 'Платная личка: $1.70 за сообщение.', groupId: '9' });
+    h.sendMessage.mockImplementation(async (request) => {
+      if (request.action === 'exclude') row.excluded = request.excluded || undefined;
+      return { ok: true, snapshot: structuredClone(h.snapshot) };
+    });
+    h.window.open();
+    await vi.waitFor(() => expect(h.root.querySelector('.pending')?.textContent).toBe('К обработке 2'));
+    expect(h.root.querySelector('.progress')?.textContent).toBe('Проверено 2 из 2');
+    h.root.querySelector<HTMLButtonElement>('[data-fan="2"]')!.click();
+    await vi.waitFor(() => expect(h.root.querySelector('.notice.closed')?.textContent).toContain('Платная личка: $1.70 за сообщение.'));
+    expect(h.root.querySelector('[data-fan="2"] .status')?.textContent).toBe('Нельзя написать');
+    expect(h.root.querySelector('.decision')?.textContent).toBe('Нельзя написать');
+    expect(h.root.querySelector('.detail textarea')).toBeNull();
+    expect(h.root.querySelector('.detail .send')).toBeNull();
+    expect(h.root.querySelector<HTMLAnchorElement>('.open-chat')?.href).toBe('https://fansly.com/messages/9');
+    h.root.querySelector<HTMLButtonElement>('.exclude')!.click();
+    await vi.waitFor(() => expect(h.root.querySelector('.pending')?.textContent).toBe('К обработке 1'));
+    expect(h.sendMessage).toHaveBeenCalledWith({ type: 'followers', action: 'exclude', scanId: h.snapshot.scanId, fanId: '2', excluded: true });
+    expect(h.root.querySelector('.error')?.textContent).toBe('Fan 2: исключён из очереди. Вернуть можно во вкладке «Все».');
+    expect(h.root.querySelector('[data-fan="2"]')).toBeNull();
+    h.root.querySelector<HTMLButtonElement>('.all')!.click();
+    h.root.querySelector<HTMLButtonElement>('[data-fan="2"]')!.click();
+    await vi.waitFor(() => expect(h.root.querySelector('.exclude')?.textContent).toBe('Вернуть в очередь'));
+    expect(h.root.querySelector('[data-fan="2"] .status')?.textContent).toBe('Исключён · нельзя написать');
+    h.root.querySelector<HTMLButtonElement>('.exclude')!.click();
+    await vi.waitFor(() => expect(h.root.querySelector('.pending')?.textContent).toBe('К обработке 2'));
+    expect(h.root.querySelector('.exclude')?.textContent).toBe('Исключить из очереди');
+    h.window.close();
+  });
+  it('E155: an excluded fan leaves the queue even when the chatter was watching their check', async () => {
+    const h = harness(); h.window.close();
+    h.snapshot.rows = [h.snapshot.rows[0]!];
+    const row = h.snapshot.rows[0]!;
+    Object.assign(row, { status: 'pending', evidence: undefined });
+    h.snapshot.verification = { active: true, remaining: 1, total: 1 };
+    h.sendMessage.mockImplementation(async (request) => {
+      if (request.action === 'exclude') row.excluded = request.excluded || undefined;
+      return { ok: true, snapshot: structuredClone(h.snapshot) };
+    });
+    h.window.open();
+    await vi.waitFor(() => expect(h.root.querySelector('[data-fan="2"]')).not.toBeNull());
+    h.root.querySelector<HTMLButtonElement>('[data-fan="2"]')!.click();
+    Object.assign(row, { status: 'closed', evidence: 'history', detail: 'Платная личка: $1.70 за сообщение.' });
+    h.snapshot.verification = { active: false, remaining: 0, total: 1 };
+    await vi.waitFor(() => expect(h.root.querySelector('.exclude')).not.toBeNull(), { timeout: 1500 });
+    h.root.querySelector<HTMLButtonElement>('.exclude')!.click();
+    await vi.waitFor(() => expect(h.root.querySelector('[data-fan="2"]')).toBeNull());
+    expect(h.root.querySelector('.detail .empty')?.textContent).toBe('Очередь пуста: остальным фанам уже написали или их исключили. Они во вкладке «Все».');
+    h.window.close();
+  });
 });

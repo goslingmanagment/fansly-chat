@@ -8,6 +8,7 @@ import {
   normalizeWelcome, type FollowerDisplayMessage, type FollowerMessageEvidence, type FollowerRow, type FollowersSnapshot,
 } from '../shared/followers.js';
 import { AUTOMATED_MESSAGE_LABEL, buildGreetingContext, countPersonalMessages, isAutomatedGreetingMessage } from '../shared/greeting-context.js';
+import { describeDmRequirements, unmetDmRequirements, type DmRequirement } from '../shared/fansly-dm-permissions.js';
 import { HI_GREETING_MAX_TRANSCRIPT } from '../shared/constants.js';
 import type { FanslyAccountResponse, FanslyGroup, FanslyMessage, PersistedState, SessionTemplate } from '../shared/types.js';
 import type { AgencyHubClient } from './agency-hub-client.js';
@@ -77,6 +78,7 @@ function blockedText(row: FollowerRow, action: 'send' | 'generate'): string {
   if (row.status === 'contacted') return `${lead}: у фана уже есть личная переписка. Строка перенесена в «Уже писали».`;
   if (row.status === 'sent') return `${lead}: этому фану уже отправили сообщение. Строка перенесена в «Уже писали».`;
   if (row.status === 'uncertain') return `${lead}: прошлая отправка этому фану не подтверждена, повтор заблокирован.`;
+  if (row.status === 'closed') return `${lead}: Fansly не даёт написать этому фану. ${row.detail ?? ''}`.trim();
   return `${lead}: проверка фана не завершена. Нажмите «Продолжить» или обновите список.`;
 }
 /** A blip is asked again no sooner than this: the live 404s came in runs of two or three seconds. */
@@ -85,6 +87,13 @@ const RECHECK_DELAY_MS = 3000;
 const RECHECK_FUSE = 5;
 const FUSED_TEXT = 'Fansly отвечает ошибками. Проверка остановлена — нажмите «Продолжить» позже.';
 const ROW_BUSY_TEXT = 'Проверка этого фана уже выполняется. Продолжите позже.';
+/** The Hub's custody state for a refused reservation. A `dispatching` one is a
+ * send nobody confirmed, often one Fansly refused; it never expires (E155). */
+const RESERVE_REFUSED: Record<string, string> = {
+  reserved: 'Другой чаттер сейчас отправляет приветствие этому фану. Обновите список через минуту.',
+  dispatching: 'Прошлая отправка этому фану не подтверждена, повтор заблокирован. Откройте чат в Fansly и проверьте.',
+  sent: 'Этому фану уже отправили приветствие. Обновите список.',
+};
 function pause(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     const abort = () => { clearTimeout(timer); reject(signal.reason); };
@@ -560,8 +569,9 @@ export class FollowersService {
     if (!savedGroupId({ groupId: created.id })) throw new ChatGooseError('fansly_server_error');
     scan.groups.set(fanId, created.id);
     scan.savedLeads.delete(fanId);
-    // The answer listed exactly this pair, and may already name a last message.
-    scan.seen.set(fanId, { fanId, groupId: created.id, verified: true, lastMessageId: created.lastMessage?.id ?? null, lastMessage: created.lastMessage });
+    // The answer listed exactly this pair, and may already name a last message
+    // and the fan's DM rules (E155).
+    scan.seen.set(fanId, { fanId, groupId: created.id, verified: true, lastMessageId: created.lastMessage?.id ?? null, lastMessage: created.lastMessage, dmPermissionFlags: created.dmPermissionFlags, accountDmPermissionFlags: created.accountDmPermissionFlags });
     scan.completeHistories.delete(fanId);
     // Save the verified identity before any history read or pause can fail.
     await traced(scope, 'group.cache-write', () => this.options.storage.set({ [key('group', scan.snapshot.creatorId, fanId)]: { groupId: created.id, observedAt: Date.now() } }), { groupId: created.id });
@@ -606,6 +616,19 @@ export class FollowersService {
     }
     // Selection only reorders an already authorised run; it never starts one.
     return this.state(tabId, scanId);
+  }
+
+  /** Only a fan Fansly will not let this account DM leaves «К обработке» by
+   * hand, and only in this browser (E155). Nothing is read from or sent to
+   * Fansly or the Hub. */
+  async exclude(tabId: number, scanId: string, fanId: string, excluded: boolean): Promise<FollowersSnapshot> {
+    const scan = this.get(tabId, scanId);
+    const row = scan.snapshot.rows.find((value) => value.id === fanId);
+    if (!row || row.status !== 'closed') throw new Error('Исключить можно только фана, которому Fansly не даёт написать.');
+    await traced(scan.trace, 'exclusion.write', () => this.options.storage.set({ [key('excluded', scan.snapshot.creatorId, fanId)]: excluded ? { at: Date.now() } : null }), { excluded }, fanId);
+    this.assertCurrent(scan);
+    row.excluded = excluded || undefined;
+    return structuredClone(scan.snapshot);
   }
 
   private traceMessage(scope: TraceScope, scan: Scan, message: FollowerMessageEvidence, source: string): void {
@@ -684,14 +707,15 @@ export class FollowersService {
 
   private async checkRow(scan: Scan, row: FollowerRow, signal: AbortSignal, scope: TraceScope | undefined, reason: string, retry: 'default' | 'none'): Promise<void> {
     const verdict = (status: FollowerRow['status'], why: string, evidence?: FollowerRow['evidence']) => {
-      row.status = status; row.evidence = evidence;
+      row.status = status; row.evidence = evidence; row.excluded = undefined;
       scope?.event('row.verdict', { status, reason: why, ...(evidence ? { evidence } : {}) });
     };
     const creator = scan.snapshot.creatorId;
     const personalKey = key('personal', creator, row.id);
     const attemptKey = key('attempt', creator, row.id);
     const groupKey = key('group', creator, row.id);
-    const saved = await traced(scope, 'row.cache-read', () => this.options.storage.get([personalKey, attemptKey, groupKey]));
+    const excludedKey = key('excluded', creator, row.id);
+    const saved = await traced(scope, 'row.cache-read', () => this.options.storage.get([personalKey, attemptKey, groupKey, excludedKey]));
     this.assertCurrent(scan);
     const attempt = saved[attemptKey] as { state?: string } | undefined;
     const savedGroup = savedGroupId(saved[groupKey]);
@@ -730,6 +754,8 @@ export class FollowersService {
     scope?.event('history.plan', { groupId, previousComplete: scan.completeHistories.has(row.id), cachedMessages: previous.length, maxPages: 30 });
     // Only a history read to its confirmed end is negative evidence.
     let complete = false;
+    let unmet: DmRequirement[] = [];
+    let rulesRead = false;
     let lagging = false;
     let personalFound = false;
     const prove = async (personal: FanslyMessage, how: 'live-page' | 'last-message') => {
@@ -746,6 +772,14 @@ export class FollowersService {
       const scanTime = reason === 'scan';
       const group = scanTime && shown?.verified ? undefined : await this.confirmGroup(scan, row.id, groupId, signal, scope, retry);
       if (!group) scope?.event('group.participants', { source: 'listing', count: 2, creatorPresent: true, fanPresent: true });
+      // Fansly's own gate for its composer (E155): a paid or closed DM. A
+      // listing without the rules leaves it open; every human action reads
+      // `GET /group` before anything is sent.
+      const gate = group ?? shown;
+      unmet = unmetDmRequirements(gate?.dmPermissionFlags, gate?.accountDmPermissionFlags);
+      const rules = Array.isArray(gate?.dmPermissionFlags) ? gate.dmPermissionFlags : null;
+      rulesRead = rules !== null;
+      scope?.event('dm.permissions', { source: group ? 'group' : 'listing', rules: rules?.map((rule) => `${rule?.flags}/${rule?.verificationFlags}`).join(',') ?? null, accountFlags: gate?.accountDmPermissionFlags?.flags ?? null, unmet: unmet.map(({ flags }) => flags).join(','), price: unmet.find(({ flags }) => flags === 1)?.price ?? null });
       scan.savedLeads.delete(row.id);
       row.groupId = groupId;
       if (savedGroup !== groupId) await traced(scope, 'group.cache-write', () => this.options.storage.set({ [groupKey]: { groupId, observedAt: Date.now() } }), { groupId });
@@ -817,6 +851,14 @@ export class FollowersService {
     }
     row.messages = displayMessages;
     if (personalFound) { verdict('contacted', 'live-personal-proof'); return; }
+    // Ahead of an unconfirmed send: nothing is sent to this fan either way, and
+    // this says why. The chatter may take the row out of the queue.
+    if (unmet.length) {
+      verdict('closed', 'dm-permission-unmet', complete ? 'history' : undefined);
+      row.detail = describeDmRequirements(unmet);
+      row.excluded = Boolean(saved[excludedKey]) || undefined;
+      return;
+    }
     if (attempt && attempt.state !== 'aborted') { verdict('uncertain', 'unconfirmed-local-custody'); row.detail = 'Результат прошлой отправки не подтверждён. Повтор заблокирован; обновление проверит историю.'; return; }
     // No chat found proves nothing (E134): the listing hides some chats and
     // has no total. The row stays workable, and says what it rests on.
@@ -826,6 +868,9 @@ export class FollowersService {
       throw new Error(lagging ? 'Fansly вернул пустую историю, хотя в чате есть сообщения. Отправка пока недоступна.' : 'История не дочитана. Отправка пока недоступна.');
     }
     const fanFirst = messages.some((message) => message.senderId === row.id && message.type === 1);
+    // The DMs are open again: an exclusion made while they were closed is over.
+    // An answer without the rules says nothing about them.
+    if (saved[excludedKey] && rulesRead) await traced(scope, 'exclusion.drop', () => this.options.storage.set({ [excludedKey]: null }));
     verdict(fanFirst ? 'reply' : 'ready', fanFirst ? 'fan-message-without-personal-dm' : 'complete-history-without-personal-dm', 'history');
     row.detail = undefined;
   }
@@ -1030,7 +1075,7 @@ export class FollowersService {
       const attemptId = crypto.randomUUID();
       const claim = await traced(scope, 'hub.reserve', () => this.options.hub.followerOutreachAttempt(state.settings, pageLabel, { fanRef: fanId, attemptId, action: 'reserve' }, signal), { attemptId });
       scope?.event('custody.reserve', { attemptId, owned: claim.owned, state: claim.state });
-      if (!claim.owned || claim.state !== 'reserved') throw new Error('Другой чаттер уже отправляет или отправил приветствие. Обновите список.');
+      if (!claim.owned || claim.state !== 'reserved') throw new Error(RESERVE_REFUSED[claim.state] ?? 'Другой чаттер уже отправляет или отправил приветствие. Обновите список.');
       // Reservation is shared across devices. Refresh once more after acquiring
       // it: both chatters may have completed their first preflight together.
       await this.check(scan, row, signal, scope, 'after-reservation');

@@ -144,6 +144,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E151 | 2026-10-11 | The five public pages wear the agency identity (source: `~/code/1-platform/agency-site`): ChatGoose logo with the gosling, pond and yellow instead of terracotta, Literata + Golos Text, flat outlined mocks, one header and footer on every page; slogan headings rewritten as plain descriptions of what a tool does. Still single files: no new assets, `mascot.png` is the new badge. |
 | E152 | 2026-10-11 | «Регистрация» in Fansly's chat header: a click shows when the fan registered (date and age), decoded from the fan's account id (a snowflake), never fetched; the id is free after a generation in the chat and one attempt of `GET /group/<id>` otherwise (no retries, nothing during a rate-limit cooldown), hence a click and not a read on every opened chat; mounted into Fansly's `.content-header-sub-row` after Gallery, selectors read from Fansly's bundle and not yet seen on a live session; one-to-one chats only; 2.8.0 |
 | E154 | 2026-10-11 | The public pages lead to the common ChatGoose home: the header logo of all five links to `../` (it was the top of the landing on `install.html` and the landing on the other four), and `start.html` links to the desktop page as `../desktop/` instead of `https://ext.gosling-agency.ru/desktop/`. Relative, because the pages are read at `chatgoose.gosling-agency.ru/fansly/`, one level below the home (the site is `~/code/1-platform/agency-site`'s); the XPI link stays on `ext.`. Footer logo, texts, deploy scripts and tests untouched; no release. E153 is the icon change (PR #147), open when this was written |
+| E155 | 2026-10-12 | «Новые»: a fan Fansly will not let the model DM (paid DM, unmet DM rules) is `closed`, «Нельзя написать» with the reason, read with Fansly's own `verifyNew` over the chat's `dmPermissionFlags`; nothing is generated, reserved or sent. «Исключить из очереди» on such a row only, remembered in this browser, dropped when the DMs open. A refused Hub reservation names the custody state instead of «Другой чаттер…». 2.8.1 |
 
 ## Entries
 
@@ -5501,3 +5502,77 @@ and one link still named a neighbour by its old address.
 - No release and no version change. The pages go out with
   `scripts/deploy-pages.sh` or with the next release, on the owner's word.
 - The number: E153 is the icon change, PR #147, open when this was written.
+
+**E155 (2026-10-12).** «Новые» knows when Fansly will not let the model DM a
+fan. RS RS (@solorzanohermoso, fan `870152607614640128`) followed @itsaribae on
+2026-10-11. He is a creator with a paid DM: Fansly's chat shows «Price Per
+Message $1.70» and «Select $1.70 p/m» where its message box would be. The
+window showed him as «Не писали»; at 20:34 UTC a chatter (Hub user 27) sent,
+Fansly refused the `POST /message`, and by the custody rules that refusal is an
+unconfirmed send: the Hub attempt `1161a180…` stays `dispatching`, which never
+expires. From then on every chatter's window showed him «Не писали» and every
+send ended in the Hub's refusal, worded «Другой чаттер уже отправляет или
+отправил приветствие».
+
+- How Fansly decides (its app bundle, `main.2e6b96097a4bb73b.js`, read
+  2026-10-12): the chat object (`GET /group/<id>`, and the inbox listing's
+  `aggregationData.groups[]`) carries `dmPermissionFlags`, the partner's rule
+  sets, any one of which lets a sender in, and `accountDmPermissionFlags`,
+  what this account already has toward the partner. Nothing else feeds the
+  composer: `GET /groups/dmpermissionflags` is read only by the creator's own
+  DM settings page. `verifyNew(rules,
+  account, tip)` returns the unmet sets; while it returns any, the composer
+  shows the permission rows instead of the message box. Bits: 1 price per
+  message, 2 the sender follows the partner, 4 subscribes to them, 8 tips, 16
+  the partner follows the sender, 32 media purchases, 64 the partner
+  subscribes, 128 the partner's list. The price is in mills (Fansly's
+  `balanceToDollars` is `floor(w/10)/100`), like the Hub's money. Every
+  ordinary fan chat in the Hub's 2026-08 captures has the sets «16 met» and
+  «64 unmet», which is open.
+- `src/shared/fansly-dm-permissions.ts` ports `verifyNew` with no tip:
+  `unmetDmRequirements` and `describeDmRequirements` («Платная личка: $1.70 за
+  сообщение.», otherwise the conditions). The tier and list names Fansly reads
+  there only label its screen and are not ported. A null price passes, as in
+  Fansly (`0 >= null`); a missing price (unmet there too) or an unreadable
+  rule (Fansly throws) is an unmet price of unknown size. Dollars come
+  from `formatExactMills` in `src/shared/spenders.ts`, now exported.
+- The row check reads the rules from `GET /group`, or at scan time from a
+  listing or a `POST /group` answer that verified the pair; rules absent from
+  an answer leave the chat open, as in Fansly, and every send and draft reads
+  `GET /group` first. A
+  personal DM found in the history still makes the row «Уже писали»;
+  otherwise unmet rules make it the new status `closed` («Нельзя написать»),
+  ahead of an unconfirmed local send journal. `closed` is not workable:
+  generation, verification and sending stop before the AI, the Hub
+  reservation or any Fansly write, and the send says why. The debug trace
+  logs `dm.permissions` (rule bits, met bits, unmet bits, price) for the first
+  live read.
+- Exclusion, on the owner's choices (2026-10-12): a `closed` row stays in «К
+  обработке» until the chatter presses «Исключить из очереди» (not
+  automatic: the rules were not yet read on a live session); only a `closed`
+  row has the button; the choice is kept in this browser
+  (`chatgoose:followers:v1:excluded:<creator>:<fan>`), not in the Hub. An
+  excluded row stays in «Все» as «Исключён · нельзя написать» with «Вернуть в
+  очередь». A check that read the rules and found the DMs open drops the
+  record; an answer without the rules keeps it. Nothing is
+  read from or sent to Fansly or the Hub for it.
+- A refused Hub reservation now names the state the Hub returned: `reserved`
+  «другой чаттер сейчас отправляет», `sent` «уже отправили приветствие»,
+  `dispatching` «прошлая отправка не подтверждена, повтор заблокирован».
+- Not changed: the custody rules (a Fansly refusal of `POST /message` is
+  still an unconfirmed send) and the Hub. On 2026-10-12 the Hub held 17
+  `dispatching` attempts (16 on ari-1, 1 on lora-1); for 14 of them the
+  archive has no chat with the fan at all, among them Mariagarrett222 and
+  Richard_Hardenlong (the restricted DM of the 2026-09-20 audit). They were
+  read, not touched: with this check a closed fan never reaches the
+  reservation, and clearing them is a Hub change for the owner to order.
+- One review pass (Opus); its findings fixed: a fan pinned on screen left
+  the queue on exclusion, the empty queue no longer says everyone was
+  written to when some were excluded, the null price, the `POST /group`
+  rules, and the record kept on an answer without rules.
+- Verified: `pnpm check`; the window on a local stand built from the real
+  `FollowersWindow` with a stubbed background (a paid DM, a closed DM, an
+  exclusion and its return, the narrow layout). Not verified: a live Fansly
+  session; RS RS's chat object was not read, the rules are known from the
+  bundle and the captures.
+- Version 2.8.1.

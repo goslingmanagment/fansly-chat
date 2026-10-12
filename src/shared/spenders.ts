@@ -143,7 +143,8 @@ export function formatSpenderAmount(usd: number): string {
   return `$${USD_WHOLE_FORMATTER.format(rounded)}`;
 }
 
-function formatExactMills(mills: number): string {
+/** '$1.70' — integer mills with no rounding: two or three decimal digits. */
+export function formatExactMills(mills: number): string {
   const wholeDollars = Math.floor(mills / 1000);
   const exactMills = String(mills % 1000).padStart(3, '0');
   const fraction = exactMills.replace(/0+$/, '').padEnd(2, '0');

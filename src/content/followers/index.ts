@@ -3,7 +3,7 @@ import { FOLLOWER_HOURS, type FollowerRow, type FollowersRequest, type Followers
 
 const LABEL: Record<FollowerStatus, string> = {
   checking: 'Проверяем…', pending: 'В очереди', ready: 'Не писали', reply: 'Ждёт ответа', contacted: 'Уже писали',
-  unknown: 'Не проверен', sending: 'Отправляем…', uncertain: 'Нужно проверить', sent: 'Отправлено',
+  closed: 'Нельзя написать', unknown: 'Не проверен', sending: 'Отправляем…', uncertain: 'Нужно проверить', sent: 'Отправлено',
 };
 const dateLabel = (value: number) => new Date(value).toLocaleString('ru-RU', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 const canSend = (row: FollowerRow) => (row.status === 'ready' || row.status === 'reply') && row.evidence === 'history';
@@ -11,7 +11,10 @@ const canCompose = (row: FollowerRow) => canSend(row) || ['pending', 'checking']
 // A queue entry is not an empty-history verdict, even if an older background
 // returns a ready row without evidence. Generation and sending fail closed.
 const unverified = (row: FollowerRow) => ['pending', 'checking'].includes(row.status) || (['ready', 'reply'].includes(row.status) && row.evidence !== 'history');
-const label = (row: FollowerRow) => ['ready', 'reply'].includes(row.status) && row.evidence !== 'history' ? 'Переписка не проверена' : LABEL[row.status];
+const label = (row: FollowerRow) => ['ready', 'reply'].includes(row.status) && row.evidence !== 'history' ? 'Переписка не проверена' : row.status === 'closed' && row.excluded ? 'Исключён · нельзя написать' : LABEL[row.status];
+/** «К обработке» is what a chatter can still act on. A fan Fansly will not let
+ * the model DM stays there until the chatter excludes them (E155). */
+const queued = (row: FollowerRow) => !['contacted', 'sent'].includes(row.status) && !(row.status === 'closed' && row.excluded);
 const UNVERIFIED_NOTICE = 'Переписка ещё не проверена. Строка ожидает проверки по аккаунту фана.';
 const draftKey = (creator: string, fan: string) => `chatgoose:followers:draft:v1:${creator}:${fan}`;
 
@@ -81,7 +84,7 @@ export class FollowersWindow {
     // Static skeleton only; every platform/model string is assigned via textContent/value.
     this.dialog.innerHTML = `<header><div><h1>Новые фоловеры</h1><span class="creator"></span></div><button class="close icon" aria-label="Закрыть">×</button></header>
       <div class="toolbar"><label>За <select aria-label="Период"></select></label><button class="debug" hidden>Отладка ↗</button><span class="progress" role="status"></span><button class="pause" hidden>Пауза</button><button class="refresh icon" aria-label="Обновить список">↻</button></div>
-      <div class="scan-info"><span class="range"></span><span class="verification" hidden></span><span class="cooldown" role="status" hidden></span></div><div class="error" role="alert" hidden></div><main><aside><nav><button class="pending active">К обработке</button><button class="all">Все</button></nav><select class="filter" aria-label="Статус фана"><option value="any">Все статусы</option><option value="ready">Не писали</option><option value="pending">В очереди</option><option value="reply">Ждёт ответа</option><option value="unchecked">Не проверены</option><option value="contacted">Уже писали</option></select><div class="list" aria-label="Фоловеры"></div></aside><section class="detail"></section></main>`;
+      <div class="scan-info"><span class="range"></span><span class="verification" hidden></span><span class="cooldown" role="status" hidden></span></div><div class="error" role="alert" hidden></div><main><aside><nav><button class="pending active">К обработке</button><button class="all">Все</button></nav><select class="filter" aria-label="Статус фана"><option value="any">Все статусы</option><option value="ready">Не писали</option><option value="pending">В очереди</option><option value="reply">Ждёт ответа</option><option value="unchecked">Не проверены</option><option value="closed">Нельзя написать</option><option value="contacted">Уже писали</option></select><div class="list" aria-label="Фоловеры"></div></aside><section class="detail"></section></main>`;
     this.dialog.setAttribute('aria-label', 'Новые фоловеры');
     this.shadow.append(this.dialog);
     this.host.id = 'chatgoose-followers';
@@ -209,6 +212,31 @@ export class FollowersWindow {
     } catch (error) { if (epoch === this.epoch) this.showError((error as Error).message); }
   }
 
+  /** Why Fansly will not let the model DM this fan, and the one action left:
+   * taking the fan out of «К обработке» in this browser, or back (E155). */
+  private closedNotice(row: FollowerRow): HTMLElement {
+    const notice = element('div', 'notice closed');
+    notice.append(element('span', '', row.detail ?? 'Fansly не даёт написать этому фану.'));
+    const toggle = element('button', 'exclude', row.excluded ? 'Вернуть в очередь' : 'Исключить из очереди');
+    toggle.type = 'button';
+    toggle.addEventListener('click', () => {
+      if (!this.snapshot) return;
+      const epoch = this.epoch;
+      const excluded = !row.excluded;
+      toggle.disabled = true; this.showError();
+      void request({ type: 'followers', action: 'exclude', scanId: this.snapshot.scanId, fanId: row.id, excluded }).then((response) => {
+        if (epoch !== this.epoch) return;
+        this.snapshot = response.snapshot!;
+        // A pinned fan would stay on screen in «К обработке» after leaving it.
+        if (excluded && this.pinned === row.id) this.pinned = null;
+        if (excluded) this.showError(`${row.displayName}: исключён из очереди. Вернуть можно во вкладке «Все».`);
+        this.render();
+      }).catch((error: unknown) => { if (epoch === this.epoch) { toggle.disabled = false; this.showError((error as Error).message); } });
+    });
+    notice.append(toggle);
+    return notice;
+  }
+
   private schedulePoll(epoch: number): void {
     if (this.poll) clearTimeout(this.poll);
     if ((!this.snapshot?.scanning && !this.snapshot?.verification?.active && !this.snapshot?.rows.some((row) => row.conversation?.loading) && (this.snapshot?.pacing?.cooldownUntil ?? 0) <= Date.now()) || epoch !== this.epoch) return;
@@ -225,7 +253,6 @@ export class FollowersWindow {
     const snapshot = this.snapshot;
     if (!snapshot) return;
     this.renderDebug(snapshot.debug);
-    const queued = (row: FollowerRow) => !['contacted', 'sent'].includes(row.status);
     const pending = snapshot.rows.filter(queued);
     const candidates = this.all ? snapshot.rows : snapshot.rows.filter((row) => queued(row) || row.id === this.pinned);
     const rows = candidates.filter((row) => this.filter === 'any' || (this.filter === 'unchecked' ? ['checking', 'pending', 'unknown', 'uncertain'].includes(row.status) : this.filter === 'contacted' ? ['contacted', 'sent'].includes(row.status) : this.filter === 'ready' || this.filter === 'reply' ? row.status === this.filter && canSend(row) : row.status === this.filter));
@@ -236,7 +263,7 @@ export class FollowersWindow {
     this.node('.pending').classList.toggle('active', !this.all);
     this.node('.all').classList.toggle('active', this.all);
     const remaining = snapshot.rows.filter((row) => ['checking', 'pending', 'unknown'].includes(row.status)).length;
-    const checked = snapshot.rows.filter((row) => canSend(row) || ['contacted', 'sent', 'sending'].includes(row.status)).length;
+    const checked = snapshot.rows.filter((row) => canSend(row) || ['contacted', 'closed', 'sent', 'sending'].includes(row.status)).length;
     const progress = `Проверено ${checked} из ${snapshot.rows.length}`;
     const phases = { welcome: 'Читаем welcome-сообщения…', followers: 'Загружаем фоловеров…', profiles: 'Загружаем профили…', checking: progress, notes: progress };
     // A failed scan with no rows is an unread list, not an empty period.
@@ -263,6 +290,7 @@ export class FollowersWindow {
     list.replaceChildren(...rows.map((row) => {
       const button = element('button', `row ${row.id === this.selected ? 'selected' : ''}`);
       button.dataset.fan = row.id; button.type = 'button';
+      if (row.status === 'closed' && row.detail) button.title = row.detail;
       button.setAttribute('aria-pressed', String(row.id === this.selected));
       const copy = element('span', 'row-copy');
       copy.append(element('strong', 'name', `${row.displayName}${row.customName ? ` (${row.customName})` : ''}`), element('span', 'meta', `@${row.username || row.id} · ${hoursAgo(row.followedAt)}`), element('span', `status ${row.status}${unverified(row) ? ' unverified' : ''}`, label(row)));
@@ -281,7 +309,7 @@ export class FollowersWindow {
     // Only changes to the selected fan may rebuild their composer. Queue
     // progress and completion must preserve the chatter's focus and caret.
     const detailKey = JSON.stringify(row
-      ? [snapshot.scanId, row.id, row.status, row.evidence, row.chatKnown, row.groupId, row.messages, row.proof, row.conversation, row.detail, row.bio, row.customName, row.displayName, row.username, row.avatarUrl, this.busy.has(row.id), unverified(row) && snapshot.verification?.active]
+      ? [snapshot.scanId, row.id, row.status, row.evidence, row.excluded, row.chatKnown, row.groupId, row.messages, row.proof, row.conversation, row.detail, row.bio, row.customName, row.displayName, row.username, row.avatarUrl, this.busy.has(row.id), unverified(row) && snapshot.verification?.active]
       : [snapshot.scanId, snapshot.scanning, snapshot.error, this.filter, rows.length]);
     if (detailKey !== this.detailKey) { this.detailKey = detailKey; void this.renderDetail(row); }
     if (row && ['contacted', 'sent'].includes(row.status) && !row.conversation && !this.conversationOpened.has(row.id) && !this.justSent.has(row.id)) void this.loadConversation(row.id);
@@ -297,7 +325,7 @@ export class FollowersWindow {
     const caret = detail.dataset.fan === row?.id && typing instanceof HTMLTextAreaElement && typing.classList.contains('draft') ? { start: typing.selectionStart, end: typing.selectionEnd } : null;
     detail.replaceChildren(); detail.dataset.fan = row?.id ?? '';
     if (!row || !this.snapshot) {
-      const text = this.snapshot?.scanning ? 'Проверяем фоловеров…' : this.snapshot?.error ? 'Проверка завершилась не полностью. См. причину выше.' : !this.snapshot?.rows.length ? 'За выбранный период новых фоловеров нет.' : this.filter !== 'any' ? 'Нет фанов с выбранным статусом.' : 'Всем найденным фоловерам уже написали. Переписка доступна во вкладке «Все».';
+      const text = this.snapshot?.scanning ? 'Проверяем фоловеров…' : this.snapshot?.error ? 'Проверка завершилась не полностью. См. причину выше.' : !this.snapshot?.rows.length ? 'За выбранный период новых фоловеров нет.' : this.filter !== 'any' ? 'Нет фанов с выбранным статусом.' : this.snapshot?.rows.some((value) => value.status === 'closed' && value.excluded) ? 'Очередь пуста: остальным фанам уже написали или их исключили. Они во вкладке «Все».' : 'Всем найденным фоловерам уже написали. Переписка доступна во вкладке «Все».';
       detail.append(element('div', 'empty', text)); return;
     }
     const epoch = this.epoch;
@@ -335,7 +363,7 @@ export class FollowersWindow {
     }
     // «Личной переписки ещё нет» is a finding: only a history read to its end
     // may say it. A chat that is known but unread says that it is unread.
-    if (!messages.length) history.append(element('div', unverified(row) ? 'empty unverified' : 'empty', row.status === 'checking' ? 'Проверяем переписку…' : conversation?.loading ? 'Загружаем переписку…' : unverified(row) ? UNVERIFIED_NOTICE : canCompose(row) ? 'Личной переписки ещё нет' : row.chatKnown ? 'Историю прочитать не удалось' : 'Сообщения не загружены.'));
+    if (!messages.length) history.append(element('div', unverified(row) ? 'empty unverified' : 'empty', row.status === 'checking' ? 'Проверяем переписку…' : conversation?.loading ? 'Загружаем переписку…' : unverified(row) ? UNVERIFIED_NOTICE : canCompose(row) || (row.status === 'closed' && row.evidence === 'history') ? 'Личной переписки ещё нет' : row.chatKnown ? 'Историю прочитать не удалось' : 'Сообщения не загружены.'));
     if (!conversation?.messages.length && row.proof && !row.messages.length) history.append(element('div', 'meta', conversation && !conversation.loading && !conversation.error ? 'Fansly не вернул сообщений. Ниже — сохранённое доказательство.' : 'Сохранённое сообщение · свежая переписка загружается отдельно'));
     for (const message of messages) {
       const bubble = element('div', `bubble ${message.own ? 'own' : 'fan'}`);
@@ -355,6 +383,7 @@ export class FollowersWindow {
     detail.append(history);
     const prepended = scroll?.first && messages[0]?.id !== scroll.first && messages.some((message) => message.id === scroll.first);
     history.scrollTop = scroll?.transcript ? scroll.top + (prepended ? history.scrollHeight - scroll.height : 0) : history.scrollHeight;
+    if (row.status === 'closed') { detail.append(this.closedNotice(row)); return; }
     if (!canCompose(row)) { if (row.detail) detail.append(element('div', 'notice', row.detail)); return; }
     const composer = element('div', 'composer');
     const textarea = element('textarea', 'draft');

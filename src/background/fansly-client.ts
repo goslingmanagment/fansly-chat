@@ -266,7 +266,7 @@ function uniquePurchaseRequests(requests: PpvAttachmentRequest[]): PpvAttachment
 /** One fan's chat as an inbox listing or search page showed it. `verified`:
  * the page's own group entry lists exactly the creator and this fan, the same
  * participant fence `GET /group` would repeat (E134). */
-export interface InboxChat {
+export interface InboxChat extends Pick<FanslyGroup, 'dmPermissionFlags' | 'accountDmPermissionFlags'> {
   fanId: string;
   groupId: string;
   verified: boolean;
@@ -289,7 +289,7 @@ function readInboxPage(response: FanslyMessagingGroupsResponse, creatorId: strin
     // A thin entry (one user, a stranger, none) leaves the check to `GET /group`.
     const users = Array.isArray(group?.users) ? group.users.map((user) => user?.userId) : [];
     const verified = fanId !== creatorId && users.length === 2 && users.includes(creatorId) && users.includes(fanId);
-    chats.push({ fanId, groupId: entry.groupId, verified, lastMessageId: entry.lastMessageId || group?.lastMessage?.id || null, lastMessage: group?.lastMessage ?? null });
+    chats.push({ fanId, groupId: entry.groupId, verified, lastMessageId: entry.lastMessageId || group?.lastMessage?.id || null, lastMessage: group?.lastMessage ?? null, dmPermissionFlags: group?.dmPermissionFlags, accountDmPermissionFlags: group?.accountDmPermissionFlags });
   }
   return { chats, count: response.data.length, groups: groups.length, withUsers: chats.filter((chat) => chat.verified).length, tail: response.data.at(-1)?.lastMessageId ?? null };
 }
@@ -717,7 +717,7 @@ export class FanslyClient {
 
   /** `POST /group` is get-or-create by identity: it answers with the fan's
    * existing chat, however old, and only otherwise with a new empty one. */
-  async createFollowerGroup(fanId: string, creatorId: string, session: SessionTemplate, signal: AbortSignal, trace?: TraceScope, admissionSignal = signal): Promise<{ id: string; lastMessage: FanslyMessage | null }> {
+  async createFollowerGroup(fanId: string, creatorId: string, session: SessionTemplate, signal: AbortSignal, trace?: TraceScope, admissionSignal = signal): Promise<{ id: string; lastMessage: FanslyMessage | null } & Pick<FanslyGroup, 'dmPermissionFlags' | 'accountDmPermissionFlags'>> {
     const group = await this.postOnce<FanslyGroup>('group', {
       users: [{ userId: fanId, permissionFlags: 0 }, { userId: creatorId, permissionFlags: 0 }],
       recipients: [], lastMessage: null, userSettings: null, type: 1,
@@ -725,7 +725,7 @@ export class FanslyClient {
     if (!group.id || !/^\d{1,24}$/.test(group.id) || group.users?.length !== 2 || !group.users.some((v) => v.userId === fanId) || !group.users.some((v) => v.userId === creatorId)) throw new ChatGooseError('fansly_server_error');
     const hidden = group.users.find((user) => user.userId === creatorId)?.userSettings?.hidden;
     trace?.event('group.create-result', { groupId: group.id, lastMessageId: group.lastMessage?.id ?? null, lastMessagePresent: Object.hasOwn(group, 'lastMessage'), creatorId, hidden: hidden === 0 || hidden === 1 ? hidden : null });
-    return { id: group.id, lastMessage: group.lastMessage ?? null };
+    return { id: group.id, lastMessage: group.lastMessage ?? null, dmPermissionFlags: group.dmPermissionFlags, accountDmPermissionFlags: group.accountDmPermissionFlags };
   }
 
   async sendFollowerMessage(groupId: string, text: string, creatorId: string, session: SessionTemplate, signal: AbortSignal, trace?: TraceScope): Promise<string> {

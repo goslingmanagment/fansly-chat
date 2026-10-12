@@ -81,3 +81,7 @@ nav button.active { color: #b95434; border-color: #d97757; }
 .open-chat { align-self: flex-end; color: #9f6549; font-size: 11px; margin: 0 22px 4px; text-decoration: none; flex-shrink: 0; }
 .open-chat:hover { text-decoration: underline; }
 .open-chat:focus-visible { outline: 2px solid #d97757; outline-offset: 2px; }
+
+.status.closed { color: #8d785d; }
+.notice.closed { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-shrink: 0; }
+.exclude { border: 1px solid var(--line); border-radius: 7px; padding: 7px 11px; font-size: 12px; white-space: nowrap; flex-shrink: 0; }

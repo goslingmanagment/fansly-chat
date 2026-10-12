@@ -1,5 +1,6 @@
 import type { MessageSoundTone } from './message-sound-protocol.js';
 import type { PaneKey } from './options-routes.js';
+import type { FanslyDmPermissionAccount, FanslyDmPermissionRule } from './fansly-dm-permissions.js';
 import type {
   StoredVoiceAttemptRoute,
   VoiceAttemptStoreEntry,
@@ -625,6 +626,10 @@ export interface FanslyGroup {
   users?: Array<{ userId: string; userSettings?: { hidden?: number } | null }>;
   userSettings?: { hidden?: number } | null;
   lastMessage?: FanslyMessage | null;
+  /** The partner's ways into their DMs and what this account has toward them;
+   * read through `unmetDmRequirements` (E155). */
+  dmPermissionFlags?: FanslyDmPermissionRule[] | null;
+  accountDmPermissionFlags?: FanslyDmPermissionAccount | null;
 }
 
 export interface FanslyMessagingGroupAccount {
