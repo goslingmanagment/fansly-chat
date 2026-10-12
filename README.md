@@ -78,7 +78,7 @@ from prose when checking what is installed or live; verify the signed update fee
   read until the chatter clicks; the answer stays until the page reloads or
   the tab changes account. One-to-one chats only
   (`src/content/fan-registration.ts`).
-- **Заметки** (E157) — the fan's native Fansly notes (what Fansly's own «Edit
+- **Заметки** (2.9.0, E157) — the fan's native Fansly notes (what Fansly's own «Edit
   User Notes» modal shows, two clicks deep in the name menu) in a ChatGoose
   panel: «Заметки» after «Регистрация» in the header row, or ⌘⇧K /
   Ctrl+Alt+K. Regular notes (contentType 12000) are listed, added, edited and
@@ -218,6 +218,13 @@ Important references:
   architecture.
 
 ## Release
+
+Release 2.9.0 (E157, E158) adds the fan-notes panel: Fansly's own notes and
+custom name, read and written with Fansly's `/account?ids=` and `/notes*`
+calls on the follower lane. Settings v21 (`fanNotesView`, default on demand);
+hotkey scheme 2 (⌘⇧K / Ctrl+Alt+K, client `fansly`), vendored from hub
+`0a96105d`. No new permission, SDK and Core contracts unchanged. Tabs opened
+before the update need a reload.
 
 Release 2.8.0 (E152) adds the fan's registration date to the chat header: a
 click on «Регистрация» decodes it from the fan's account id. At most one
