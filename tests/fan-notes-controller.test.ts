@@ -122,6 +122,9 @@ describe('FanNotesController (E157)', () => {
       isCovered: vi.fn(() => false),
       headerName: () => 'Richard',
       hotkeyLabel: '⌘⇧K',
+      startFill: vi.fn(),
+      cancelFill: vi.fn(),
+      newOperationId: () => 'fill-op-1',
       ...overrides,
     };
     controller = new FanNotesController(options as unknown as ConstructorParameters<typeof FanNotesController>[0]);
@@ -517,6 +520,100 @@ describe('FanNotesController (E157)', () => {
 
     outside.focus();
     expect(document.activeElement).toBe(panel);
+  });
+
+  describe('«✨ Заполнить из чата» (E159)', () => {
+    async function openTemplate() {
+      const made = create();
+      made.controller.sync();
+      made.controller.toggle();
+      await flush();
+      buttonNamed('+ По шаблону').click();
+      return made;
+    }
+
+    it('offers the fill on a questionnaire and asks for its labels', async () => {
+      const { controller: notes, options } = await openTemplate();
+      const fillButton = buttonNamed('✨ Заполнить из чата');
+      expect(fillButton.hidden).toBe(false);
+      fillButton.click();
+
+      expect(options.startFill).toHaveBeenCalledWith({
+        operationId: 'fill-op-1',
+        groupId: GROUP_A,
+        noteFields: ['Имя', 'Локация', 'Возраст', 'Работа', 'Хобби', 'Фетиши', 'Характеристика', 'Медиа'],
+      });
+      expect(notes.ownsOperation('fill-op-1')).toBe(true);
+      // The fields are locked while the answer is on its way.
+      expect(q<HTMLTextAreaElement>('.chatgoose-note-textarea')?.disabled).toBe(true);
+      expect(buttonNamed('Создать').disabled).toBe(true);
+      expect(q('.chatgoose-notes-fill-status')?.textContent).toBe('Читаю переписку…');
+
+      notes.handleOperationMessage({ type: 'operation:progress', operationId: 'fill-op-1', feature: 'fan-notes-fill', phase: 'loading-messages', currentPage: 2, targetPages: 5 });
+      expect(q('.chatgoose-notes-fill-status')?.textContent).toBe('Читаю переписку… 2/5');
+    });
+
+    it('fills the empty fields and offers «было → станет» for the ones the chatter filled', async () => {
+      const { controller: notes } = await openTemplate();
+      const text = q<HTMLTextAreaElement>('.chatgoose-note-textarea')!;
+      text.value = text.value.replace('Имя: ', 'Имя: Рич');
+      text.dispatchEvent(new window.Event('input'));
+      buttonNamed('✨ Заполнить из чата').click();
+
+      notes.handleOperationMessage({
+        type: 'operation:complete',
+        operationId: 'fill-op-1',
+        result: { rawText: 'Имя: Richard\nЛокация: Virginia\nВозраст: \nРабота: military\nХобби: \nФетиши: \nХарактеристика: GFE, платит за кастомы\nМедиа: видео в душе' },
+      } as never);
+
+      const filled = q<HTMLTextAreaElement>('.chatgoose-note-textarea')!.value;
+      expect(filled).toContain('Имя: Рич');
+      expect(filled).toContain('Локация: Virginia');
+      expect(filled).toContain('Работа: military');
+      expect(filled).toContain('Медиа: видео в душе');
+      expect(q('.chatgoose-notes-fill-notice')?.textContent).toContain('Заполнено полей: 4');
+      expect(q('.chatgoose-notes-suggestion')?.textContent).toBe('Имя:Рич→RichardЗаменить');
+
+      buttonNamed('Заменить').click();
+      expect(q<HTMLTextAreaElement>('.chatgoose-note-textarea')!.value).toContain('Имя: Richard');
+      expect(q('.chatgoose-notes-suggestions')).toBeNull();
+      // Nothing went to Fansly: the chatter still saves by hand.
+      expect(notes.ownsOperation('fill-op-1')).toBe(false);
+    });
+
+    it('stops on demand, and a late answer never lands in the draft', async () => {
+      const { controller: notes, options } = await openTemplate();
+      buttonNamed('✨ Заполнить из чата').click();
+      buttonNamed('Остановить').click();
+
+      expect(options.cancelFill).toHaveBeenCalledWith('fill-op-1');
+      expect(notes.ownsOperation('fill-op-1')).toBe(false);
+      notes.handleOperationMessage({ type: 'operation:complete', operationId: 'fill-op-1', result: { rawText: 'Имя: Late' } } as never);
+      expect(q<HTMLTextAreaElement>('.chatgoose-note-textarea')!.value).not.toContain('Late');
+      expect(q<HTMLTextAreaElement>('.chatgoose-note-textarea')!.disabled).toBe(false);
+    });
+
+    it('names a failure in the draft and keeps the text', async () => {
+      const { controller: notes } = await openTemplate();
+      buttonNamed('✨ Заполнить из чата').click();
+      notes.handleOperationMessage({ type: 'operation:error', operationId: 'fill-op-1', error: createUserError('chat_changed') } as never);
+
+      expect(q('.chatgoose-notes-inline-error')?.textContent).toBe('Заполнение остановлено: открыт другой чат.');
+      expect(q<HTMLTextAreaElement>('.chatgoose-note-textarea')!.value.startsWith('Имя: ')).toBe(true);
+    });
+
+    it('hides the fill on a free note', async () => {
+      const made = create();
+      made.controller.sync();
+      made.controller.toggle();
+      await flush();
+      buttonNamed('+ Новая заметка').click();
+      expect(buttonNamed('✨ Заполнить из чата').hidden).toBe(true);
+      const text = q<HTMLTextAreaElement>('.chatgoose-note-textarea')!;
+      text.value = 'Имя: \nВозраст: ';
+      text.dispatchEvent(new window.Event('input'));
+      expect(buttonNamed('✨ Заполнить из чата').hidden).toBe(false);
+    });
   });
 
   it('drops everything read under the previous account, answers in flight included', async () => {

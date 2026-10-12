@@ -15,6 +15,12 @@
 //
 // Drafts are kept per fan, so a chatter who switches chats mid-edit finds the
 // text again on returning.
+//
+// «✨ Заполнить из чата» (E159) runs the kernel's `fan-notes-fill` over the
+// whole chat, the way a full Recap reads it. It asks for the questionnaire's
+// labels only; the answer fills the empty fields, and a field the chatter
+// already filled is never overwritten — a different answer for it is offered
+// as «было → станет». Nothing is saved to Fansly until «Создать»/«Сохранить».
 
 import { CONVERSATION_ATTACH_TIMEOUT_MS } from '../../shared/constants.js';
 import { formatUserFacingError, getUserErrorDescription, toUserError } from '../../shared/errors.js';
@@ -26,12 +32,18 @@ import {
   FAN_NOTE_TEXT_MAX_CHARS,
   FAN_NOTE_TITLE_MAX_CHARS,
   FAN_NOTES_VIEW_DEFAULT,
+  applyFieldSuggestion,
   charCount,
+  mergeFilledFields,
+  parseFilledFields,
+  parseNoteTemplate,
   type FanNote,
+  type NoteFieldSuggestion,
   type FanNotesSnapshot,
   type FanNotesView,
 } from '../../shared/fan-notes.js';
 import type {
+  BackgroundPortMessage,
   DeleteFanNoteRequest,
   DeleteFanNoteResponse,
   FanNotesResponse,
@@ -65,6 +77,19 @@ interface Draft {
   /** A create failed after it may have landed: no second one until a reread. */
   blocked: boolean;
   error: string | null;
+  /** The last fill's answers for fields the chatter had already filled. */
+  suggestions: NoteFieldSuggestion[];
+  /** What the last fill did, in a line. */
+  fillNotice: string | null;
+}
+
+/** One questionnaire fill in flight (one per tab: the background runs one
+ * operation at a time). */
+interface Fill {
+  operationId: string;
+  fanId: string;
+  labels: string[];
+  status: string;
 }
 
 export interface FanNotesControllerOptions {
@@ -80,6 +105,12 @@ export interface FanNotesControllerOptions {
   isCovered: () => boolean;
   /** The fan's name as the chat header shows it, before the notes are read. */
   headerName: () => string | null;
+  /** Start `fan-notes-fill` for the open chat (E159); the operation's port
+   * messages come back through `handleOperationMessage`. */
+  startFill: (request: { operationId: string; groupId: string; noteFields: string[] }) => void;
+  cancelFill: (operationId: string) => void;
+  /** A fresh id per operation (crypto.randomUUID in the page). */
+  newOperationId?: () => string;
   hotkeyLabel: string;
 }
 
@@ -102,6 +133,7 @@ export class FanNotesController {
   private readonly nameDrafts = new Map<string, string>();
   private readonly nameStatus = new Map<string, NotesPanelModel['customName']['status']>();
   private confirmDelete: { fanId: string; noteId: string } | null = null;
+  private fill: Fill | null = null;
   private deleting: { fanId: string; noteId: string } | null = null;
   /** Bumped by `reset()`: an answer asked for before it is dropped. */
   private epoch = 0;
@@ -139,6 +171,11 @@ export class FanNotesController {
       onCustomNameInput: (value) => this.nameInput(value),
       onCustomNameCommit: () => { void this.commitName(); },
       onCustomNameRevert: () => this.revertName(),
+      onFill: () => this.startFill(),
+      onStopFill: () => this.stopFill(),
+      onApplySuggestion: (index) => this.applySuggestion(index),
+      onApplyAllSuggestions: () => this.applyAllSuggestions(),
+      onDismissSuggestions: () => this.dismissSuggestions(),
     });
     this.trigger = new NotesTrigger({
       onToggle: () => { this.toggle(); },
@@ -204,6 +241,8 @@ export class FanNotesController {
   /** The tab now works as another Fansly account: nothing read or typed under
    * the previous one may be shown or written. */
   reset(): void {
+    if (this.fill) this.options.cancelFill(this.fill.operationId);
+    this.fill = null;
     this.epoch += 1;
     this.entries.clear();
     this.drafts.clear();
@@ -413,6 +452,7 @@ export class FanNotesController {
 
   private writing(fanId: string): boolean {
     return Boolean(this.drafts.get(fanId)?.saving) ||
+      this.fill?.fanId === fanId ||
       this.deleting?.fanId === fanId ||
       this.nameStatus.get(fanId) === 'saving';
   }
@@ -488,6 +528,8 @@ export class FanNotesController {
       saving: false,
       blocked: false,
       error: null,
+      suggestions: [],
+      fillNotice: null,
     });
     this.render();
     this.panel.focusField('editor-text:new', fromTemplate ? FAN_NOTE_TEMPLATE_TEXT.indexOf('\n') : undefined);
@@ -498,7 +540,16 @@ export class FanNotesController {
     const note = data?.notes.find((entry) => entry.id === noteId);
     if (!data || !note || this.drafts.has(data.fan.accountId)) return;
     this.confirmDelete = null;
-    this.drafts.set(data.fan.accountId, { noteId, title: note.title, text: note.note, saving: false, blocked: false, error: null });
+    this.drafts.set(data.fan.accountId, {
+      noteId,
+      title: note.title,
+      text: note.note,
+      saving: false,
+      blocked: false,
+      error: null,
+      suggestions: [],
+      fillNotice: null,
+    });
     this.render();
     this.panel.focusField(`editor-text:${noteId}`);
   }
@@ -506,7 +557,7 @@ export class FanNotesController {
   private editorInput(title: string, text: string): void {
     const data = this.current();
     const draft = data ? this.drafts.get(data.fan.accountId) : undefined;
-    if (!draft || draft.saving) return;
+    if (!draft || draft.saving || this.fill?.fanId === data?.fan.accountId) return;
     draft.title = title;
     draft.text = text;
   }
@@ -514,6 +565,7 @@ export class FanNotesController {
   private cancelEdit(): void {
     const data = this.current();
     if (!data || this.drafts.get(data.fan.accountId)?.saving) return;
+    if (this.fill?.fanId === data.fan.accountId) this.stopFill();
     this.drafts.delete(data.fan.accountId);
     this.render();
   }
@@ -523,7 +575,7 @@ export class FanNotesController {
     if (!data) return;
     const fanId = data.fan.accountId;
     const draft = this.drafts.get(fanId);
-    if (!draft || draft.saving || draft.blocked) return;
+    if (!draft || draft.saving || draft.blocked || this.fill?.fanId === fanId) return;
     const title = draft.title.trim();
     const text = draft.text.trimEnd();
     if (!title && !text.trim()) {
@@ -620,6 +672,123 @@ export class FanNotesController {
     } else {
       this.options.onError(errorOf(response?.ok === false ? response : null, thrown));
     }
+    this.render();
+  }
+
+  // ─── «✨ Заполнить из чата» ─────────────────────────────────────────────
+
+  private startFill(): void {
+    const data = this.current();
+    const groupId = this.groupId;
+    if (!data || !groupId || this.fill) return;
+    const fanId = data.fan.accountId;
+    const draft = this.drafts.get(fanId);
+    if (!draft || draft.saving) return;
+    const fields = parseNoteTemplate(draft.text);
+    if (fields.length === 0) return;
+    const operationId = this.options.newOperationId?.() ?? crypto.randomUUID();
+    this.fill = { operationId, fanId, labels: fields.map((field) => field.label), status: 'Читаю переписку…' };
+    draft.error = null;
+    draft.fillNotice = null;
+    draft.suggestions = [];
+    this.render();
+    this.options.startFill({ operationId, groupId, noteFields: this.fill.labels });
+  }
+
+  private stopFill(): void {
+    const fill = this.fill;
+    if (!fill) return;
+    // Dropped here, not on the background's answer: a cancelled operation may
+    // never send one, and a late answer must not land in the draft.
+    this.fill = null;
+    this.options.cancelFill(fill.operationId);
+    this.render();
+  }
+
+  /** True for the questionnaire fill's operation: its port messages are the
+   * panel's, not the app's surfaces'. */
+  ownsOperation(operationId: string): boolean {
+    return this.fill?.operationId === operationId;
+  }
+
+  handleOperationMessage(message: BackgroundPortMessage): void {
+    const fill = this.fill;
+    if (!fill || !('operationId' in message) || message.operationId !== fill.operationId) return;
+    switch (message.type) {
+      case 'operation:progress':
+        fill.status = message.phase === 'loading-messages' && message.currentPage && message.targetPages
+          ? `Читаю переписку… ${message.currentPage}/${message.targetPages}`
+          : message.phase === 'generating'
+            ? 'Заполняю анкету…'
+            : fill.status;
+        this.render();
+        return;
+      case 'operation:complete':
+        this.finishFill(fill, message.result.rawText);
+        return;
+      case 'operation:error':
+      case 'operation:discarded':
+        this.failFill(fill, message.error);
+        return;
+      default:
+        return;
+    }
+  }
+
+  private finishFill(fill: Fill, rawText: string): void {
+    this.fill = null;
+    const draft = this.drafts.get(fill.fanId);
+    if (!draft) {
+      this.render();
+      return;
+    }
+    const merged = mergeFilledFields(draft.text, parseFilledFields(rawText, fill.labels));
+    draft.text = merged.text;
+    draft.suggestions = merged.suggestions;
+    draft.fillNotice = merged.filledCount === 0 && merged.suggestions.length === 0
+      ? 'В переписке не нашлось ничего нового для анкеты.'
+      : [
+          merged.filledCount > 0 ? `Заполнено полей: ${merged.filledCount}` : null,
+          merged.suggestions.length > 0 ? `предложений для заполненных: ${merged.suggestions.length}` : null,
+        ].filter(Boolean).join(', ') + '. Проверьте и сохраните.';
+    this.render();
+  }
+
+  private failFill(fill: Fill, error: UserFacingError): void {
+    this.fill = null;
+    const draft = this.drafts.get(fill.fanId);
+    if (draft) {
+      draft.error = error.key === 'chat_changed'
+        ? 'Заполнение остановлено: открыт другой чат.'
+        : `Не заполнено: ${formatUserFacingError(error)}`;
+    }
+    this.render();
+  }
+
+  private applySuggestion(index: number): void {
+    const data = this.current();
+    const draft = data ? this.drafts.get(data.fan.accountId) : undefined;
+    const suggestion = draft?.suggestions[index];
+    if (!draft || !suggestion || draft.saving) return;
+    draft.text = applyFieldSuggestion(draft.text, suggestion);
+    draft.suggestions = draft.suggestions.filter((_, position) => position !== index);
+    this.render();
+  }
+
+  private applyAllSuggestions(): void {
+    const data = this.current();
+    const draft = data ? this.drafts.get(data.fan.accountId) : undefined;
+    if (!draft || draft.saving) return;
+    for (const suggestion of draft.suggestions) draft.text = applyFieldSuggestion(draft.text, suggestion);
+    draft.suggestions = [];
+    this.render();
+  }
+
+  private dismissSuggestions(): void {
+    const data = this.current();
+    const draft = data ? this.drafts.get(data.fan.accountId) : undefined;
+    if (!draft) return;
+    draft.suggestions = [];
     this.render();
   }
 
@@ -722,7 +891,19 @@ export class FanNotesController {
       },
       notes: data?.notes.map((note) => ({ id: note.id, title: note.title, text: note.note })) ?? [],
       editor: draft
-        ? { noteId: draft.noteId, title: draft.title, text: draft.text, saving: draft.saving, blocked: draft.blocked, error: draft.error }
+        ? {
+            noteId: draft.noteId,
+            title: draft.title,
+            text: draft.text,
+            saving: draft.saving,
+            blocked: draft.blocked,
+            error: draft.error,
+            filling: this.fill?.fanId === fanId ? this.fill.status : null,
+            // Another chat's fill holds the tab's one operation.
+            fillBusy: this.fill !== null && this.fill.fanId !== fanId,
+            suggestions: draft.suggestions,
+            fillNotice: draft.fillNotice,
+          }
         : null,
       writing: fanId !== null && this.writing(fanId),
       confirmDeleteId: this.confirmDelete && this.confirmDelete.fanId === fanId ? this.confirmDelete.noteId : null,

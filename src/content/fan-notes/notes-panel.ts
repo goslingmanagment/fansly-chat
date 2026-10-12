@@ -6,7 +6,9 @@
 import {
   FAN_NOTES_VIEW_LABELS,
   FAN_NOTES_VIEWS,
+  parseNoteTemplate,
   type FanNotesView,
+  type NoteFieldSuggestion,
 } from '../../shared/fan-notes.js';
 import { makeKbd } from '../ui/kbd.js';
 import type { NotesPlacement } from './placement.js';
@@ -26,6 +28,12 @@ export interface NotesPanelEditor {
   /** A create failed after it may have landed: no second one until a reread. */
   blocked: boolean;
   error: string | null;
+  /** «✨ Заполнить из чата» running for this draft: its status line. */
+  filling: string | null;
+  /** A fill of another chat holds the tab's one operation. */
+  fillBusy: boolean;
+  suggestions: NoteFieldSuggestion[];
+  fillNotice: string | null;
 }
 
 export interface NotesPanelModel {
@@ -68,6 +76,11 @@ export interface NotesPanelCallbacks {
   onCustomNameInput: (value: string) => void;
   onCustomNameCommit: () => void;
   onCustomNameRevert: () => void;
+  onFill: () => void;
+  onStopFill: () => void;
+  onApplySuggestion: (index: number) => void;
+  onApplyAllSuggestions: () => void;
+  onDismissSuggestions: () => void;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -332,10 +345,23 @@ export class NotesPanel {
     text.placeholder = 'Текст заметки';
     text.value = editor.text;
     text.dataset.focusKey = `editor-text:${editor.noteId ?? 'new'}`;
-    title.disabled = editor.saving;
-    text.disabled = editor.saving;
+    // A fill writes into the fields when it lands: no typing underneath it.
+    title.disabled = editor.saving || editor.filling !== null;
+    text.disabled = editor.saving || editor.filling !== null;
 
-    const report = () => this.callbacks.onEditorInput(title.value, text.value);
+    const fill = button('chatgoose-button chatgoose-button-ai', '✨ Заполнить из чата', () => this.callbacks.onFill());
+    fill.title = 'ИИ заполнит пустые поля анкеты по всей переписке; заполненные не тронет';
+    const syncFill = () => {
+      fill.hidden = editor.filling !== null || parseNoteTemplate(text.value).length === 0;
+    };
+    syncFill();
+    fill.disabled = editor.saving || editor.fillBusy;
+    if (editor.fillBusy) fill.title = 'Сейчас заполняется анкета в другом чате';
+
+    const report = () => {
+      this.callbacks.onEditorInput(title.value, text.value);
+      syncFill();
+    };
     title.addEventListener('input', report);
     text.addEventListener('input', report);
     const keys = (event: KeyboardEvent) => {
@@ -359,13 +385,48 @@ export class NotesPanel {
       editor.saving ? 'Сохраняю…' : editor.noteId === null ? 'Создать' : 'Сохранить',
       () => this.callbacks.onSave(),
     );
-    save.disabled = editor.saving || editor.blocked;
+    save.disabled = editor.saving || editor.blocked || editor.filling !== null;
     const cancel = button('chatgoose-button chatgoose-button-secondary', 'Отмена', () => this.callbacks.onCancelEdit());
     cancel.disabled = editor.saving;
-    actions.append(save, cancel, el('span', 'chatgoose-notes-kbd-hint', '⌘/Ctrl+Enter — сохранить'));
+    actions.append(save, cancel, fill);
+    if (editor.filling !== null) {
+      const status = el('span', 'chatgoose-notes-fill-status', editor.filling);
+      const stop = button('chatgoose-text-button', 'Остановить', () => this.callbacks.onStopFill());
+      actions.append(status, stop);
+    } else {
+      actions.append(el('span', 'chatgoose-notes-kbd-hint', '⌘/Ctrl+Enter — сохранить'));
+    }
     card.append(title, text, actions);
+    if (editor.fillNotice) card.append(el('div', 'chatgoose-notes-fill-notice', editor.fillNotice));
+    if (editor.suggestions.length > 0) card.append(this.suggestionsBlock(editor));
     if (editor.error) card.append(el('div', 'chatgoose-notes-inline-error', editor.error));
     return card;
+  }
+
+  /** The fill's answers for fields the chatter had filled: «было → станет». */
+  private suggestionsBlock(editor: NotesPanelEditor): HTMLElement {
+    const block = el('div', 'chatgoose-notes-suggestions');
+    block.append(el('div', 'chatgoose-notes-suggestions-title', 'В чате нашлось другое — заполненные поля Гусь не трогал:'));
+    editor.suggestions.forEach((suggestion, index) => {
+      const row = el('div', 'chatgoose-notes-suggestion');
+      const change = el('div', 'chatgoose-notes-suggestion-change');
+      change.append(
+        el('span', 'chatgoose-notes-suggestion-label', `${suggestion.label}:`),
+        el('span', 'chatgoose-notes-suggestion-old', suggestion.current),
+        el('span', 'chatgoose-notes-suggestion-arrow', '→'),
+        el('span', 'chatgoose-notes-suggestion-new', suggestion.proposed),
+      );
+      const apply = button('chatgoose-text-button', 'Заменить', () => this.callbacks.onApplySuggestion(index));
+      apply.disabled = editor.saving;
+      row.append(change, apply);
+      block.append(row);
+    });
+    const actions = el('div', 'chatgoose-notes-suggestions-actions');
+    const all = button('chatgoose-button', 'Заменить все', () => this.callbacks.onApplyAllSuggestions());
+    all.disabled = editor.saving;
+    actions.append(all, button('chatgoose-button chatgoose-button-secondary', 'Скрыть', () => this.callbacks.onDismissSuggestions()));
+    block.append(actions);
+    return block;
   }
 
   private footer(model: NotesPanelModel): HTMLElement {

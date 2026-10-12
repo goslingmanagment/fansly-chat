@@ -36,6 +36,8 @@ const FEATURE_HINTS: Record<FeatureType, string> = {
   'chat-review': 'Оценка переписки: что сработало, что нет',
   'coach-chat': 'Спросить ИИ про этого фана своими словами',
   'voice-script': 'Текст для голосовой заметки',
+  // No bar button: the notes panel's «✨ Заполнить из чата» (E159).
+  'fan-notes-fill': 'Заполнить анкету в заметках по всей переписке',
 };
 
 /** Controls that are not `FeatureType` entries but still need explaining. */

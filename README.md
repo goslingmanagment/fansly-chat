@@ -78,7 +78,7 @@ from prose when checking what is installed or live; verify the signed update fee
   read until the chatter clicks; the answer stays until the page reloads or
   the tab changes account. One-to-one chats only
   (`src/content/fan-registration.ts`).
-- **Заметки** (2.9.0, E157) — the fan's native Fansly notes (what Fansly's own «Edit
+- **Заметки** (2.9.0, E157; AI fill 2.10.0, E159) — the fan's native Fansly notes (what Fansly's own «Edit
   User Notes» modal shows, two clicks deep in the name menu) in a ChatGoose
   panel: «Заметки» after «Регистрация» in the header row, or ⌘⇧K /
   Ctrl+Alt+K. Regular notes (contentType 12000) are listed, added, edited and
@@ -93,6 +93,12 @@ from prose when checking what is installed or live; verify the signed update fee
   Fansly's own `POST /notes`, `/notes/edit`, `/notes/delete`, one attempt on an
   explicit save or delete. Chatter-eyes-only: notes never reach a prompt
   (`src/content/fan-notes/`, `src/shared/fan-notes.ts`).
+  «✨ Заполнить из чата» (E159) in the editor of a questionnaire (a note of
+  `Label: value` lines) runs the kernel feature `fan-notes-fill` (Sonnet by
+  default) over the whole chat, read like a full Recap: only the labels
+  travel, never the chatter's values. Empty fields are filled; a filled field
+  is never overwritten — a different answer is offered as «было → станет»
+  with «Заменить». Nothing is saved until the chatter saves the note.
 - **Vault uploader** — on `/creator/vault`, a folder of media goes into the open
   album one file at a time through Fansly's own upload form, each confirmed by
   its album card, with a per-account/per-album checkpoint for resuming; an
@@ -218,6 +224,13 @@ Important references:
   architecture.
 
 ## Release
+
+Release 2.10.0 (E159, E160) adds «✨ Заполнить из чата» to the notes panel:
+the Core feature `fan-notes-fill` (Sonnet 5.5 by default, Core `a3449f77`,
+#572) fills a questionnaire from the whole chat. SDK re-vendored from the
+deployed Core (contract `a6f77fbb…`); Core keeps serving the SDK of 2.8.1 and
+2.9.0 (`030124…`). No new permission. Tabs opened before the update need a
+reload.
 
 Release 2.9.0 (E157, E158) adds the fan-notes panel: Fansly's own notes and
 custom name, read and written with Fansly's `/account?ids=` and `/notes*`

@@ -386,7 +386,8 @@ function buildConversationRefs(
   fanAccountId: string | null,
   groupId: string,
 ): { conversationRef: string; fanRef?: string } {
-  const usesCanonicalRefs = feature === 'coach-chat' || feature === 'fan-summary';
+  const usesCanonicalRefs =
+    feature === 'coach-chat' || feature === 'fan-summary' || feature === 'fan-notes-fill';
   if (usesCanonicalRefs && fanAccountId) {
     return { conversationRef: groupId, fanRef: fanAccountId };
   }
@@ -2362,7 +2363,9 @@ export class OperationCoordinator {
         )?.userId ?? null;
 
       if (
-        (payload.feature === 'coach-chat' || payload.feature === 'fan-summary') &&
+        (payload.feature === 'coach-chat' ||
+          payload.feature === 'fan-summary' ||
+          payload.feature === 'fan-notes-fill') &&
         !fanAccountId
       ) {
         // New Coach and Recap requests use canonical groupId + fanRef identity.
@@ -2407,6 +2410,8 @@ export class OperationCoordinator {
 
       if (
         isDeepFeature(payload.feature) &&
+        // A questionnaire is worth filling from the fan's first few lines (E159).
+        payload.feature !== 'fan-notes-fill' &&
         transcriptMessages.length < MIN_MESSAGES_FOR_DEEP
       ) {
         throw new ChatGooseError('not_enough_history');
@@ -2882,7 +2887,7 @@ export class OperationCoordinator {
       // …but only SENT to the kernel for coach + short recap (spec §7 rollback
       // gating — old cores never see the field from a full run).
       const transcriptCoverage: 'full-history' | 'window' | undefined =
-        payload.feature === 'coach-chat' || isShortRecap
+        payload.feature === 'coach-chat' || isShortRecap || payload.feature === 'fan-notes-fill'
           ? computedTranscriptCoverage
           : undefined;
       const refs = buildConversationRefs(
@@ -2925,6 +2930,9 @@ export class OperationCoordinator {
         ...(isShortRecap ? { summaryMode: 'short' as const } : {}),
         // Three variants for the overlay; the New Followers window asks for 1.
         ...(greetingContext !== undefined ? { variantCount: 3 as const } : {}),
+        ...(payload.feature === 'fan-notes-fill' && payload.noteFields !== undefined
+          ? { noteFields: payload.noteFields }
+          : {}),
         // The REQUESTED window (kernel records requestedCount from this): the
         // short const for a short recap, else the feature's window (deep for a
         // full recap). Distinct from clientContext.messageCount (the kept count).

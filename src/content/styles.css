@@ -3682,6 +3682,78 @@ body.chatgoose-voice-studio-lock {
   font-size: 12px;
 }
 
+/* «✨ Заполнить из чата» (E159): the one AI control of the panel. */
+.chatgoose-button.chatgoose-button-ai {
+  border-color: var(--chatgoose-clay-line);
+  background: var(--chatgoose-clay-bg);
+  color: var(--chatgoose-clay-ink);
+}
+
+.chatgoose-notes-fill-status {
+  margin-left: auto;
+  color: var(--chatgoose-ink-mid);
+  font-size: 12px;
+}
+
+.chatgoose-notes-fill-notice {
+  color: var(--chatgoose-green);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.chatgoose-notes-suggestions {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--chatgoose-amber-line);
+  border-radius: var(--chatgoose-radius-chip);
+  background: var(--chatgoose-amber-bg);
+}
+
+.chatgoose-notes-suggestions-title {
+  color: var(--chatgoose-amber);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.chatgoose-notes-suggestion {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.chatgoose-notes-suggestion-change {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.chatgoose-notes-suggestion-label {
+  margin-right: 4px;
+  font-weight: 700;
+}
+
+.chatgoose-notes-suggestion-old {
+  color: var(--chatgoose-ink-low);
+  text-decoration: line-through;
+}
+
+.chatgoose-notes-suggestion-arrow {
+  margin: 0 4px;
+  color: var(--chatgoose-ink-mid);
+}
+
+.chatgoose-notes-suggestion-new {
+  color: var(--chatgoose-ink);
+  font-weight: 600;
+}
+
+.chatgoose-notes-suggestions-actions {
+  display: flex;
+  gap: 6px;
+}
+
 /* ─── Voice (лента) ──────────────────────────────────────────────
    Family theme: terracotta accent, a serif script editor, mono numbers.
    Colours come from the tokens, so the dark twin is a pure variable swap. */

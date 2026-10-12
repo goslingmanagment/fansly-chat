@@ -120,3 +120,141 @@ export function readFanNotes(
 export function charCount(text: string): number {
   return Array.from(text).length;
 }
+
+// ─── «✨ Заполнить из чата» (E159) ─────────────────────────────────────────
+//
+// A questionnaire is any note whose lines read `Label: value`. The kernel
+// (`fan-notes-fill`) gets the labels only and answers one `Label: value` line
+// per label from the chat; the chatter's own values never travel. The panel
+// then fills the empty fields and offers the rest as «было → станет».
+
+/** The kernel's bounds for `noteFields` (Core contract). */
+export const FAN_NOTE_FIELDS_MAX = 30;
+export const FAN_NOTE_FIELD_LABEL_MAX_CHARS = 60;
+/** Fewer field lines than this is a note, not a questionnaire. */
+export const FAN_NOTE_FIELDS_MIN = 2;
+
+const FIELD_LINE = /^\s*([^:\n]+?)\s*:(.*)$/;
+
+export interface NoteTemplateField {
+  label: string;
+  value: string;
+  /** Index of the line in the note's text. */
+  line: number;
+}
+
+/** Labels compare trimmed, case-insensitively and composed (NFC): a model
+ * may echo «й» decomposed. */
+function labelKey(label: string): string {
+  return label.trim().normalize('NFC').toLocaleLowerCase('ru');
+}
+
+function isLabel(label: string): boolean {
+  const trimmed = label.trim();
+  return trimmed.length > 0 &&
+    charCount(trimmed) <= FAN_NOTE_FIELD_LABEL_MAX_CHARS &&
+    /\p{L}/u.test(trimmed) &&
+    // Core refuses these in a label: they would break the `Label: value` line
+    // or change under the prompt's escaping.
+    !/[<>&\r\u2028\u2029]/.test(trimmed) &&
+    // «https://…» is a link in a free note, not a field.
+    !/^https?$/i.test(trimmed);
+}
+
+/** The questionnaire fields of a note, first occurrence of each label, in
+ * order; empty when the note is not a questionnaire. */
+export function parseNoteTemplate(text: string): NoteTemplateField[] {
+  const fields: NoteTemplateField[] = [];
+  const seen = new Set<string>();
+  text.split('\n').forEach((raw, line) => {
+    const match = FIELD_LINE.exec(raw);
+    if (!match || !isLabel(match[1]!)) return;
+    const label = match[1]!.trim();
+    const key = labelKey(label);
+    if (seen.has(key)) return;
+    seen.add(key);
+    fields.push({ label, value: match[2]!.trim(), line });
+  });
+  return fields.length >= FAN_NOTE_FIELDS_MIN && fields.length <= FAN_NOTE_FIELDS_MAX ? fields : [];
+}
+
+/** What crosses into the background: labels as the kernel contract takes them. */
+export function isValidNoteFields(value: unknown): value is string[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > FAN_NOTE_FIELDS_MAX) return false;
+  const seen = new Set<string>();
+  for (const label of value) {
+    if (typeof label !== 'string' || label !== label.trim() || label.includes(':') || label.includes('\n') || !isLabel(label)) {
+      return false;
+    }
+    const key = labelKey(label);
+    if (seen.has(key)) return false;
+    seen.add(key);
+  }
+  return true;
+}
+
+/** The kernel's answer as label → value, for the asked labels only. Lines
+ * about other labels, preambles and blank lines are ignored; an empty value
+ * means the chat had nothing for that field. */
+export function parseFilledFields(rawText: string, labels: readonly string[]): Map<string, string> {
+  const wanted = new Map(labels.map((label) => [labelKey(label), label] as const));
+  const filled = new Map<string, string>();
+  for (const raw of rawText.split('\n')) {
+    const match = FIELD_LINE.exec(raw);
+    if (!match) continue;
+    const label = wanted.get(labelKey(match[1]!.replace(/^[-*•\s]+/, '')));
+    if (!label || filled.has(label)) continue;
+    filled.set(label, match[2]!.trim());
+  }
+  return filled;
+}
+
+export interface NoteFieldSuggestion {
+  label: string;
+  current: string;
+  proposed: string;
+}
+
+function sameValue(a: string, b: string): boolean {
+  return a.trim().replace(/\s+/g, ' ').toLocaleLowerCase('ru') ===
+    b.trim().replace(/\s+/g, ' ').toLocaleLowerCase('ru');
+}
+
+/** Write a value into its field line, keeping the chatter's label as typed. */
+function withValue(line: string, value: string): string {
+  const colon = line.indexOf(':');
+  return `${line.slice(0, colon + 1)} ${value}`;
+}
+
+/** Fill the empty fields of `text` from the kernel's answer; a field the
+ * chatter already filled is never touched — a different answer for it comes
+ * back as a suggestion. */
+export function mergeFilledFields(
+  text: string,
+  filled: ReadonlyMap<string, string>,
+): { text: string; filledCount: number; suggestions: NoteFieldSuggestion[] } {
+  const lines = text.split('\n');
+  const suggestions: NoteFieldSuggestion[] = [];
+  let filledCount = 0;
+  for (const field of parseNoteTemplate(text)) {
+    const proposed = filled.get(field.label)?.trim() ?? '';
+    if (!proposed) continue;
+    if (!field.value) {
+      lines[field.line] = withValue(lines[field.line]!, proposed);
+      filledCount += 1;
+    } else if (!sameValue(field.value, proposed)) {
+      suggestions.push({ label: field.label, current: field.value, proposed });
+    }
+  }
+  return { text: lines.join('\n'), filledCount, suggestions };
+}
+
+/** Accept one suggestion: the field takes the proposed value. A field the
+ * chatter has since edited away is left alone. */
+export function applyFieldSuggestion(text: string, suggestion: NoteFieldSuggestion): string {
+  const field = parseNoteTemplate(text).find((entry) => labelKey(entry.label) === labelKey(suggestion.label));
+  if (!field || !sameValue(field.value, suggestion.current)) return text;
+  const lines = text.split('\n');
+  lines[field.line] = withValue(lines[field.line]!, suggestion.proposed);
+  return lines.join('\n');
+}

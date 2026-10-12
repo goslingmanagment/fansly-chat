@@ -3426,6 +3426,7 @@ export declare const aiUsageEventInputSchema: z.ZodObject<{
         "hi-greeting": "hi-greeting";
         "coach-chat": "coach-chat";
         "voice-script": "voice-script";
+        "fan-notes-fill": "fan-notes-fill";
     }>;
     model: z.ZodString;
     inputTokens: z.ZodNumber;
@@ -3452,6 +3453,7 @@ export declare const aiUsageBatchBodySchema: z.ZodObject<{
             "hi-greeting": "hi-greeting";
             "coach-chat": "coach-chat";
             "voice-script": "voice-script";
+            "fan-notes-fill": "fan-notes-fill";
         }>;
         model: z.ZodString;
         inputTokens: z.ZodNumber;
@@ -3585,6 +3587,7 @@ export declare const aiGatewayStreamBodySchema: z.ZodObject<{
         "hi-greeting": "hi-greeting";
         "coach-chat": "coach-chat";
         "voice-script": "voice-script";
+        "fan-notes-fill": "fan-notes-fill";
     }>;
     pageLabel: z.ZodString;
     platform: z.ZodEnum<{
@@ -3664,6 +3667,7 @@ export declare const aiGatewayStreamFrameSchema: z.ZodDiscriminatedUnion<[z.ZodO
         "hi-greeting": "hi-greeting";
         "coach-chat": "coach-chat";
         "voice-script": "voice-script";
+        "fan-notes-fill": "fan-notes-fill";
     }>;
     pageLabel: z.ZodString;
     model: z.ZodString;
@@ -3768,6 +3772,7 @@ export declare const aiFeatureStreamFrameSchema: z.ZodUnion<readonly [z.ZodDiscr
         "hi-greeting": "hi-greeting";
         "coach-chat": "coach-chat";
         "voice-script": "voice-script";
+        "fan-notes-fill": "fan-notes-fill";
     }>;
     pageLabel: z.ZodString;
     model: z.ZodString;
@@ -3997,6 +4002,10 @@ export declare const AI_FEATURE_STREAM_BODY_LIMIT_BYTES: number;
 export declare const AI_LIVE_TEXT_MAX_ITEMS = 60;
 /** Per item, in UTF-16 code units. */
 export declare const AI_LIVE_TEXT_MAX_CHARS = 5000;
+export declare const AI_NOTE_FIELDS_MAX = 30;
+/** Per label, after trimming, in UTF-16 code units. */
+export declare const AI_NOTE_FIELD_LABEL_MAX_CHARS = 60;
+export declare const aiNoteFieldsSchema: z.ZodArray<z.ZodString>;
 export declare const aiLiveTextContextSchema: z.ZodObject<{
     capturedAt: z.ZodString;
     items: z.ZodArray<z.ZodObject<{
@@ -4051,6 +4060,7 @@ export declare const aiFeatureStreamBodySchema: z.ZodObject<{
     summaryMode: z.ZodOptional<z.ZodLiteral<"short">>;
     variantCount: z.ZodOptional<z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<3>]>>;
     greetingMode: z.ZodOptional<z.ZodLiteral<"new-follower">>;
+    noteFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
     knownFanMessageIds: z.ZodOptional<z.ZodArray<z.ZodString>>;
     liveTextContext: z.ZodOptional<z.ZodObject<{
         capturedAt: z.ZodString;
@@ -4207,6 +4217,7 @@ export declare const aiUsageTopFeatureSchema: z.ZodObject<{
         "hi-greeting": "hi-greeting";
         "coach-chat": "coach-chat";
         "voice-script": "voice-script";
+        "fan-notes-fill": "fan-notes-fill";
     }>;
     requestCount: z.ZodNumber;
     sharePct: z.ZodNumber;
@@ -4223,6 +4234,7 @@ export declare const aiUsageFeatureBreakdownSchema: z.ZodObject<{
         "hi-greeting": "hi-greeting";
         "coach-chat": "coach-chat";
         "voice-script": "voice-script";
+        "fan-notes-fill": "fan-notes-fill";
     }>;
     requestCount: z.ZodNumber;
     sharePct: z.ZodNumber;
@@ -4300,6 +4312,7 @@ export declare const adminChatterUsageRowSchema: z.ZodObject<{
             "hi-greeting": "hi-greeting";
             "coach-chat": "coach-chat";
             "voice-script": "voice-script";
+            "fan-notes-fill": "fan-notes-fill";
         }>;
         requestCount: z.ZodNumber;
         sharePct: z.ZodNumber;
@@ -4316,6 +4329,7 @@ export declare const adminChatterUsageRowSchema: z.ZodObject<{
             "hi-greeting": "hi-greeting";
             "coach-chat": "coach-chat";
             "voice-script": "voice-script";
+            "fan-notes-fill": "fan-notes-fill";
         }>;
         requestCount: z.ZodNumber;
         sharePct: z.ZodNumber;
@@ -4382,6 +4396,7 @@ export declare const adminChatterUsageResponseSchema: z.ZodObject<{
                 "hi-greeting": "hi-greeting";
                 "coach-chat": "coach-chat";
                 "voice-script": "voice-script";
+                "fan-notes-fill": "fan-notes-fill";
             }>;
             requestCount: z.ZodNumber;
             sharePct: z.ZodNumber;
@@ -4398,6 +4413,7 @@ export declare const adminChatterUsageResponseSchema: z.ZodObject<{
                 "hi-greeting": "hi-greeting";
                 "coach-chat": "coach-chat";
                 "voice-script": "voice-script";
+                "fan-notes-fill": "fan-notes-fill";
             }>;
             requestCount: z.ZodNumber;
             sharePct: z.ZodNumber;
@@ -4470,6 +4486,7 @@ export declare const authMyUsageResponseSchema: z.ZodObject<{
                 "hi-greeting": "hi-greeting";
                 "coach-chat": "coach-chat";
                 "voice-script": "voice-script";
+                "fan-notes-fill": "fan-notes-fill";
             }>;
             requestCount: z.ZodNumber;
             sharePct: z.ZodNumber;
@@ -4486,6 +4503,7 @@ export declare const authMyUsageResponseSchema: z.ZodObject<{
                 "hi-greeting": "hi-greeting";
                 "coach-chat": "coach-chat";
                 "voice-script": "voice-script";
+                "fan-notes-fill": "fan-notes-fill";
             }>;
             requestCount: z.ZodNumber;
             sharePct: z.ZodNumber;
@@ -12968,6 +12986,7 @@ declare const baseRouteSchemas: {
                     "hi-greeting": "hi-greeting";
                     "coach-chat": "coach-chat";
                     "voice-script": "voice-script";
+                    "fan-notes-fill": "fan-notes-fill";
                 }>;
                 model: z.ZodString;
                 inputTokens: z.ZodNumber;
@@ -13074,6 +13093,7 @@ declare const baseRouteSchemas: {
                 "hi-greeting": "hi-greeting";
                 "coach-chat": "coach-chat";
                 "voice-script": "voice-script";
+                "fan-notes-fill": "fan-notes-fill";
             }>;
             pageLabel: z.ZodString;
             platform: z.ZodEnum<{
@@ -23850,6 +23870,7 @@ declare const baseRouteSchemas: {
             summaryMode: z.ZodOptional<z.ZodLiteral<"short">>;
             variantCount: z.ZodOptional<z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<3>]>>;
             greetingMode: z.ZodOptional<z.ZodLiteral<"new-follower">>;
+            noteFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
             knownFanMessageIds: z.ZodOptional<z.ZodArray<z.ZodString>>;
             liveTextContext: z.ZodOptional<z.ZodObject<{
                 capturedAt: z.ZodString;
@@ -24125,6 +24146,7 @@ declare const baseRouteSchemas: {
                             "hi-greeting": "hi-greeting";
                             "coach-chat": "coach-chat";
                             "voice-script": "voice-script";
+                            "fan-notes-fill": "fan-notes-fill";
                         }>;
                         requestCount: z.ZodNumber;
                         sharePct: z.ZodNumber;
@@ -24141,6 +24163,7 @@ declare const baseRouteSchemas: {
                             "hi-greeting": "hi-greeting";
                             "coach-chat": "coach-chat";
                             "voice-script": "voice-script";
+                            "fan-notes-fill": "fan-notes-fill";
                         }>;
                         requestCount: z.ZodNumber;
                         sharePct: z.ZodNumber;
@@ -25483,6 +25506,7 @@ declare const baseRouteSchemas: {
                             "hi-greeting": "hi-greeting";
                             "coach-chat": "coach-chat";
                             "voice-script": "voice-script";
+                            "fan-notes-fill": "fan-notes-fill";
                         }>;
                         requestCount: z.ZodNumber;
                         sharePct: z.ZodNumber;
@@ -25499,6 +25523,7 @@ declare const baseRouteSchemas: {
                             "hi-greeting": "hi-greeting";
                             "coach-chat": "coach-chat";
                             "voice-script": "voice-script";
+                            "fan-notes-fill": "fan-notes-fill";
                         }>;
                         requestCount: z.ZodNumber;
                         sharePct: z.ZodNumber;

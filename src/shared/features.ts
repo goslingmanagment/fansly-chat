@@ -174,6 +174,25 @@ export const FEATURE_POLICIES = {
     usesPingSegment: false,
     includesEarnings: false,
   },
+  'fan-notes-fill': {
+    // E159: fills the notes questionnaire from the whole chat, like a full
+    // Recap reads it (deep window, spending and subscription for «Медиа» and
+    // «Характеристика»). The notes panel owns its surface and merges the raw
+    // `Label: value` lines itself.
+    messageCountBucket: 'deep',
+    timeoutBucket: 'deep',
+    modelFeature: 'fan-notes-fill',
+    surfaceKind: 'panel-only',
+    promptMode: 'analysis',
+    // The raw text is the result; inert for the generic builder, never insertable.
+    resultKind: 'summary',
+    supportsReplyMode: false,
+    supportsReplyTone: false,
+    requiresDraft: false,
+    usesPingSegment: false,
+    includesEarnings: true,
+    includesFanBio: true,
+  },
 } as const satisfies Record<FeatureType, FeaturePolicy>;
 
 export function getFeaturePolicy(feature: FeatureType): FeaturePolicy {

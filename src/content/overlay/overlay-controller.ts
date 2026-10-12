@@ -264,6 +264,8 @@ function titleForFeature(feature: FeatureType): string {
       return 'Ping';
     case 'voice-script':
       throw new Error('voice-script uses the dedicated voice panel');
+    case 'fan-notes-fill':
+      throw new Error('fan-notes-fill uses the notes panel');
     case 'coach-chat':
       return 'Coach';
   }
