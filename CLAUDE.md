@@ -11,6 +11,20 @@ and current architecture: `README.md` (kept current). Sibling for OnlyFans:
 
 ## Where the truth is
 
+- **Fansly browser work uses Chrome DevTools MCP** (`chrome-devtools`,
+  `mcp__chrome-devtools__*`) by default, automatically. Do not choose Claude in
+  Chrome for Fansly or wait for a reminder. Start with `list_pages` and inspect
+  the intended already-open tab. Read-only DOM, styles, console and network
+  inspection is allowed; avoid reloads and conversation switches. Opening a
+  chat can mark it read; typing can send typing events. Sending, uploads and
+  account changes must be authorized by the owner's task. A tool denial is
+  not permission to try another transport.
+- [docs/fansly-development.md](docs/fansly-development.md) — start here for
+  Fansly integration: shared bundle/research guide, connection recovery,
+  chat lifecycle and this client's code map. Read it before changing the
+  integration. When browser access is blocked, use the local evidence and
+  report the exact blocker. Chrome page inspection does not validate the
+  Firefox MV3 extension; keep its checks and live verification separate.
 - `docs/decisions.md` — append-only decision log (E1…). The quick-ref table
   at the top is incomplete; grep the entry number in the body.
 - `README.md` — current architecture, setup, development, release.

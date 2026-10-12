@@ -151,6 +151,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E159 | 2026-10-12 | «✨ Заполнить из чата» in the notes editor: the kernel feature `fan-notes-fill` (Core, Sonnet 5.5 by default) fills a questionnaire (`Label: value` lines) from the whole chat, read like a full Recap (deep window, spending, subscription), no 30-message minimum. Only the labels travel (`noteFields`); empty fields are filled, a filled field is never overwritten — a different answer is offered as «было → станет». Nothing is saved until the chatter saves. Rides the tab's one operation; routed to the panel, not the overlay |
 | E160 | 2026-10-12 | Release 2.10.0 = E159 (AI fill of the notes questionnaire). Core `fan-notes-fill` deployed first (Core `a3449f77`, #572, contract `a6f77fbb…`; Core keeps serving the SDK of 2.8.1/2.9.0, `030124…`), then the SDK re-vendored from the deployed commit. Version by the 2.9.0 rule (a feature), the owner ordered the chain |
 | E161 | 2026-10-12 | 2.10.0 was signed by AMO but never served: the session running `deploy.sh` ended while it waited for the approval, before the upload, the feed and the tag. AMO versions are single-use and the script has no resume path, so the same build ships as 2.10.1 through the ordinary `deploy.sh`; the changelog names 2.10.1 only. No code change |
+| E162 | 2026-10-13 | Chrome DevTools MCP по умолчанию для Fansly; карта исходников и общий справочник с chat-extension (X38), бандл и исследования; правило проверено в новой сессии Claude |
 
 ## Entries
 
@@ -5774,3 +5775,13 @@ as 2.10.1 through the ordinary path; the CHANGELOG section, the changelog page
 and the announce name 2.10.1, and 2.10.0 is left unused in AMO. Lesson for the
 procedure: run `deploy.sh` where it outlives the session (a detached shell),
 since the AMO wait is the longest step.
+
+**E162 (2026-10-13).** Владелец попросил, чтобы Claude сам использовал Chrome DevTools MCP для
+Fansly вместо Claude in Chrome и знал, где бандл/исследования обоих расширений. Общее решение —
+[chat-extension X38](https://github.com/goslingmanagment/chat-extension/blob/main/docs/decisions.md#x38-fansly-chrome-devtools-mcp-и-общий-справочник-разработки-2026-10-13).
+`CLAUDE.md` закрепляет выбор `chrome-devtools`, чтение уже открытой вкладки и границу между
+осмотром и действиями с живой сессией. [docs/fansly-development.md](fansly-development.md) даёт
+карту исходников этого клиента и ссылку на общий справочник в `chat-extension` (бандл, чат,
+API/WS, FBuddy, хаб и материалы `~/code/8-docs`). Новая сессия Claude автоматически прочитала
+инструкцию и выбрала DevTools; доступ к Fansly ранее проверен через этот MCP. Проверка сайта
+в Chrome не заменяет проверку Firefox MV3. Код расширения, релиз и настройки аккаунтов не менялись.
