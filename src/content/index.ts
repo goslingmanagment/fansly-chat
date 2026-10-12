@@ -30,6 +30,7 @@ import { VoicePanel } from './voice/voice-panel.js';
 import { VoiceStudio } from './voice/voice-studio.js';
 import { CheatsheetController } from './cheatsheet-controller.js';
 import { FanRegistrationControl } from './fan-registration.js';
+import { FanNotesController } from './fan-notes/notes-controller.js';
 import { BoardLauncher } from './spenders/board-launcher.js';
 import { SpendersBoardController } from './spenders/spenders-board-controller.js';
 import { parseGroupIdFromPath, startRouteWatcher } from './route-watcher.js';
@@ -45,6 +46,7 @@ import { isEditableElement } from './ui/view-helpers.js';
 import {
   detectLabelPlatform,
   HOTKEY_FEATURE,
+  hotkeyComboLabel,
   type HotkeyAction,
 } from '../shared/hotkeys.js';
 import { isGlobalHotkeyAction, resolveHotkeyKeydown } from './hotkey-input.js';
@@ -129,7 +131,9 @@ function hotkeyNeedsInitialTabState(action: HotkeyAction): boolean {
   return HOTKEY_FEATURE[action] !== undefined ||
     action === 'coach' ||
     action === 'fan-summary' ||
-    action === 'spenders-board';
+    action === 'spenders-board' ||
+    // The panel opens in the chatter's saved view, which the tab state carries.
+    action === 'fan-notes';
 }
 
 function resultPartTexts(
@@ -725,6 +729,23 @@ export class ChatGooseContentApp {
     request: (groupId) => sendRuntimeRequest('getFanRegistration', { groupId }),
     onError: (error) => this.showUserErrorToast(error, { dedupeKey: 'fan-registration' }),
   });
+  private readonly fanNotes = new FanNotesController({
+    load: (groupId) => sendRuntimeRequest('getFanNotes', { groupId }),
+    saveNote: (request) => sendRuntimeRequest('saveFanNote', request),
+    deleteNote: (request) => sendRuntimeRequest('deleteFanNote', request),
+    saveCustomName: (request) => sendRuntimeRequest('saveFanCustomName', request),
+    saveView: (view) => sendRuntimeRequest('setFanNotesView', { view }),
+    onError: (error) => this.showUserErrorToast(error, { dedupeKey: 'fan-notes' }),
+    isCovered: () =>
+      this.overlay.isVisible() ||
+      (this.cheatsheetController?.isOpen() ?? false) ||
+      (this.boardController?.isOpen() ?? false) ||
+      (this.voiceStudio?.isOpen() ?? false) ||
+      // «Новые» is a modal <dialog> in a shadow root: focus sits on its host.
+      document.activeElement?.closest('#chatgoose-followers') != null,
+    headerName: () => getActiveConversationDisplayName(),
+    hotkeyLabel: hotkeyComboLabel('fan-notes', detectLabelPlatform()),
+  });
 
   constructor() {
     this.root.id = 'chatgoose-root';
@@ -941,6 +962,10 @@ export class ChatGooseContentApp {
       case 'cheatsheet':
         this.cheatsheet.toggle();
         return true;
+      case 'fan-notes':
+        // Outside a one-to-one chat there are no notes to show; the key then
+        // stays the browser's.
+        return this.fanNotes.toggle();
       case 'coach':
         // App action (spec §3): open/focus Coach. openCoach itself toasts when
         // the fan/group is unresolvable — the arm is ALWAYS handled so ⌘⇧C never
@@ -2142,6 +2167,7 @@ export class ChatGooseContentApp {
     this.completedCompareCache.setActiveGroup(groupId);
     this.mountController.setActiveRoute(groupId);
     this.fanRegistration.sync();
+    this.fanNotes.sync();
 
     if (changed) {
       this.pendingCompareFingerprint = null;
@@ -3367,6 +3393,7 @@ export class ChatGooseContentApp {
         }
         if (accountChanged) {
           this.fanRegistration.reset();
+          this.fanNotes.reset();
         }
         if (personaChanged || accountChanged) {
           // Voice custody is bound to the creator account as well as the group.
@@ -3404,6 +3431,7 @@ export class ChatGooseContentApp {
           this.closeCoach();
         }
         this.tabState = message.state;
+        this.fanNotes.applyView(message.state.fanNotesView);
         this.resolveInitialTabState?.();
         this.resolveInitialTabState = null;
         // Coach UI settings snapshot (spec §7): a settings change may alter

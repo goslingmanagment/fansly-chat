@@ -25,7 +25,8 @@ export function sharedHotkeyEngine(): HotkeyEngine {
   if (existing) {
     return existing;
   }
-  const engine = createHotkeyEngine({ platform: detectLabelPlatform(), client: 'extension' });
+  // 'fansly': every row of the extensions plus the Fansly-only ones (Notes).
+  const engine = createHotkeyEngine({ platform: detectLabelPlatform(), client: 'fansly' });
   host[ENGINE_SLOT] = engine;
   // Capture on window: the page's own handlers cannot hide a keyup from us.
   window.addEventListener('keyup', (event) => engine.keyup(event), true);

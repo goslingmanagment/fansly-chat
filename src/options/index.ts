@@ -24,6 +24,7 @@ import {
   type StatusPillKind,
 } from './dom.js';
 import { COPY } from './copy.js';
+import { normalizeFanNotesView } from '../shared/fan-notes.js';
 import { renderHotkeysPane } from './hotkeys-pane.js';
 import { createSignInGate } from './sign-in-gate.js';
 import { accountIdEquivalents } from '../shared/message-sound-decision.js';
@@ -679,6 +680,10 @@ async function render(): Promise<void> {
     return;
   }
   const state = await readStorageState();
+  /** The fan-notes view as storage last reported it (E157): chosen in the
+   * Fansly tab, so a save of this page must carry the latest, not its own
+   * snapshot's. */
+  let latestFanNotesView = state.settings.fanNotesView;
   // Start live session discovery after sign-in, but do not put it on the
   // critical path for the local settings UI. getSessionsSnapshot may spend up
   // to five seconds resolving a Fansly identity. It also owns identity
@@ -3923,6 +3928,8 @@ async function render(): Promise<void> {
         return;
       }
       state.settings = mergedSettings;
+      // A tab may have changed the view while this write was in flight.
+      state.settings.fanNotesView = latestFanNotesView;
 
       if (disposed) {
         return;
@@ -4864,6 +4871,16 @@ async function render(): Promise<void> {
       changes: Record<string, browser.storage.StorageChange>,
       areaName: string,
     ): void => {
+      // The fan-notes view is chosen in the Fansly tab, not here (E157). This
+      // page writes its whole snapshot back on every save, so it adopts the
+      // tab's choice at once — from the change itself, before any save can
+      // run — or its next save would revert every tab's view.
+      if (areaName === 'local' && changes.settings?.newValue && typeof changes.settings.newValue === 'object') {
+        latestFanNotesView = normalizeFanNotesView(
+          (changes.settings.newValue as { fanNotesView?: unknown }).fanNotesView,
+        );
+        state.settings.fanNotesView = latestFanNotesView;
+      }
       if (
         areaName !== 'local' ||
         !(

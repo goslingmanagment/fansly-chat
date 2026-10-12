@@ -9,7 +9,8 @@
 // - everything that writes into the reply field, plus Cancel — ⌘+key on macOS,
 //   Ctrl+key on Windows (E Reply, I Fix, G Hi, P Ping, . Cancel);
 // - analysis, panels and toggles — ⌘⇧+key on macOS, Ctrl+Alt+key on Windows
-//   (H Help, S Recap, O tone, B Review, L Split, M Spenders, C Coach).
+//   (H Help, S Recap, O tone, B Review, L Split, M Spenders, C Coach,
+//   K fan notes).
 //
 // Keys are matched by physical position (`event.code`), so the Russian layout
 // works without switching. Facts behind the choices, from Firefox's
@@ -24,11 +25,11 @@
 // builds every label; content/hotkey-input.ts owns the engine instance.
 
 import {
-  HOTKEYS,
   detectHotkeyPlatform,
   hotkeyAriaShortcut,
   hotkeyChip,
   hotkeyLabel,
+  hotkeysForClient,
   type HotkeyAction as SchemeAction,
   type HotkeyPlatform,
 } from '@chatgoose/hotkeys';
@@ -50,6 +51,7 @@ export type HotkeyAction =
   | 'toggle-split'
   | 'cancel'
   | 'spenders-board'
+  | 'fan-notes'
   | 'cheatsheet';
 
 /** Every action of the family table, as the extension names it. */
@@ -70,6 +72,7 @@ export const EXTENSION_ACTION: Record<SchemeAction, SchemeHotkeyAction> = {
   split: 'toggle-split',
   spenders: 'spenders-board',
   coach: 'coach',
+  notes: 'fan-notes',
 };
 
 const SCHEME_ACTION = Object.fromEntries(
@@ -112,6 +115,7 @@ export const HOTKEY_ACTION_NAMES: Record<HotkeyAction, string> = {
   'toggle-split': 'Split — Reply и Fix серией из 2–3 сообщений',
   'spenders-board': 'Доска Spenders',
   coach: 'Coach — спросить AI про фана',
+  'fan-notes': 'Заметки о фане (заметки Fansly)',
   cheatsheet: 'Шпаргалка хоткеев',
 };
 
@@ -176,13 +180,12 @@ export interface HotkeyEntry {
 }
 
 /** Every reference row for this platform, in display order within each group:
- * the family table (extension actions only), the `?` cheatsheet, the keys the
+ * the family table (the rows the Fansly extension runs), the `?` cheatsheet, the keys the
  * extension handles outside the table, and what works differently than in the
  * desktop app. Pure — both surfaces render exactly this list. */
 export function buildHotkeyEntries(platform: LabelPlatform): HotkeyEntry[] {
   const entries: HotkeyEntry[] = [];
-  for (const def of HOTKEYS) {
-    if (!def.clients.includes('extension')) continue;
+  for (const def of hotkeysForClient('fansly')) {
     const action = EXTENSION_ACTION[def.action];
     entries.push({
       id: action,

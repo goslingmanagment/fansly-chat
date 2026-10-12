@@ -213,7 +213,7 @@ describe('migrateState', () => {
 
   it('v18 (E145): adds the incoming-message sound on by default and preserves explicit choices', () => {
     const legacy = migrateState({ schemaVersion: 17, settings: { uiTheme: 'dark' } });
-    expect(legacy.schemaVersion).toBe(20);
+    expect(legacy.schemaVersion).toBe(21);
     expect(legacy.settings).toMatchObject({
       uiTheme: 'dark',
       messageSoundEnabled: true,
@@ -241,7 +241,7 @@ describe('migrateState', () => {
 
   it('v19 (E146): adds the follower sound on, with its own tone, and preserves explicit choices', () => {
     const v18 = migrateState({ schemaVersion: 18, settings: { messageSoundTone: 'soft' } });
-    expect(v18.schemaVersion).toBe(20);
+    expect(v18.schemaVersion).toBe(21);
     expect(v18.settings).toMatchObject({
       messageSoundEnabled: true,
       messageSoundTone: 'soft',
@@ -274,13 +274,26 @@ describe('migrateState', () => {
 
   it('v20 (E149): adds «Fansly через вкладку» off for every install and keeps a choice', () => {
     const v19 = migrateState({ schemaVersion: 19, settings: { uiTheme: 'dark', followSoundTone: 'bell' } });
-    expect(v19.schemaVersion).toBe(20);
+    expect(v19.schemaVersion).toBe(21);
     expect(v19.settings).toMatchObject({ uiTheme: 'dark', followSoundTone: 'bell', fanslyViaTab: false });
     expect(migrateState({ schemaVersion: 17, settings: {} }).settings.fanslyViaTab).toBe(false);
     expect(migrateState({ schemaVersion: 20, settings: { fanslyViaTab: true } }).settings.fanslyViaTab).toBe(true);
     // The route turns only on an explicit `true`: junk never moves requests.
     for (const junk of ['true', 1, {}, null]) {
       expect(migrateState({ schemaVersion: 20, settings: { fanslyViaTab: junk } }).settings.fanslyViaTab).toBe(false);
+    }
+  });
+
+  it('v21 (E157): adds the fan-notes view on demand for every install and keeps a choice', () => {
+    const v20 = migrateState({ schemaVersion: 20, settings: { uiTheme: 'dark', fanslyViaTab: true } });
+    expect(v20.schemaVersion).toBe(21);
+    expect(v20.settings).toMatchObject({ uiTheme: 'dark', fanslyViaTab: true, fanNotesView: 'drawer' });
+    expect(migrateState({ schemaVersion: 17, settings: {} }).settings.fanNotesView).toBe('drawer');
+    for (const view of ['docked', 'drawer', 'center'] as const) {
+      expect(migrateState({ schemaVersion: 21, settings: { fanNotesView: view } }).settings.fanNotesView).toBe(view);
+    }
+    for (const junk of ['always', 1, {}, null]) {
+      expect(migrateState({ schemaVersion: 21, settings: { fanNotesView: junk } }).settings.fanNotesView).toBe('drawer');
     }
   });
 

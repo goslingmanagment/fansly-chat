@@ -155,6 +155,30 @@ describe('protocol boundary guards', () => {
       getRuntimeRequestType({ type: 'getFanRegistration', groupId: '../account/me' }),
     ).toBeNull();
 
+    // E157: fan notes. Ids reach Fansly URLs and bodies; texts are bounded.
+    const creatorId = '700000000000000001';
+    const fanAccountId = '905593157180223488';
+    const stored = { id: '900000000000000001', contentType: 12000, contentId: fanAccountId, title: 'Анкета', note: 'Имя: ' };
+    expect(getRuntimeRequestType({ type: 'getFanNotes', groupId: '818181818181818181' })).toBe('getFanNotes');
+    expect(getRuntimeRequestType({ type: 'getFanNotes', groupId: '../notes' })).toBeNull();
+    expect(getRuntimeRequestType({ type: 'saveFanNote', creatorId, fanAccountId, noteId: null, title: '', note: 'x' })).toBe('saveFanNote');
+    expect(getRuntimeRequestType({ type: 'saveFanNote', creatorId, fanAccountId, noteId: stored.id, title: 'T', note: 'x' })).toBe('saveFanNote');
+    expect(getRuntimeRequestType({ type: 'saveFanNote', creatorId, fanAccountId, noteId: 'abc', title: '', note: 'x' })).toBeNull();
+    expect(getRuntimeRequestType({ type: 'saveFanNote', creatorId: 'creator', fanAccountId, noteId: null, title: '', note: 'x' })).toBeNull();
+    expect(getRuntimeRequestType({ type: 'saveFanNote', creatorId, fanAccountId, noteId: null, title: '', note: 'x'.repeat(50_001) })).toBeNull();
+    expect(getRuntimeRequestType({ type: 'saveFanNote', creatorId, fanAccountId, noteId: null, title: 't'.repeat(1_001), note: 'x' })).toBeNull();
+    // Code points, not UTF-16 units: 50 000 emoji fit.
+    expect(getRuntimeRequestType({ type: 'saveFanNote', creatorId, fanAccountId, noteId: null, title: '', note: '💰'.repeat(50_000) })).toBe('saveFanNote');
+    expect(getRuntimeRequestType({ type: 'deleteFanNote', creatorId, fanAccountId, note: stored })).toBe('deleteFanNote');
+    expect(getRuntimeRequestType({ type: 'deleteFanNote', creatorId, fanAccountId, note: { ...stored, id: undefined } })).toBeNull();
+    expect(getRuntimeRequestType({ type: 'saveFanCustomName', creatorId, fanAccountId, current: null, name: 'Richard' })).toBe('saveFanCustomName');
+    expect(getRuntimeRequestType({ type: 'saveFanCustomName', creatorId, fanAccountId, current: { ...stored, contentType: 12002 }, name: '' })).toBe('saveFanCustomName');
+    expect(getRuntimeRequestType({ type: 'saveFanCustomName', creatorId, fanAccountId, current: null, name: 'n'.repeat(1_001) })).toBeNull();
+    for (const view of ['docked', 'drawer', 'center']) {
+      expect(getRuntimeRequestType({ type: 'setFanNotesView', view })).toBe('setFanNotesView');
+    }
+    expect(getRuntimeRequestType({ type: 'setFanNotesView', view: 'always' })).toBeNull();
+
     expect(getRuntimeRequestType({ type: 'getPopupStatus', tabId: '12' })).toBeNull();
     expect(getRuntimeRequestType({ type: 'unknown' })).toBeNull();
     expect(getRuntimeRequestType(null)).toBeNull();

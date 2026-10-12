@@ -104,7 +104,8 @@
 #chatgoose-toast-root,
 #chatgoose-board-root,
 #chatgoose-cheatsheet-root,
-#chatgoose-launcher-root {
+#chatgoose-launcher-root,
+#chatgoose-notes-root {
   color-scheme: light;
 }
 
@@ -113,7 +114,8 @@
 :root.chatgoose-theme-dark #chatgoose-toast-root,
 :root.chatgoose-theme-dark #chatgoose-board-root,
 :root.chatgoose-theme-dark #chatgoose-cheatsheet-root,
-:root.chatgoose-theme-dark #chatgoose-launcher-root {
+:root.chatgoose-theme-dark #chatgoose-launcher-root,
+:root.chatgoose-theme-dark #chatgoose-notes-root {
   color-scheme: dark;
 }
 
@@ -897,7 +899,9 @@
  *   2147483645  #chatgoose-overlay-root       ┐ same band: their relative
  *   2147483645  #chatgoose-board-root         ├ order is DOM order, exactly
  *   2147483645  #chatgoose-voice-studio-root  ┘ as it was before the re-band
- *   2147483644  #chatgoose-launcher-root      floating $ launcher
+ *   2147483644  #chatgoose-notes-root         fan notes (E157): under every
+ *                                             overlay, so Coach dims it
+ *   2147483643  #chatgoose-launcher-root      floating $ launcher
  *
  * Toasts must be STRICTLY topmost: the overlay backdrop has
  * `pointer-events: auto`, so a toast sharing or losing the band is both
@@ -3187,7 +3191,7 @@ body.chatgoose-voice-studio-lock {
   position: fixed;
   left: 18px;
   bottom: 18px;
-  z-index: 2147483644;
+  z-index: 2147483643;
 }
 
 .chatgoose-launcher {
@@ -3267,6 +3271,415 @@ body.chatgoose-voice-studio-lock {
   stroke-width: 1.2;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+/* ─── Fan notes (E157) ───────────────────────────────────────────────────────
+   The trigger sits in Fansly's own header row beside «Регистрация» and wears
+   that row's size and colours; the panel is ours. Docked beside the chat it
+   takes the quieter card shadow, over the chat the pop shadow. */
+
+.chatgoose-notes-trigger {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--dark-blue-1, #637395);
+  font-size: 0.75em;
+  font-weight: normal;
+  line-height: 1.1em;
+  white-space: nowrap;
+}
+
+.chatgoose-notes-trigger-button {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.chatgoose-notes-trigger-button:hover,
+.chatgoose-notes-trigger[data-open="true"] .chatgoose-notes-trigger-button {
+  color: var(--chatgoose-clay);
+}
+
+.chatgoose-notes-trigger-button:focus-visible {
+  outline: 2px solid var(--chatgoose-clay);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+.chatgoose-notes-trigger-icon {
+  width: 1.15em;
+  height: 1.15em;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.chatgoose-notes-count {
+  padding: 0 0.4em;
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 14%, transparent);
+  font-family: var(--chatgoose-font-mono);
+  font-size: 0.92em;
+}
+
+#chatgoose-notes-root {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483644;
+  pointer-events: none;
+  font-family: var(--chatgoose-font);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.chatgoose-notes-scrim {
+  position: absolute;
+  inset: 0;
+  background: var(--chatgoose-scrim);
+  pointer-events: auto;
+}
+
+.chatgoose-notes {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  pointer-events: auto;
+  border: 1px solid var(--chatgoose-line-strong);
+  border-radius: var(--chatgoose-radius-menu);
+  background: var(--chatgoose-bg1);
+  box-shadow: var(--chatgoose-shadow-pop);
+  color: var(--chatgoose-ink);
+  font-size: 13px;
+  animation: chatgoose-fade-in 0.15s ease;
+}
+
+.chatgoose-notes:focus {
+  outline: none;
+}
+
+.chatgoose-notes[data-placement="docked"] {
+  border-color: var(--chatgoose-line);
+  box-shadow: var(--chatgoose-shadow);
+}
+
+.chatgoose-notes[data-placement="center"] {
+  left: 50%;
+  top: 9vh;
+  width: min(540px, calc(100vw - 40px));
+  max-height: 82vh;
+  transform: translateX(-50%);
+}
+
+.chatgoose-notes button,
+.chatgoose-notes input,
+.chatgoose-notes select,
+.chatgoose-notes textarea {
+  font-family: inherit;
+}
+
+.chatgoose-notes-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--chatgoose-line);
+}
+
+.chatgoose-notes-heading {
+  display: grid;
+  flex: 1;
+  gap: 4px;
+  min-width: 0;
+}
+
+.chatgoose-notes-fan {
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chatgoose-notes-handle {
+  margin-left: 4px;
+  color: var(--chatgoose-ink-low);
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.chatgoose-notes-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chatgoose-text-button {
+  appearance: none;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: var(--chatgoose-radius-flat);
+  background: none;
+  color: var(--chatgoose-ink-mid);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chatgoose-text-button:hover:not(:disabled) {
+  background: var(--chatgoose-clay-bg);
+  color: var(--chatgoose-clay-ink);
+}
+
+.chatgoose-text-button-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--chatgoose-bad) 10%, transparent);
+  color: var(--chatgoose-bad);
+}
+
+.chatgoose-text-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.chatgoose-text-button:focus-visible {
+  outline: 2px solid var(--chatgoose-clay);
+  outline-offset: 1px;
+}
+
+.chatgoose-notes-body {
+  display: grid;
+  flex: 1 1 auto;
+  align-content: start;
+  gap: 14px;
+  min-height: 0;
+  padding: 14px 16px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.chatgoose-notes-field {
+  display: grid;
+  gap: 5px;
+}
+
+.chatgoose-notes-input,
+.chatgoose-note-textarea,
+.chatgoose-notes-select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--chatgoose-line-strong);
+  border-radius: var(--chatgoose-radius-chip);
+  background: var(--chatgoose-field);
+  color: var(--chatgoose-ink);
+  font-size: 13px;
+}
+
+.chatgoose-notes-input:focus,
+.chatgoose-note-textarea:focus,
+.chatgoose-notes-select:focus {
+  outline: none;
+  border-color: var(--chatgoose-clay);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--chatgoose-clay) 18%, transparent);
+}
+
+.chatgoose-notes-input:disabled,
+.chatgoose-note-textarea:disabled {
+  opacity: 0.6;
+}
+
+.chatgoose-notes-hint {
+  color: var(--chatgoose-ink-low);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.chatgoose-notes-hint[data-status="saved"] {
+  color: var(--chatgoose-green);
+}
+
+.chatgoose-notes-hint[data-status="error"],
+.chatgoose-notes-hint[data-status="unconfirmed"],
+.chatgoose-notes-hint[data-status="too-long"] {
+  color: var(--chatgoose-bad);
+}
+
+.chatgoose-notes-list {
+  display: grid;
+  gap: 10px;
+}
+
+.chatgoose-note {
+  padding: 10px 12px 12px;
+  border: 1px solid var(--chatgoose-line);
+  border-radius: var(--chatgoose-radius-card);
+  background: var(--chatgoose-bg2);
+}
+
+.chatgoose-note-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.chatgoose-note-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chatgoose-note-title-empty {
+  color: var(--chatgoose-ink-low);
+  font-style: italic;
+  font-weight: 500;
+}
+
+.chatgoose-note-actions {
+  display: flex;
+  gap: 2px;
+  margin-right: -6px;
+}
+
+.chatgoose-note-text {
+  color: var(--chatgoose-ink);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.chatgoose-note-confirm {
+  border-color: color-mix(in srgb, var(--chatgoose-bad) 35%, transparent);
+}
+
+.chatgoose-note-confirm-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.chatgoose-note-confirm-text {
+  flex: 1 1 100%;
+  color: var(--chatgoose-bad);
+  font-weight: 600;
+}
+
+.chatgoose-note-editing {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-color: var(--chatgoose-clay-line);
+  background: var(--chatgoose-bg1);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--chatgoose-clay) 10%, transparent);
+}
+
+.chatgoose-note-textarea {
+  min-height: 150px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.chatgoose-note-edit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.chatgoose-button.chatgoose-button-save {
+  border-color: var(--chatgoose-clay);
+  background: var(--chatgoose-clay);
+  color: #fff;
+}
+
+.chatgoose-button.chatgoose-button-save:hover:not(:disabled) {
+  border-color: var(--chatgoose-clay-deep);
+  background: var(--chatgoose-clay-deep);
+  color: #fff;
+}
+
+.chatgoose-notes-kbd-hint {
+  margin-left: auto;
+  color: var(--chatgoose-ink-low);
+  font-size: 11px;
+}
+
+.chatgoose-notes-inline-error,
+.chatgoose-notes-error-title {
+  color: var(--chatgoose-bad);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.chatgoose-notes-error {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--chatgoose-bad) 35%, transparent);
+  border-radius: var(--chatgoose-radius-card);
+}
+
+.chatgoose-notes-error-title {
+  font-weight: 600;
+}
+
+.chatgoose-notes-empty {
+  padding: 18px 8px;
+  color: var(--chatgoose-ink-low);
+  line-height: 1.5;
+  text-align: center;
+}
+
+.chatgoose-notes-footer {
+  display: grid;
+  gap: 10px;
+  padding: 10px 16px 12px;
+  border-top: 1px solid var(--chatgoose-line);
+  background: var(--chatgoose-bg1);
+}
+
+.chatgoose-notes-create {
+  display: flex;
+  gap: 6px;
+}
+
+.chatgoose-notes-create .chatgoose-button {
+  flex: 1;
+}
+
+.chatgoose-notes-view {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--chatgoose-ink-mid);
+  font-size: 12px;
+}
+
+.chatgoose-notes-view .chatgoose-notes-select {
+  flex: 1;
+  width: auto;
+  padding: 5px 8px;
+  font-size: 12px;
 }
 
 /* ─── Voice (лента) ──────────────────────────────────────────────

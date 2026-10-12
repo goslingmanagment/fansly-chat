@@ -2,7 +2,10 @@ import {
   AGENCY_HUB_DEVICE_TOKEN_META_STORAGE_KEY,
   AGENCY_HUB_DEVICE_TOKEN_REVOKE_TIMEOUT_MS,
   AGENCY_HUB_PREFETCH_TIMEOUT_MS,
+  FAN_NOTES_READ_TIMEOUT_MS,
+  FAN_NOTES_WRITE_TIMEOUT_MS,
   FAN_REGISTRATION_TIMEOUT_MS,
+  FANSLY_CUSTOM_NAME_NOTE_TYPE,
   LAST_SEEN_VERSION_STORAGE_KEY,
   ONBOARDING_STORAGE_KEY,
   SPENDERS_BUILD_TIMEOUT_MS,
@@ -18,6 +21,12 @@ import {
 import { getCompareDraftCount, resolveMappedPersonalityId } from '../shared/compare-cards.js';
 import { createUserError, toUserError } from '../shared/errors.js';
 import { fanslyIdTimestampMs } from '../shared/fansly-id-time.js';
+import {
+  FANSLY_ACCOUNT_NOTE_TYPE,
+  FANSLY_CUSTOM_NAME_NOTE_TITLE,
+  readFanNotes,
+  type FanNote,
+} from '../shared/fan-notes.js';
 import {
   getRuntimeRequestType,
   isAgencyHubConnectionTestSettings,
@@ -37,14 +46,24 @@ import type {
   AccountsViewEntry,
   AgencyHubDeviceTokenMeta,
   AgencyHubSignOutResponse,
+  DeleteFanNoteRequest,
+  DeleteFanNoteResponse,
+  FanNotesRequest,
+  FanNotesResponse,
   FanRegistrationResponse,
   FanslyGroup,
   LastSeenVersionSnapshot,
   OnboardingSnapshot,
   PopupStatus,
   RecapStatusResponse,
+  SaveFanCustomNameRequest,
+  SaveFanCustomNameResponse,
+  SaveFanNoteRequest,
+  SaveFanNoteResponse,
+  SetFanNotesViewRequest,
   SpendersBuildPayload,
   TabAccountIdentity,
+  UserFacingError,
 } from '../shared/types.js';
 import type {
   StoredVoiceAttemptRoute,
@@ -300,6 +319,23 @@ function soleFanOfGroup(group: FanslyGroup, creatorId: string): string | null {
 
 /** Every fansly.com tab, however deep the route. Matches the manifest's own
  * host permission so the query can never ask for more than is granted. */
+/** Chats whose fan the background remembers (E157); a shift opens fewer. */
+const FAN_OF_CHAT_LIMIT = 1_000;
+
+/** A Fansly read or write that is the chatter's whole action: optional-read
+ * failures arrive as `unknown_error` and are named here (E152, E157). */
+function fanslyActionError(error: unknown): UserFacingError {
+  if (error instanceof DOMException && error.name === 'AbortError') {
+    return createUserError('timed_out');
+  }
+  if (error instanceof ChatGooseError && error.key === 'unknown_error') {
+    return error.details?.status === 0
+      ? createUserError('network_error')
+      : createUserError('fansly_server_error');
+  }
+  return toUserError(error);
+}
+
 const FANSLY_TAB_URL_PATTERN = '*://fansly.com/*';
 
 interface ValidVoiceAttemptSender {
@@ -375,6 +411,154 @@ export function registerRuntimeApi({
   voiceService,
   voiceAttempts,
 }: RuntimeApiDeps): void {
+  /** `creatorId:groupId` → the fan. A chat's two members never change, so one
+   * group read serves the background's lifetime (E157). */
+  const fanOfChat = new Map<string, string>();
+
+  /** The fan's native Fansly notes (E157): read on the chatter's request (the
+   * panel open, or «Всегда справа» on an opened chat), written only on an
+   * explicit save or delete. Every request is one attempt on the tab's own
+   * session, and none is sent while Fansly is rate-limiting the account's
+   * reads. A write that fails after dispatch may still have landed: the panel
+   * says so and offers a reread, never a retry. */
+  const handleFanNotes = async (
+    requestType: 'getFanNotes' | 'saveFanNote' | 'deleteFanNote' | 'saveFanCustomName',
+    message: unknown,
+    sender: browser.runtime.MessageSender,
+  ): Promise<
+    FanNotesResponse | SaveFanNoteResponse | DeleteFanNoteResponse | SaveFanCustomNameResponse
+  > => {
+    const tabId = sender.tab?.id;
+    const session = tabId !== undefined ? sessionStore.getSessionForTab(tabId) : null;
+    if (!session || !session.connected) {
+      return { ok: false, error: createUserError('not_connected') };
+    }
+    const cooldownUntil = fanslyClient.followerReadStatus(session)?.cooldownUntil ?? 0;
+    if (cooldownUntil > Date.now()) {
+      return { ok: false, error: createUserError('rate_limited', { retryAtMs: cooldownUntil }) };
+    }
+
+    const controller = new AbortController();
+    const timeout = globalThis.setTimeout(
+      () => controller.abort(),
+      requestType === 'getFanNotes' ? FAN_NOTES_READ_TIMEOUT_MS : FAN_NOTES_WRITE_TIMEOUT_MS,
+    );
+    const { signal } = controller;
+    // Every request rides the shared follower lane: reads are paced, and a
+    // 429 on a read or a write starts the cooldown every other Fansly read of
+    // the account respects. Right before each dispatch the lane re-checks
+    // that this tab still works as the same Fansly session; a tab that became
+    // another account meanwhile answers `chat_changed` and nothing is sent.
+    const paced = fanslyClient.followerSession(session, () => {
+      const current = sessionStore.getSessionForTab(tabId!);
+      if (
+        !current?.connected ||
+        current.authorization !== session.authorization ||
+        current.fanslySessionId !== session.fanslySessionId
+      ) {
+        throw new ChatGooseError('chat_changed');
+      }
+    });
+    try {
+      const creatorId = session.resolvedAccountId ??
+        await fanslyClient.getAuthenticatedAccountId(session, signal);
+
+      if (requestType === 'getFanNotes') {
+        const { groupId } = message as unknown as FanNotesRequest;
+        const unresolved: FanNotesResponse = {
+          ok: false,
+          error: createUserError('coach_fan_unresolved'),
+        };
+        const chatKey = `${creatorId}:${groupId}`;
+        // One group read per chat, remembered: the fan is the other member of
+        // a chat of exactly two. Not the tab's generation context — it takes
+        // the first non-creator member unchecked, and writes follow this read.
+        let fanAccountId = fanOfChat.get(chatKey) ?? null;
+        if (!fanAccountId) {
+          const group = await fanslyClient.getGroup(groupId, paced, signal, undefined, 'none');
+          fanAccountId = soleFanOfGroup(group, creatorId);
+          if (!fanAccountId) return unresolved;
+        }
+        if (fanOfChat.size >= FAN_OF_CHAT_LIMIT && !fanOfChat.has(chatKey)) {
+          fanOfChat.delete(fanOfChat.keys().next().value!);
+        }
+        fanOfChat.set(chatKey, fanAccountId);
+
+        const [account] = await fanslyClient.getAccountNames([fanAccountId], paced, signal, 'none');
+        if (!account || account.id !== fanAccountId) return unresolved;
+        return {
+          ok: true,
+          creatorId,
+          fan: {
+            accountId: fanAccountId,
+            username: account.username?.trim() || null,
+            displayName: account.displayName?.trim() || null,
+          },
+          ...readFanNotes(account),
+        };
+      }
+
+      // Writes: the notes were read under this creator; a tab that became
+      // another Fansly account since must not write onto that account's fan.
+      const target = message as unknown as { creatorId: string; fanAccountId: string };
+      if (target.creatorId !== creatorId) {
+        return { ok: false, error: createUserError('chat_changed') };
+      }
+
+      if (requestType === 'saveFanNote') {
+        const { fanAccountId, noteId, title, note } = message as unknown as SaveFanNoteRequest;
+        const saved = noteId === null
+          ? await fanslyClient.createAccountNote(fanAccountId, FANSLY_ACCOUNT_NOTE_TYPE, title, note, paced, signal)
+          : await fanslyClient.editAccountNote(
+              { id: noteId, contentType: FANSLY_ACCOUNT_NOTE_TYPE, contentId: fanAccountId, title, note },
+              title,
+              note,
+              paced,
+              signal,
+            );
+        return { ok: true, note: saved };
+      }
+
+      if (requestType === 'deleteFanNote') {
+        const { fanAccountId, note } = message as unknown as DeleteFanNoteRequest;
+        // Regular notes only: the custom name goes through saveFanCustomName.
+        if (note.contentId !== fanAccountId || note.contentType !== FANSLY_ACCOUNT_NOTE_TYPE) {
+          return { ok: false, error: createUserError('chat_changed') };
+        }
+        await fanslyClient.deleteAccountNote(note, paced, signal);
+        return { ok: true };
+      }
+
+      const { fanAccountId, current, name } = message as unknown as SaveFanCustomNameRequest;
+      if (current && (current.contentId !== fanAccountId || current.contentType !== FANSLY_CUSTOM_NAME_NOTE_TYPE)) {
+        return { ok: false, error: createUserError('chat_changed') };
+      }
+      const trimmed = name.trim();
+      let customName: FanNote | null;
+      if (!trimmed) {
+        // Fansly's own «trash-undo»: no note, the fan's display name again.
+        if (current) await fanslyClient.deleteAccountNote(current, paced, signal);
+        customName = null;
+      } else if (current) {
+        customName = await fanslyClient.editAccountNote(current, current.title || FANSLY_CUSTOM_NAME_NOTE_TITLE, trimmed, paced, signal);
+      } else {
+        customName = await fanslyClient.createAccountNote(
+          fanAccountId,
+          FANSLY_CUSTOM_NAME_NOTE_TYPE,
+          FANSLY_CUSTOM_NAME_NOTE_TITLE,
+          trimmed,
+          paced,
+          signal,
+        );
+      }
+      return { ok: true, customName };
+    } catch (error) {
+      return { ok: false, error: fanslyActionError(error) };
+    } finally {
+      globalThis.clearTimeout(timeout);
+    }
+  };
+
   const handleRequest = async (
     requestType: RuntimeRequestType,
     message: unknown,
@@ -1424,6 +1608,26 @@ export function registerRuntimeApi({
         return { ok: false, error: toUserError(error) };
       } finally {
         globalThis.clearTimeout(timeout);
+      }
+    }
+
+    if (
+      requestType === 'getFanNotes' ||
+      requestType === 'saveFanNote' ||
+      requestType === 'deleteFanNote' ||
+      requestType === 'saveFanCustomName'
+    ) {
+      return handleFanNotes(requestType, message, sender);
+    }
+
+    if (requestType === 'setFanNotesView') {
+      // Shape already validated by getRuntimeRequestType.
+      const { view } = message as unknown as SetFanNotesViewRequest;
+      try {
+        await saveSettings({ fanNotesView: view });
+        return { ok: true };
+      } catch {
+        return { ok: false };
       }
     }
 

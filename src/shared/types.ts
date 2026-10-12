@@ -1,6 +1,7 @@
 import type { MessageSoundTone } from './message-sound-protocol.js';
 import type { PaneKey } from './options-routes.js';
 import type { FanslyDmPermissionAccount, FanslyDmPermissionRule } from './fansly-dm-permissions.js';
+import type { FanNote, FanNotesSnapshot, FanNotesView } from './fan-notes.js';
 import type {
   StoredVoiceAttemptRoute,
   VoiceAttemptStoreEntry,
@@ -57,6 +58,9 @@ export interface Settings {
    * its container proxy) instead of the background. Off by default: a chatter
    * without a system-wide VPN turns it on. */
   fanslyViaTab: boolean;
+  /** E157: how the fan-notes panel shows — beside the chat for every chat,
+   * beside it on demand, or a centred window on demand. */
+  fanNotesView: FanNotesView;
 }
 
 export interface Personality {
@@ -496,6 +500,7 @@ export interface FanslyGroupResponse {
 export interface FanslyAccountNote {
   id?: string;
   contentType?: number;
+  contentId?: string;
   title?: string | null;
   note?: string | null;
 }
@@ -904,6 +909,9 @@ export interface TabUiState {
   /** Optional for a brief old-background/new-content overlap during updates;
    * absence keeps the default-on behaviour. */
   showToolbarHints?: boolean;
+  /** E157. Optional for the same old-background/new-content overlap; absence
+   * is the default view. */
+  fanNotesView?: FanNotesView;
   modelProviderByFeature?: Partial<Record<ModelSelectableFeatureType, 'anthropic' | 'openrouter'>>;
   apiKeyReadyByFeature?: Partial<Record<ModelSelectableFeatureType, boolean>>;
   hasPersonalities: boolean;
@@ -1121,6 +1129,11 @@ export interface RuntimeRequestMap {
   getSpendersList: GetSpendersListRequest | undefined;
   resolveFanChat: ResolveFanChatRequest;
   getFanRegistration: FanRegistrationRequest;
+  getFanNotes: FanNotesRequest;
+  saveFanNote: SaveFanNoteRequest;
+  deleteFanNote: DeleteFanNoteRequest;
+  saveFanCustomName: SaveFanCustomNameRequest;
+  setFanNotesView: SetFanNotesViewRequest;
   getRecapStatus: RecapStatusRequest;
   openDebugPrompt: DebugPromptTokenRequest;
   getDebugPromptSnapshot: DebugPromptTokenRequest;
@@ -1155,6 +1168,11 @@ export interface RuntimeResponseMap {
   getSpendersList: SpendersListResponse;
   resolveFanChat: ResolveFanChatResponse;
   getFanRegistration: FanRegistrationResponse;
+  getFanNotes: FanNotesResponse;
+  saveFanNote: SaveFanNoteResponse;
+  deleteFanNote: DeleteFanNoteResponse;
+  saveFanCustomName: SaveFanCustomNameResponse;
+  setFanNotesView: { ok: boolean };
   getRecapStatus: RecapStatusResponse;
   openDebugPrompt: OpenDebugPromptResponse;
   getDebugPromptSnapshot: DebugPromptSnapshotResponse;
@@ -1436,6 +1454,55 @@ export interface FanRegistrationRequest {
 export type FanRegistrationResponse =
   | { ok: true; fanAccountId: string; registeredAtMs: number }
   | { ok: false; error: UserFacingError };
+
+/** The open one-to-one chat's fan notes (E157). */
+export interface FanNotesRequest {
+  groupId: string;
+}
+
+export type FanNotesResponse =
+  | ({ ok: true } & FanNotesSnapshot)
+  | { ok: false; error: UserFacingError };
+
+/** Every write names the creator the notes were read under: a tab that became
+ * another Fansly account meanwhile must not write onto that account's fan. */
+interface FanNoteWriteTarget {
+  creatorId: string;
+  fanAccountId: string;
+}
+
+/** `noteId` null creates a note; otherwise that note is edited. */
+export interface SaveFanNoteRequest extends FanNoteWriteTarget {
+  noteId: string | null;
+  title: string;
+  note: string;
+}
+
+export type SaveFanNoteResponse =
+  | { ok: true; note: FanNote }
+  | { ok: false; error: UserFacingError };
+
+export interface DeleteFanNoteRequest extends FanNoteWriteTarget {
+  note: FanNote;
+}
+
+export type DeleteFanNoteResponse =
+  | { ok: true }
+  | { ok: false; error: UserFacingError };
+
+/** An empty `name` deletes the custom name (Fansly's own «trash-undo»). */
+export interface SaveFanCustomNameRequest extends FanNoteWriteTarget {
+  current: FanNote | null;
+  name: string;
+}
+
+export type SaveFanCustomNameResponse =
+  | { ok: true; customName: FanNote | null }
+  | { ok: false; error: UserFacingError };
+
+export interface SetFanNotesViewRequest {
+  view: FanNotesView;
+}
 
 export interface AgencyHubConnectionTestRequest {
   settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubDeviceToken'>;

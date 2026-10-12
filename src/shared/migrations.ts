@@ -16,6 +16,7 @@ import {
   normalizeMessageSoundVolume,
   normalizeMutedAccountIds,
 } from './message-sound.js';
+import { FAN_NOTES_VIEW_DEFAULT, normalizeFanNotesView } from './fan-notes.js';
 import { collectSummaryCacheEntries } from './summary-cache.js';
 import {
   normalizePersonaCatalog,
@@ -44,6 +45,7 @@ export function createDefaultSettings(): Settings {
     followSoundEnabled: true,
     followSoundTone: FOLLOW_SOUND_TONE_DEFAULT,
     fanslyViaTab: false,
+    fanNotesView: FAN_NOTES_VIEW_DEFAULT,
   };
 }
 
@@ -105,6 +107,9 @@ function migrateSettingsRecord(
   // re-defaulted by adoptFanslyMessageToneDefault before this normalizer).
   // v20 (E149): fanslyViaTab ADDED — «Fansly через вкладку», off for everyone:
   // the request route changes only where a chatter switches it on.
+  // v21 (E157): fanNotesView ADDED — how the fan-notes panel shows. Everyone
+  // starts on demand («Справа по кнопке»): no Fansly read until a chatter
+  // opens the panel or picks «Всегда справа».
   return {
     // v17: an EMPTY address is the pre-E123 default nobody chose — the fleet has
     // one hub, so it is filled in rather than left blank for the chatter to
@@ -146,6 +151,7 @@ function migrateSettingsRecord(
     followSoundEnabled: Boolean(raw?.followSoundEnabled ?? defaults.followSoundEnabled),
     followSoundTone: normalizeMessageSoundTone(raw?.followSoundTone, defaults.followSoundTone),
     fanslyViaTab: raw?.fanslyViaTab === true,
+    fanNotesView: normalizeFanNotesView(raw?.fanNotesView),
   };
 }
 

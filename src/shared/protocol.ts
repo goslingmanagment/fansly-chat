@@ -4,6 +4,13 @@ import {
   COACH_QUESTION_MAX_CHARS,
 } from './constants.js';
 import { FEATURE_POLICIES } from './features.js';
+import {
+  FAN_CUSTOM_NAME_MAX_CHARS,
+  FAN_NOTE_TEXT_MAX_CHARS,
+  FAN_NOTE_TITLE_MAX_CHARS,
+  FAN_NOTES_VIEWS,
+  type FanNotesView,
+} from './fan-notes.js';
 import { isOptionsPaneKey } from './options-routes.js';
 import {
   isStoredVoiceAttemptRoute,
@@ -485,6 +492,28 @@ export function getRuntimeRequestType(message: unknown): RuntimeRequestType | nu
       return isString(message.groupId) && /^\d{1,24}$/.test(message.groupId)
         ? 'getFanRegistration'
         : null;
+    case 'getFanNotes':
+      // The id goes into a Fansly URL path, as for getFanRegistration.
+      return isFanslyId(message.groupId) ? 'getFanNotes' : null;
+    case 'saveFanNote':
+      return isFanNoteWriteTarget(message) &&
+        (message.noteId === null || isFanslyId(message.noteId)) &&
+        isBoundedPoints(message.title, FAN_NOTE_TITLE_MAX_CHARS) &&
+        isBoundedPoints(message.note, FAN_NOTE_TEXT_MAX_CHARS)
+        ? 'saveFanNote'
+        : null;
+    case 'deleteFanNote':
+      return isFanNoteWriteTarget(message) && isFanNote(message.note)
+        ? 'deleteFanNote'
+        : null;
+    case 'saveFanCustomName':
+      return isFanNoteWriteTarget(message) &&
+        (message.current === null || isFanNote(message.current)) &&
+        isBoundedPoints(message.name, FAN_CUSTOM_NAME_MAX_CHARS)
+        ? 'saveFanCustomName'
+        : null;
+    case 'setFanNotesView':
+      return FAN_NOTES_VIEWS.includes(message.view as FanNotesView) ? 'setFanNotesView' : null;
     case 'getRecapStatus':
       // groupId must be a non-empty conversation id; an empty groupId is a
       // meaningless recap-status query. The exact current persona definition is
@@ -519,6 +548,29 @@ export function getRuntimeRequestType(message: unknown): RuntimeRequestType | nu
     default:
       return null;
   }
+}
+
+/** Fansly ids land in URL paths and request bodies: digits only. */
+function isFanslyId(value: unknown): value is string {
+  return isString(value) && /^\d{1,24}$/.test(value);
+}
+
+/** Bounded in code points, the unit the panel counts in. */
+function isBoundedPoints(value: unknown, max: number): value is string {
+  return isString(value) && Array.from(value).length <= max;
+}
+
+function isFanNoteWriteTarget(message: Record<string, unknown>): boolean {
+  return isFanslyId(message.creatorId) && isFanslyId(message.fanAccountId);
+}
+
+function isFanNote(value: unknown): boolean {
+  return isObjectRecord(value) &&
+    isFanslyId(value.id) &&
+    isNumber(value.contentType) &&
+    isFanslyId(value.contentId) &&
+    isString(value.title) &&
+    isString(value.note);
 }
 
 function isRecapCoverage(value: unknown): boolean {

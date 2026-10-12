@@ -20,6 +20,7 @@ import {
   resolveCanonicalAccountId,
 } from './account-aliases.js';
 import { normalizeAgencyHubBaseUrl } from './agency-hub.js';
+import { normalizeFanNotesView } from './fan-notes.js';
 import {
   normalizeMessageSoundTone,
   normalizeMessageSoundVolume,
@@ -291,6 +292,7 @@ export function sanitizeSettings(input: Partial<Settings>): Settings {
     followSoundEnabled: Boolean(input.followSoundEnabled ?? defaults.followSoundEnabled),
     followSoundTone: normalizeMessageSoundTone(input.followSoundTone, defaults.followSoundTone),
     fanslyViaTab: input.fanslyViaTab === true,
+    fanNotesView: normalizeFanNotesView(input.fanNotesView),
   };
 }
 

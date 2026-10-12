@@ -34,7 +34,7 @@ const CTRL = key('ControlLeft', 'Control', { ctrlKey: true });
 
 /** A fresh engine with the platform's primary modifier already down. */
 function pressed(platform: LabelPlatform) {
-  const engine = createHotkeyEngine({ platform, client: 'extension' });
+  const engine = createHotkeyEngine({ platform, client: 'fansly' });
   engine.keydown(platform === 'mac' ? META : CTRL);
   return engine;
 }
@@ -65,6 +65,9 @@ describe('the family table, as the extension sees it', () => {
     expect(hotkeyComboLabel('cheatsheet', 'win')).toBe('?');
     expect(hotkeyAriaLabel('toggle-split', 'mac')).toBe('Meta+Shift+L');
     expect(hotkeyAriaLabel('coach', 'win')).toBe('Control+Alt+C');
+    // E157: notes on K — N reopens a closed window in Firefox.
+    expect(hotkeyComboLabel('fan-notes', 'mac')).toBe('⌘⇧K');
+    expect(hotkeyComboLabel('fan-notes', 'win')).toBe('Ctrl+Alt+K');
   });
 
   it('gives the toolbar features a chip: the bare key for text actions, ⇧/Alt for panels', () => {
@@ -110,6 +113,8 @@ describe('resolveHotkeyKeydown', () => {
       .toEqual({ kind: 'action', action: 'spenders-board', repeat: false });
     expect(resolveHotkeyKeydown(key('KeyC', 'c', { metaKey: true, shiftKey: true }), true, pressed('mac')))
       .toEqual({ kind: 'action', action: 'coach', repeat: false });
+    expect(resolveHotkeyKeydown(key('KeyK', 'л', { ctrlKey: true, altKey: true }), true, pressed('win')))
+      .toEqual({ kind: 'action', action: 'fan-notes', repeat: false });
   });
 
   it('keeps the macOS ⌘⇧E / ⌘⇧I / ⌘⇧G / ⌘⇧X habits and swallows ⌘⇧D / ⌘⇧F', () => {
@@ -126,7 +131,7 @@ describe('resolveHotkeyKeydown', () => {
   it('leaves the browser its own ⌘F / Ctrl+F and the retired Windows Alt+Shift combos', () => {
     expect(resolveHotkeyKeydown(key('KeyF', 'f', { metaKey: true }), true, pressed('mac'))).toBeNull();
     expect(resolveHotkeyKeydown(key('KeyF', 'а', { ctrlKey: true }), true, pressed('win'))).toBeNull();
-    const engine = createHotkeyEngine({ platform: 'win', client: 'extension' });
+    const engine = createHotkeyEngine({ platform: 'win', client: 'fansly' });
     expect(resolveHotkeyKeydown(key('KeyE', 'e', { altKey: true, shiftKey: true }), true, engine)).toBeNull();
     expect(resolveHotkeyKeydown(key('KeyE', 'e', { ctrlKey: true, shiftKey: true }), true, engine)).toBeNull();
   });
@@ -147,7 +152,7 @@ describe('resolveHotkeyKeydown', () => {
   });
 
   it('opens the cheatsheet on ? outside text inputs only', () => {
-    const engine = createHotkeyEngine({ platform: 'mac', client: 'extension' });
+    const engine = createHotkeyEngine({ platform: 'mac', client: 'fansly' });
     expect(resolveHotkeyKeydown(key('Slash', '?', { shiftKey: true }), false, engine))
       .toEqual({ kind: 'action', action: 'cheatsheet', repeat: false });
     // ЙЦУКЕН: «?» is Shift+7 — matched by the character, not the key.

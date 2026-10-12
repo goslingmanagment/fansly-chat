@@ -44,6 +44,7 @@ describe('content-script surface layering', () => {
       'chatgoose-board-root',
       'chatgoose-cheatsheet-root',
       'chatgoose-launcher-root',
+      'chatgoose-notes-root',
       'chatgoose-overlay-root',
       'chatgoose-toast-root',
       'chatgoose-vault-root',
@@ -77,6 +78,16 @@ describe('content-script surface layering', () => {
     const overlay = get('chatgoose-overlay-root');
     expect(get('chatgoose-board-root')).toBe(overlay);
     expect(get('chatgoose-voice-studio-root')).toBe(overlay);
+  });
+
+  it('keeps the fan-notes panel under every overlay surface (E157)', () => {
+    // Docked beside the chat it stays up while Coach or the board open; they
+    // must cover it (and their scrim dim it), never the other way round.
+    const notes = get('chatgoose-notes-root');
+    expect(notes).toBeLessThan(get('chatgoose-overlay-root'));
+    expect(notes).toBeLessThan(get('chatgoose-board-root'));
+    expect(notes).toBeLessThan(get('chatgoose-voice-studio-root'));
+    expect(notes).toBeLessThan(get('chatgoose-vault-root'));
   });
 
   it('keeps the floating launcher strictly at the bottom', () => {

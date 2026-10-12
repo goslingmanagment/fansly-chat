@@ -19,7 +19,7 @@ export const DEFAULT_AGENCY_HUB_BASE_URL = 'https://gosling-agency.ru';
 
 // ─── Storage ─────────────────────────────────────────────────────────────
 
-export const STORAGE_SCHEMA_VERSION = 20;
+export const STORAGE_SCHEMA_VERSION = 21;
 /** Full-recap local cache prefix (legacy/unqualified keys read as FULL). */
 export const SUMMARY_CACHE_PREFIX = 'summary:';
 /** Short-recap local cache prefix (spec §5 persistence-collision rule): a short
@@ -146,6 +146,11 @@ export const SPENDERS_BUILD_TIMEOUT_REASON = 'spenders-build-timeout';
 export const SPENDERS_RESOLVE_TIMEOUT_MS = 15_000;
 /** Budget for the one group read behind a fan's registration date (E152). */
 export const FAN_REGISTRATION_TIMEOUT_MS = 15_000;
+/** Budget for one fan-notes answer: the group read when the fan is not known
+ * yet, then the account read (E157). */
+export const FAN_NOTES_READ_TIMEOUT_MS = 20_000;
+/** Budget for one note write; a single attempt, never retried (E157). */
+export const FAN_NOTES_WRITE_TIMEOUT_MS = 15_000;
 /** How long the Fansly SPA router gets to react to a board chat-open before
  * the extension falls back to a full page load. */
 export const SPENDERS_SPA_NAV_VERIFY_MS = 2_000;
@@ -354,6 +359,8 @@ export const DEFAULT_SETTINGS: Settings = {
   followSoundEnabled: true,
   followSoundTone: FOLLOW_SOUND_TONE_DEFAULT,
   fanslyViaTab: false,
+  // FAN_NOTES_VIEW_DEFAULT, spelled out: fan-notes.ts imports this module.
+  fanNotesView: 'drawer',
 };
 
 // ─── Build ──────────────────────────────────────────────────────────────

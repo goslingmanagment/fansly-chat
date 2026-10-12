@@ -14,6 +14,7 @@ import {
 import { mapWithConcurrency } from '../shared/concurrency.js';
 import { aggregateEarnings } from '../shared/earnings.js';
 import { ChatGooseError } from '../shared/errors.js';
+import { readFanNote, type FanNote } from '../shared/fan-notes.js';
 import {
   estimateTargetPages,
   extractOldestMessageId,
@@ -80,6 +81,8 @@ const ORDER_TYPE_SINGLE = 1;
 const ORDER_TYPE_BUNDLE = 2;
 
 type MediaPurchaseStatus = 'purchased' | 'not-purchased';
+/** Fansly's own note endpoints (the native notes modal, E157). */
+type FanNotePath = 'notes' | 'notes/edit' | 'notes/delete';
 
 interface CachedMediaPurchaseStatus {
   expiresAt: number;
@@ -649,7 +652,7 @@ export class FanslyClient {
 
   /** Writes never enter fetchEnvelope's read retry loop. Any failure after
    * dispatch is ambiguous to the caller and must remain in its durable journal. */
-  private async postOnce<T>(path: 'group' | 'message', body: unknown, session: SessionTemplate, signal: AbortSignal, trace?: TraceScope, admissionSignal = signal): Promise<T> {
+  private async postOnce<T>(path: 'group' | 'message' | FanNotePath, body: unknown, session: SessionTemplate, signal: AbortSignal, trace?: TraceScope, admissionSignal = signal): Promise<T> {
     const headers = new Headers({
       authorization: session.authorization,
       'fansly-client-id': session.fanslyClientId,
@@ -657,7 +660,7 @@ export class FanslyClient {
       'fansly-session-id': session.fanslySessionId,
       'content-type': 'application/json',
     });
-    const check = session.routeChecks[path] ?? session.latestCheck;
+    const check = (path === 'group' || path === 'message' ? session.routeChecks[path] : undefined) ?? session.latestCheck;
     if (check) headers.set('fansly-client-check', check);
     const requestUrl = withNgswBypass(new URL(`https://apiv3.fansly.com/api/v1/${path}`));
     // Chat resolution is paced like a read, but remains a single POST attempt.
@@ -703,14 +706,15 @@ export class FanslyClient {
         throw new ChatGooseError('fansly_server_error', undefined, { status: response.status, ...(typeof shape.code === 'string' ? { code: shape.code } : {}) });
       }
       const envelope = await response.json() as { success?: boolean; response?: T; error?: unknown };
-      if (envelope.success !== true || !envelope.response) {
+      // A delete has nothing to hand back; `success` is its whole answer.
+      if (envelope.success !== true || (!envelope.response && path !== 'notes/delete')) {
         const code = (envelope.error as { code?: unknown } | null | undefined)?.code;
         const known = typeof code === 'number' || typeof code === 'string' ? String(code).slice(0, 40) : undefined;
         attemptTrace?.event('http.refused', { status: response.status, code: known ?? null });
         throw new ChatGooseError('fansly_server_error', undefined, { status: response.status, refused: true, ...(known ? { code: known } : {}) });
       }
       attemptTrace?.end({ status: response.status, outcome: 'success' });
-      return envelope.response;
+      return envelope.response as T;
     } catch (error) { attemptTrace?.fail(error); throw error; }
     finally { permit?.release(); }
   }
@@ -734,6 +738,33 @@ export class FanslyClient {
     }, session, signal, trace);
     if (!message.id || !/^\d{1,24}$/.test(message.id) || message.groupId !== groupId || message.senderId !== creatorId) throw new ChatGooseError('fansly_server_error');
     return message.id;
+  }
+
+  /** A new regular note on the fan, or the custom name (12002), with Fansly's
+   * own body (E157). One POST; a failure after dispatch is ambiguous, so the
+   * caller tells the chatter to reread rather than retrying. */
+  async createAccountNote(fanAccountId: string, contentType: number, title: string, text: string, session: SessionTemplate, signal: AbortSignal): Promise<FanNote> {
+    const created = await this.postOnce<unknown>('notes', { contentType, contentId: fanAccountId, title, note: text }, session, signal);
+    return this.readWrittenNote(created, fanAccountId, contentType);
+  }
+
+  async editAccountNote(note: FanNote, title: string, text: string, session: SessionTemplate, signal: AbortSignal): Promise<FanNote> {
+    const edited = await this.postOnce<unknown>('notes/edit', { id: note.id, contentType: note.contentType, contentId: note.contentId, title, note: text }, session, signal);
+    return this.readWrittenNote(edited, note.contentId, note.contentType, note.id);
+  }
+
+  async deleteAccountNote(note: FanNote, session: SessionTemplate, signal: AbortSignal): Promise<void> {
+    await this.postOnce<unknown>('notes/delete', { id: note.id, contentType: note.contentType, contentId: note.contentId, title: note.title, note: note.note }, session, signal);
+  }
+
+  /** The note as Fansly stored it. An answer about another note or another
+   * fan is not a confirmation of this write. */
+  private readWrittenNote(raw: unknown, fanAccountId: string, contentType: number, expectedId?: string): FanNote {
+    const note = readFanNote(raw, fanAccountId);
+    if (!note || note.contentId !== fanAccountId || note.contentType !== contentType || (expectedId !== undefined && note.id !== expectedId)) {
+      throw new ChatGooseError('fansly_server_error');
+    }
+    return note;
   }
 
   async getAuthenticatedAccountId(session: SessionTemplate, signal: AbortSignal): Promise<string> {
