@@ -3261,7 +3261,7 @@ export class OperationCoordinator {
         this.flushChunks(tabId, current);
       }
 
-      // Output-exhaustion fail-closed (spec §8, CLAUDE.md family law): a provider
+      // Output-exhaustion fail-closed (spec §8, AGENTS.md family law): a provider
       // hitting its token ceiling (normalized cross-provider by isOutputExhausted:
       // kernel 'max_tokens' + OpenRouter 'length') makes the generation
       // non-committable for EVERY feature — "a truncated stream is an error, never

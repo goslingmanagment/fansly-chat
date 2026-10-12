@@ -220,7 +220,7 @@ pnpm typecheck  # strict TypeScript check
 
 Important references:
 
-- [CLAUDE.md](CLAUDE.md) — binding engineering rules and invariants;
+- [AGENTS.md](AGENTS.md) — binding engineering rules and invariants;
 - [docs/decisions.md](docs/decisions.md) — append-only architecture decisions;
 - `docs/generated/` — point-in-time code maps; check each file's snapshot SHA
   before relying on line numbers or current-state claims;

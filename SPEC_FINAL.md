@@ -1,6 +1,6 @@
 > **HISTORICAL PRODUCT/UX SPEC (v1.3, pre-kernel).** Architecture, provider-key,
 > prompt-assembly, and Agency Hub statements in this file are not current.
-> Current truth comes from source code, `CLAUDE.md`, `docs/decisions.md`, and the
+> Current truth comes from source code, `AGENTS.md`, `docs/decisions.md`, and the
 > vendored kernel contract. Preserve this file for product intent and history;
 > do not implement its Direct-AI architecture.
 

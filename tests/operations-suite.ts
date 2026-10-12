@@ -5806,7 +5806,7 @@ describe(`OperationCoordinator (${part})`, () => {
     // chat-review parse XML (valid:false rather than throwing), so before this a
     // truncated analysis result reached the chatter as a valid:false fallback —
     // violating "a truncated stream is an error, never presented" with NO
-    // exceptions (CLAUDE.md). Every feature × both stop reasons must fail closed.
+    // exceptions (AGENTS.md). Every feature × both stop reasons must fail closed.
     for (const feature of ['help-me', 'chat-review'] as const) {
       for (const stopReason of ['max_tokens', 'length'] as const) {
         const kernelGateway = {
