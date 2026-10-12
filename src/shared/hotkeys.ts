@@ -25,11 +25,11 @@
 // builds every label; content/hotkey-input.ts owns the engine instance.
 
 import {
-  HOTKEYS,
   detectHotkeyPlatform,
   hotkeyAriaShortcut,
   hotkeyChip,
   hotkeyLabel,
+  hotkeysForClient,
   type HotkeyAction as SchemeAction,
   type HotkeyPlatform,
 } from '@chatgoose/hotkeys';
@@ -180,13 +180,12 @@ export interface HotkeyEntry {
 }
 
 /** Every reference row for this platform, in display order within each group:
- * the family table (extension actions only), the `?` cheatsheet, the keys the
+ * the family table (the rows the Fansly extension runs), the `?` cheatsheet, the keys the
  * extension handles outside the table, and what works differently than in the
  * desktop app. Pure — both surfaces render exactly this list. */
 export function buildHotkeyEntries(platform: LabelPlatform): HotkeyEntry[] {
   const entries: HotkeyEntry[] = [];
-  for (const def of HOTKEYS) {
-    if (!def.clients.includes('extension')) continue;
+  for (const def of hotkeysForClient('fansly')) {
     const action = EXTENSION_ACTION[def.action];
     entries.push({
       id: action,

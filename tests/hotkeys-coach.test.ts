@@ -28,12 +28,12 @@ describe('coach + recap app-action hotkeys', () => {
   });
 
   it('resolves ⌘⇧C and Ctrl+Alt+C to the coach action', () => {
-    const mac = createHotkeyEngine({ platform: 'mac', client: 'extension' });
+    const mac = createHotkeyEngine({ platform: 'mac', client: 'fansly' });
     mac.keydown({ code: 'MetaLeft', key: 'Meta', metaKey: true, ctrlKey: false, altKey: false, shiftKey: false });
     expect(resolveHotkeyKeydown({ code: 'KeyC', key: 'с', metaKey: true, ctrlKey: false, altKey: false, shiftKey: true, repeat: false } as KeyboardEvent, true, mac))
       .toEqual({ kind: 'action', action: 'coach', repeat: false });
 
-    const win = createHotkeyEngine({ platform: 'win', client: 'extension' });
+    const win = createHotkeyEngine({ platform: 'win', client: 'fansly' });
     expect(resolveHotkeyKeydown({ code: 'KeyC', key: 'c', metaKey: false, ctrlKey: true, altKey: true, shiftKey: false, repeat: false } as KeyboardEvent, true, win))
       .toEqual({ kind: 'action', action: 'coach', repeat: false });
   });

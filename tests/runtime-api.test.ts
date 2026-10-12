@@ -3179,6 +3179,7 @@ describe('runtime-api fan notes (E157)', () => {
       followerReadStatus: vi.fn<() => { cooldownUntil: number; intervalMs: number } | undefined>(
         () => undefined,
       ),
+      followerSession: vi.fn((session: SessionTemplate, _validate?: () => void) => ({ ...session, paced: true })),
     };
   }
 
@@ -3205,8 +3206,9 @@ describe('runtime-api fan notes (E157)', () => {
         { id: '900000000000000003', contentType: 12000, contentId: fanAccountId, title: '', note: 'Летит в San Diego' },
       ],
     });
-    expect(fanslyClient.getGroup).toHaveBeenCalledWith(groupId, expect.anything(), expect.any(AbortSignal), undefined, 'none');
-    expect(fanslyClient.getAccountNames).toHaveBeenCalledWith([fanAccountId], expect.anything(), expect.any(AbortSignal), 'none');
+    // Both reads ride the paced follower lane: a 429 there cools every read down.
+    expect(fanslyClient.getGroup).toHaveBeenCalledWith(groupId, expect.objectContaining({ paced: true }), expect.any(AbortSignal), undefined, 'none');
+    expect(fanslyClient.getAccountNames).toHaveBeenCalledWith([fanAccountId], expect.objectContaining({ paced: true }), expect.any(AbortSignal), 'none');
 
     // The chat's fan is remembered: a reread costs only the account read.
     await send({ type: 'getFanNotes', groupId });
@@ -3214,15 +3216,18 @@ describe('runtime-api fan notes (E157)', () => {
     expect(fanslyClient.getAccountNames).toHaveBeenCalledTimes(2);
   });
 
-  it('takes the fan a generation already resolved in this chat', async () => {
+  it('does not take the fan from a generation\'s tab context: writes follow this read', async () => {
+    // The tab context holds the first non-creator member, unchecked — in a
+    // group chat that is somebody, not «the fan».
     const { fanslyClient, tabContexts } = await harness();
+    fanslyClient.getGroup.mockResolvedValue({ users: [{ userId: creatorId }, { userId: fanAccountId }, { userId: '111111111111111111' }] });
     tabContexts.setRoute(7, groupId, 1);
     tabContexts.setFan(7, groupId, fanAccountId, 'Richard');
 
     const response = await send({ type: 'getFanNotes', groupId });
 
-    expect(response).toMatchObject({ ok: true, fan: { accountId: fanAccountId } });
-    expect(fanslyClient.getGroup).not.toHaveBeenCalled();
+    expect(response).toEqual({ ok: false, error: createUserError('coach_fan_unresolved') });
+    expect(fanslyClient.getAccountNames).not.toHaveBeenCalled();
   });
 
   it('sends nothing while Fansly is rate-limiting the account\'s reads — writes included', async () => {
@@ -3294,6 +3299,9 @@ describe('runtime-api fan notes (E157)', () => {
 
     const foreign = { ...target, contentId: '111111111111111111' };
     expect(await send({ type: 'deleteFanNote', creatorId, fanAccountId, note: foreign })).toEqual({ ok: false, error: createUserError('chat_changed') });
+    // The custom name is not a note to delete here: saveFanCustomName owns it.
+    const name = { ...target, contentType: 12002 };
+    expect(await send({ type: 'deleteFanNote', creatorId, fanAccountId, note: name })).toEqual({ ok: false, error: createUserError('chat_changed') });
     expect(fanslyClient.deleteAccountNote).toHaveBeenCalledTimes(1);
   });
 
@@ -3320,6 +3328,18 @@ describe('runtime-api fan notes (E157)', () => {
     // A regular note is never treated as the custom name.
     const regular = { ...current, contentType: 12000 };
     expect(await send({ type: 'saveFanCustomName', creatorId, fanAccountId, current: regular, name: 'x' })).toEqual({ ok: false, error: createUserError('chat_changed') });
+  });
+
+  it('writes ride the paced lane, which re-checks right before dispatch that the tab is still that session', async () => {
+    const { fanslyClient, sessionStore } = await harness();
+    await send({ type: 'saveFanNote', creatorId, fanAccountId, noteId: null, title: '', note: 'x' });
+
+    expect(fanslyClient.createAccountNote).toHaveBeenCalledWith(fanAccountId, 12000, '', 'x', expect.objectContaining({ paced: true }), expect.any(AbortSignal));
+    const validate = fanslyClient.followerSession.mock.calls.at(-1)![1]!;
+    expect(() => validate()).not.toThrow();
+    // The tab became another Fansly account while the write waited for its route.
+    sessionStore.registerCapture(7, makeCapture('700000000000000002'));
+    expect(() => validate()).toThrow(expect.objectContaining({ key: 'chat_changed' }));
   });
 
   it('names a failed write the way the chatter can act on', async () => {

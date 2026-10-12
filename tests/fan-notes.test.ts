@@ -5,7 +5,7 @@ import {
   FAN_NOTE_TEMPLATE_TEXT,
   FAN_NOTE_TEMPLATE_TITLE,
   FAN_NOTES_VIEW_DEFAULT,
-  clampChars,
+  charCount,
   normalizeFanNotesView,
   readFanNotes,
 } from '../src/shared/fan-notes.js';
@@ -54,8 +54,8 @@ describe('fan notes (E157)', () => {
     ]);
   });
 
-  it('clamps on code points, never splitting an emoji', () => {
-    expect(clampChars('💰💰💰', 2)).toBe('💰💰');
-    expect(clampChars('abc', 5)).toBe('abc');
+  it('counts code points, so an emoji is one character', () => {
+    expect(charCount('💰💰💰')).toBe(3);
+    expect(charCount('abc')).toBe(3);
   });
 });

@@ -34,7 +34,7 @@ const CTRL = key('ControlLeft', 'Control', { ctrlKey: true });
 
 /** A fresh engine with the platform's primary modifier already down. */
 function pressed(platform: LabelPlatform) {
-  const engine = createHotkeyEngine({ platform, client: 'extension' });
+  const engine = createHotkeyEngine({ platform, client: 'fansly' });
   engine.keydown(platform === 'mac' ? META : CTRL);
   return engine;
 }
@@ -131,7 +131,7 @@ describe('resolveHotkeyKeydown', () => {
   it('leaves the browser its own ⌘F / Ctrl+F and the retired Windows Alt+Shift combos', () => {
     expect(resolveHotkeyKeydown(key('KeyF', 'f', { metaKey: true }), true, pressed('mac'))).toBeNull();
     expect(resolveHotkeyKeydown(key('KeyF', 'а', { ctrlKey: true }), true, pressed('win'))).toBeNull();
-    const engine = createHotkeyEngine({ platform: 'win', client: 'extension' });
+    const engine = createHotkeyEngine({ platform: 'win', client: 'fansly' });
     expect(resolveHotkeyKeydown(key('KeyE', 'e', { altKey: true, shiftKey: true }), true, engine)).toBeNull();
     expect(resolveHotkeyKeydown(key('KeyE', 'e', { ctrlKey: true, shiftKey: true }), true, engine)).toBeNull();
   });
@@ -152,7 +152,7 @@ describe('resolveHotkeyKeydown', () => {
   });
 
   it('opens the cheatsheet on ? outside text inputs only', () => {
-    const engine = createHotkeyEngine({ platform: 'mac', client: 'extension' });
+    const engine = createHotkeyEngine({ platform: 'mac', client: 'fansly' });
     expect(resolveHotkeyKeydown(key('Slash', '?', { shiftKey: true }), false, engine))
       .toEqual({ kind: 'action', action: 'cheatsheet', repeat: false });
     // ЙЦУКЕН: «?» is Shift+7 — matched by the character, not the key.

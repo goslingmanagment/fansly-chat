@@ -3512,7 +3512,9 @@ body.chatgoose-voice-studio-lock {
   color: var(--chatgoose-green);
 }
 
-.chatgoose-notes-hint[data-status="error"] {
+.chatgoose-notes-hint[data-status="error"],
+.chatgoose-notes-hint[data-status="unconfirmed"],
+.chatgoose-notes-hint[data-status="too-long"] {
   color: var(--chatgoose-bad);
 }
 

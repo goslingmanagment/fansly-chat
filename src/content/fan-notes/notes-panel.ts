@@ -4,9 +4,6 @@
 // the next state change carries it back.
 
 import {
-  FAN_CUSTOM_NAME_MAX_CHARS,
-  FAN_NOTE_TEXT_MAX_CHARS,
-  FAN_NOTE_TITLE_MAX_CHARS,
   FAN_NOTES_VIEW_LABELS,
   FAN_NOTES_VIEWS,
   type FanNotesView,
@@ -26,6 +23,8 @@ export interface NotesPanelEditor {
   title: string;
   text: string;
   saving: boolean;
+  /** A create failed after it may have landed: no second one until a reread. */
+  blocked: boolean;
   error: string | null;
 }
 
@@ -43,8 +42,10 @@ export interface NotesPanelModel {
   customName: {
     value: string;
     placeholder: string;
-    status: 'idle' | 'saving' | 'saved' | 'error';
+    status: 'idle' | 'saving' | 'saved' | 'error' | 'unconfirmed' | 'too-long';
   };
+  /** A write is in flight: a reread now would race it. */
+  writing: boolean;
   notes: NotesPanelNote[];
   editor: NotesPanelEditor | null;
   confirmDeleteId: string | null;
@@ -92,6 +93,8 @@ const NAME_STATUS: Record<NotesPanelModel['customName']['status'], string> = {
   saving: 'Сохраняю…',
   saved: 'Сохранено в Fansly',
   error: 'Не сохранено · Enter — ещё раз, Esc — вернуть',
+  unconfirmed: 'Не сохранено, но могло записаться — нажмите «Обновить» и проверьте',
+  'too-long': 'Слишком длинное имя — сократите, обрезать молча Гусь не будет',
 };
 
 export class NotesPanel {
@@ -101,6 +104,9 @@ export class NotesPanel {
   private model: NotesPanelModel | null = null;
 
   constructor(private readonly callbacks: NotesPanelCallbacks) {
+    // A panel left by the previous instance of the extension (an update) is
+    // dead: its scrim would cover Fansly until the tab reloads.
+    for (const stale of document.querySelectorAll('#chatgoose-notes-root')) stale.remove();
     this.root = el('div');
     this.root.id = 'chatgoose-notes-root';
     this.scrim = el('div', 'chatgoose-notes-scrim');
@@ -108,7 +114,36 @@ export class NotesPanel {
     this.panel = el('aside', 'chatgoose-notes');
     this.panel.tabIndex = -1;
     this.panel.setAttribute('aria-label', 'Заметки о фане');
+    this.panel.addEventListener('keydown', (event) => this.trapTab(event));
     this.root.append(this.scrim, this.panel);
+  }
+
+  /** The centred window is modal: Tab and Shift+Tab cycle inside it, never
+   * out to the composer behind the scrim. */
+  private trapTab(event: KeyboardEvent): void {
+    if (event.key !== 'Tab' || this.model?.view !== 'center') return;
+    const focusable = [...this.panel.querySelectorAll<HTMLElement>('button, input, textarea, select')]
+      .filter((node) => !(node as HTMLButtonElement).disabled);
+    if (focusable.length === 0) {
+      event.preventDefault();
+      return;
+    }
+    const first = focusable[0]!;
+    const last = focusable[focusable.length - 1]!;
+    const active = document.activeElement;
+    if (event.shiftKey && (active === first || active === this.panel)) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && active === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
+  /** The modal took the focus once; a click or a script elsewhere must not
+   * leave it behind the scrim. */
+  holdsFocus(): boolean {
+    return this.model?.view === 'center';
   }
 
   isRendered(): boolean {
@@ -185,7 +220,7 @@ export class NotesPanel {
     const actions = el('div', 'chatgoose-notes-header-actions');
     const refresh = button('chatgoose-text-button', 'Обновить', () => this.callbacks.onRefresh());
     refresh.title = 'Перечитать заметки с Fansly';
-    refresh.disabled = model.body.kind === 'loading';
+    refresh.disabled = model.body.kind === 'loading' || model.writing;
     actions.append(refresh);
     if (model.view !== 'docked' || model.narrow) {
       const close = button('chatgoose-close', '×', () => this.callbacks.onClose());
@@ -233,9 +268,8 @@ export class NotesPanel {
     input.type = 'text';
     input.value = model.customName.value;
     input.placeholder = model.customName.placeholder;
-    input.maxLength = FAN_CUSTOM_NAME_MAX_CHARS;
     input.dataset.focusKey = 'custom-name';
-    input.disabled = model.customName.status === 'saving';
+    input.disabled = model.customName.status === 'saving' || model.customName.status === 'unconfirmed';
     input.addEventListener('input', () => this.callbacks.onCustomNameInput(input.value));
     input.addEventListener('keydown', (event) => {
       if (event.isComposing) return;
@@ -292,13 +326,11 @@ export class NotesPanel {
     title.type = 'text';
     title.placeholder = 'Заголовок';
     title.value = editor.title;
-    title.maxLength = FAN_NOTE_TITLE_MAX_CHARS;
     title.dataset.focusKey = `editor-title:${editor.noteId ?? 'new'}`;
     const text = el('textarea', 'chatgoose-note-textarea');
     text.rows = 9;
     text.placeholder = 'Текст заметки';
     text.value = editor.text;
-    text.maxLength = FAN_NOTE_TEXT_MAX_CHARS;
     text.dataset.focusKey = `editor-text:${editor.noteId ?? 'new'}`;
     title.disabled = editor.saving;
     text.disabled = editor.saving;
@@ -312,9 +344,10 @@ export class NotesPanel {
         event.preventDefault();
         this.callbacks.onSave();
       } else if (event.key === 'Escape') {
-        // Esc leaves the editor, not the panel.
+        // Esc leaves the field, never the draft: a habitual Esc must not throw
+        // away a questionnaire. The draft stays until «Отмена» or a save.
         event.preventDefault();
-        this.callbacks.onCancelEdit();
+        (event.target as HTMLElement).blur();
       }
     };
     title.addEventListener('keydown', keys);
@@ -326,10 +359,10 @@ export class NotesPanel {
       editor.saving ? 'Сохраняю…' : editor.noteId === null ? 'Создать' : 'Сохранить',
       () => this.callbacks.onSave(),
     );
-    save.disabled = editor.saving;
+    save.disabled = editor.saving || editor.blocked;
     const cancel = button('chatgoose-button chatgoose-button-secondary', 'Отмена', () => this.callbacks.onCancelEdit());
     cancel.disabled = editor.saving;
-    actions.append(save, cancel, el('span', 'chatgoose-notes-kbd-hint', '⌘/Ctrl+Enter — сохранить · Esc — отмена'));
+    actions.append(save, cancel, el('span', 'chatgoose-notes-kbd-hint', '⌘/Ctrl+Enter — сохранить'));
     card.append(title, text, actions);
     if (editor.error) card.append(el('div', 'chatgoose-notes-inline-error', editor.error));
     return card;

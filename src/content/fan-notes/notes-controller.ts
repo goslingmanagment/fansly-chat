@@ -9,7 +9,9 @@
 // - a failed read is not retried by itself, only by the chatter;
 // - a write goes out on «Сохранить», «Удалить» or Enter in the name field,
 //   once. When it fails the draft stays and the panel offers a reread: the
-//   write may have landed.
+//   write may have landed. A create that failed is not sent again until that
+//   reread (a second create could duplicate a note that did land), and no
+//   reread starts while a write is in flight.
 //
 // Drafts are kept per fan, so a chatter who switches chats mid-edit finds the
 // text again on returning.
@@ -24,7 +26,7 @@ import {
   FAN_NOTE_TEXT_MAX_CHARS,
   FAN_NOTE_TITLE_MAX_CHARS,
   FAN_NOTES_VIEW_DEFAULT,
-  clampChars,
+  charCount,
   type FanNote,
   type FanNotesSnapshot,
   type FanNotesView,
@@ -60,6 +62,8 @@ interface Draft {
   title: string;
   text: string;
   saving: boolean;
+  /** A create failed after it may have landed: no second one until a reread. */
+  blocked: boolean;
   error: string | null;
 }
 
@@ -112,6 +116,12 @@ export class FanNotesController {
   private observedRoute: Element | null = null;
   private readonly onKeydown = (event: KeyboardEvent) => this.handleKeydown(event);
   private readonly onResize = () => this.scheduleLayout();
+  /** The centred window is modal: focus that lands behind its scrim (a
+   * focus() of Fansly's, a Tab from the address bar) comes back. */
+  private readonly onFocusIn = (event: FocusEvent) => {
+    if (!this.panel.isRendered() || !this.panel.holdsFocus() || this.options.isCovered()) return;
+    if (!this.panel.contains(event.target as Node | null)) this.panel.focus();
+  };
 
   constructor(private readonly options: FanNotesControllerOptions) {
     this.panel = new NotesPanel({
@@ -143,6 +153,7 @@ export class FanNotesController {
     // Capture: the panel decides before the other surfaces' Esc handlers run,
     // so one press closes one thing.
     document.addEventListener('keydown', this.onKeydown, true);
+    document.addEventListener('focusin', this.onFocusIn, true);
     window.addEventListener('resize', this.onResize);
   }
 
@@ -175,6 +186,8 @@ export class FanNotesController {
 
   /** The button or the hotkey. False outside a one-to-one chat. */
   toggle(): boolean {
+    // The press decides the chat: the app's polled route may lag a switch.
+    this.sync();
     if (!this.groupId) return false;
     const visible = this.isVisible();
     if (this.view === 'docked' && !this.dockFits()) {
@@ -208,6 +221,7 @@ export class FanNotesController {
     if (this.layoutTimer !== null) window.clearTimeout(this.layoutTimer);
     this.resizeObserver?.disconnect();
     document.removeEventListener('keydown', this.onKeydown, true);
+    document.removeEventListener('focusin', this.onFocusIn, true);
     window.removeEventListener('resize', this.onResize);
     this.trigger.destroy();
     this.panel.hide();
@@ -390,7 +404,17 @@ export class FanNotesController {
   private refresh(): void {
     const groupId = this.groupId;
     if (!groupId || this.entries.get(groupId)?.kind === 'loading') return;
+    const data = this.current();
+    // A reread racing a write would hide its result (the answer lands on a
+    // snapshot that is no longer there) and drop the draft with it.
+    if (data && this.writing(data.fan.accountId)) return;
     void this.load(groupId);
+  }
+
+  private writing(fanId: string): boolean {
+    return Boolean(this.drafts.get(fanId)?.saving) ||
+      this.deleting?.fanId === fanId ||
+      this.nameStatus.get(fanId) === 'saving';
   }
 
   private async load(groupId: string): Promise<void> {
@@ -412,9 +436,28 @@ export class FanNotesController {
     this.entries.set(groupId, response?.ok
       ? { kind: 'ready', data: { creatorId: response.creatorId, fan: response.fan, customName: response.customName, notes: response.notes } }
       : { kind: 'error', error: errorOf(response?.ok === false ? response : null, thrown) });
+    if (response?.ok) this.afterReread(response.fan.accountId, response.notes);
     while (this.entries.size > KEPT_CHATS) this.entries.delete(this.entries.keys().next().value!);
     this.trigger.sync();
     this.render();
+  }
+
+  /** A fresh read answers what an unconfirmed write could not: the chatter
+   * now sees whether it landed, so a create may go out again. A draft of a
+   * note deleted elsewhere becomes a new note instead of a card that cannot
+   * render (and would lock the panel). */
+  private afterReread(fanId: string, notes: readonly FanNote[]): void {
+    const draft = this.drafts.get(fanId);
+    if (draft && !draft.saving) {
+      draft.blocked = false;
+      if (draft.noteId !== null && !notes.some((note) => note.id === draft.noteId)) {
+        draft.noteId = null;
+        draft.error = 'Эту заметку удалили в Fansly. «Создать» сохранит текст как новую заметку.';
+      } else if (draft.error?.startsWith('Не сохранено')) {
+        draft.error = null;
+      }
+    }
+    if (this.nameStatus.get(fanId) === 'unconfirmed') this.nameStatus.set(fanId, 'idle');
   }
 
   /** The open chat's notes, when they are read. */
@@ -443,6 +486,7 @@ export class FanNotesController {
       title: fromTemplate ? FAN_NOTE_TEMPLATE_TITLE : '',
       text: fromTemplate ? FAN_NOTE_TEMPLATE_TEXT : '',
       saving: false,
+      blocked: false,
       error: null,
     });
     this.render();
@@ -454,7 +498,7 @@ export class FanNotesController {
     const note = data?.notes.find((entry) => entry.id === noteId);
     if (!data || !note || this.drafts.has(data.fan.accountId)) return;
     this.confirmDelete = null;
-    this.drafts.set(data.fan.accountId, { noteId, title: note.title, text: note.note, saving: false, error: null });
+    this.drafts.set(data.fan.accountId, { noteId, title: note.title, text: note.note, saving: false, blocked: false, error: null });
     this.render();
     this.panel.focusField(`editor-text:${noteId}`);
   }
@@ -479,9 +523,17 @@ export class FanNotesController {
     if (!data) return;
     const fanId = data.fan.accountId;
     const draft = this.drafts.get(fanId);
-    if (!draft || draft.saving) return;
-    if (!draft.title.trim() && !draft.text.trim()) {
+    if (!draft || draft.saving || draft.blocked) return;
+    const title = draft.title.trim();
+    const text = draft.text.trimEnd();
+    if (!title && !text.trim()) {
       draft.error = 'Пустую заметку не сохраняю.';
+      this.render();
+      return;
+    }
+    // Refused, never cut: a cut would drop the tail of the note in Fansly.
+    if (charCount(title) > FAN_NOTE_TITLE_MAX_CHARS || charCount(text) > FAN_NOTE_TEXT_MAX_CHARS) {
+      draft.error = `Слишком длинно: заголовок до ${FAN_NOTE_TITLE_MAX_CHARS} символов, текст до ${FAN_NOTE_TEXT_MAX_CHARS}. Сократите — обрезать молча Гусь не будет.`;
       this.render();
       return;
     }
@@ -496,8 +548,8 @@ export class FanNotesController {
         creatorId: data.creatorId,
         fanAccountId: fanId,
         noteId: draft.noteId,
-        title: clampChars(draft.title.trim(), FAN_NOTE_TITLE_MAX_CHARS),
-        note: clampChars(draft.text.trimEnd(), FAN_NOTE_TEXT_MAX_CHARS),
+        title,
+        note: text,
       });
     } catch (error) {
       thrown = error;
@@ -516,7 +568,13 @@ export class FanNotesController {
     } else {
       const error = errorOf(response?.ok === false ? response : null, thrown);
       draft.saving = false;
-      draft.error = `Не сохранено: ${formatUserFacingError(error)}. Если не уверены, сохранилось ли, нажмите «Обновить» — черновик останется.`;
+      if (draft.noteId === null) {
+        // The create may have landed; another one now could make a duplicate.
+        draft.blocked = true;
+        draft.error = `Не сохранено: ${formatUserFacingError(error)}. Заметка могла всё же записаться — нажмите «Обновить»: если она появится в списке, черновик можно отменить.`;
+      } else {
+        draft.error = `Не сохранено: ${formatUserFacingError(error)}. Если не уверены, сохранилось ли, нажмите «Обновить» — черновик останется.`;
+      }
     }
     this.render();
   }
@@ -587,10 +645,16 @@ export class FanNotesController {
     if (!data) return;
     const fanId = data.fan.accountId;
     const typed = this.nameDrafts.get(fanId);
-    if (typed === undefined || this.nameStatus.get(fanId) === 'saving') return;
-    const name = clampChars(typed.trim(), FAN_CUSTOM_NAME_MAX_CHARS);
+    const status = this.nameStatus.get(fanId);
+    if (typed === undefined || status === 'saving' || status === 'unconfirmed') return;
+    const name = typed.trim();
     if (name === (data.customName?.note.trim() ?? '')) {
       this.nameDrafts.delete(fanId);
+      return;
+    }
+    if (charCount(name) > FAN_CUSTOM_NAME_MAX_CHARS) {
+      this.nameStatus.set(fanId, 'too-long');
+      this.render();
       return;
     }
     this.nameStatus.set(fanId, 'saving');
@@ -615,7 +679,8 @@ export class FanNotesController {
       if (this.nameDrafts.get(fanId) === typed) this.nameDrafts.delete(fanId);
       this.nameStatus.set(fanId, 'saved');
     } else {
-      this.nameStatus.set(fanId, 'error');
+      // A failed create may have landed: a second would leave two names.
+      this.nameStatus.set(fanId, data.customName === null && name ? 'unconfirmed' : 'error');
       this.options.onError(errorOf(response?.ok === false ? response : null, thrown));
     }
     this.render();
@@ -657,8 +722,9 @@ export class FanNotesController {
       },
       notes: data?.notes.map((note) => ({ id: note.id, title: note.title, text: note.note })) ?? [],
       editor: draft
-        ? { noteId: draft.noteId, title: draft.title, text: draft.text, saving: draft.saving, error: draft.error }
+        ? { noteId: draft.noteId, title: draft.title, text: draft.text, saving: draft.saving, blocked: draft.blocked, error: draft.error }
         : null,
+      writing: fanId !== null && this.writing(fanId),
       confirmDeleteId: this.confirmDelete && this.confirmDelete.fanId === fanId ? this.confirmDelete.noteId : null,
       deletingId: this.deleting && this.deleting.fanId === fanId ? this.deleting.noteId : null,
       hotkeyLabel: this.options.hotkeyLabel,

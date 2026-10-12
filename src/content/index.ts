@@ -740,7 +740,9 @@ export class ChatGooseContentApp {
       this.overlay.isVisible() ||
       (this.cheatsheetController?.isOpen() ?? false) ||
       (this.boardController?.isOpen() ?? false) ||
-      (this.voiceStudio?.isOpen() ?? false),
+      (this.voiceStudio?.isOpen() ?? false) ||
+      // «Новые» is a modal <dialog> in a shadow root: focus sits on its host.
+      document.activeElement?.closest('#chatgoose-followers') != null,
     headerName: () => getActiveConversationDisplayName(),
     hotkeyLabel: hotkeyComboLabel('fan-notes', detectLabelPlatform()),
   });

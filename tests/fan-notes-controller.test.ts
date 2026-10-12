@@ -363,6 +363,162 @@ describe('FanNotesController (E157)', () => {
     expect(q('.chatgoose-notes')?.dataset.placement).toBe('center');
   });
 
+  it('refuses an over-long note instead of cutting it (a cut would drop the tail in Fansly)', async () => {
+    const long = 'x'.repeat(50_001);
+    const load = vi.fn(async () => ok(snapshot(FAN_A, [note('900000000000000001', 'Анкета', long)])));
+    const { controller: notes, options } = create({ load } as never);
+    notes.sync();
+    notes.toggle();
+    await flush();
+
+    buttonNamed('Изменить').click();
+    expect(q<HTMLTextAreaElement>('.chatgoose-note-textarea')?.value.length).toBe(50_001);
+    buttonNamed('Сохранить').click();
+    await flush();
+
+    expect(options.saveNote).not.toHaveBeenCalled();
+    expect(q('.chatgoose-notes-inline-error')?.textContent).toContain('Слишком длинно');
+  });
+
+  it('after a failed create sends no second one until a reread shows whether it landed', async () => {
+    const saveNote = vi.fn(async () => ({ ok: false as const, error: createUserError('timed_out') }));
+    const { controller: notes, options } = create({ saveNote } as never);
+    notes.sync();
+    notes.toggle();
+    await flush();
+    buttonNamed('+ По шаблону').click();
+    buttonNamed('Создать').click();
+    await flush();
+
+    expect(saveNote).toHaveBeenCalledTimes(1);
+    expect(buttonNamed('Создать').disabled).toBe(true);
+    expect(q('.chatgoose-notes-inline-error')?.textContent).toContain('могла всё же записаться');
+
+    buttonNamed('Обновить').click();
+    await flush();
+    expect(options.load).toHaveBeenCalledTimes(2);
+    expect(buttonNamed('Создать').disabled).toBe(false);
+    expect(q<HTMLTextAreaElement>('.chatgoose-note-textarea')?.value.startsWith('Имя: ')).toBe(true);
+  });
+
+  it('starts no reread while a write is in flight, so the confirmed note is not lost', async () => {
+    let confirm!: () => void;
+    const saveNote = vi.fn((request: { title: string; note: string; fanAccountId: string }) => new Promise((resolve) => {
+      confirm = () => resolve({ ok: true, note: note('900000000000000009', request.title, request.note, request.fanAccountId) });
+    }));
+    const { controller: notes, options } = create({ saveNote } as never);
+    notes.sync();
+    notes.toggle();
+    await flush();
+    buttonNamed('+ Новая заметка').click();
+    const text = q<HTMLTextAreaElement>('.chatgoose-note-textarea')!;
+    text.value = 'новая';
+    text.dispatchEvent(new window.Event('input'));
+    buttonNamed('Создать').click();
+
+    expect(buttonNamed('Обновить').disabled).toBe(true);
+    buttonNamed('Обновить').click();
+    confirm();
+    await flush();
+
+    expect(options.load).toHaveBeenCalledTimes(1);
+    expect([...document.querySelectorAll('.chatgoose-note-text')].map((node) => node.textContent)).toContain('новая');
+  });
+
+  it('turns the draft of a note deleted elsewhere into a new note instead of locking the panel', async () => {
+    const load = vi.fn()
+      .mockResolvedValueOnce(ok(snapshot()))
+      .mockResolvedValueOnce(ok(snapshot(FAN_A, [])));
+    const { controller: notes } = create({ load } as never);
+    notes.sync();
+    notes.toggle();
+    await flush();
+    buttonNamed('Изменить').click();
+    buttonNamed('Обновить').click();
+    await flush();
+
+    expect(q<HTMLTextAreaElement>('.chatgoose-note-textarea')?.value).toBe('Имя: Richard');
+    expect(buttonNamed('Создать').disabled).toBe(false);
+    expect(q('.chatgoose-notes-inline-error')?.textContent).toContain('удалили в Fansly');
+  });
+
+  it('Esc in the editor leaves the field but keeps the draft', async () => {
+    const { controller: notes } = create();
+    notes.sync();
+    notes.toggle();
+    await flush();
+    buttonNamed('+ По шаблону').click();
+    const text = q<HTMLTextAreaElement>('.chatgoose-note-textarea')!;
+    text.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+
+    expect(q('.chatgoose-note-textarea')).not.toBeNull();
+    expect(document.activeElement).not.toBe(text);
+  });
+
+  it('the hotkey decides the chat at the press, before the polled route caught up', async () => {
+    const { controller: notes, options } = create();
+    notes.sync();
+    navigate(`/messages/${GROUP_B}`);
+    notes.toggle();
+    await flush();
+
+    expect(options.load).toHaveBeenCalledWith(GROUP_B);
+    expect(options.load).not.toHaveBeenCalledWith(GROUP_A);
+  });
+
+  it('removes a panel the previous instance of the extension left behind', () => {
+    const stale = document.createElement('div');
+    stale.id = 'chatgoose-notes-root';
+    stale.innerHTML = '<div class="chatgoose-notes-scrim"></div>';
+    document.body.append(stale);
+    create();
+
+    expect(stale.isConnected).toBe(false);
+  });
+
+  it('after a failed name create waits for a reread before creating another', async () => {
+    const saveCustomName = vi.fn(async () => ({ ok: false as const, error: createUserError('timed_out') }));
+    const { controller: notes, options } = create({ saveCustomName } as never);
+    notes.sync();
+    notes.toggle();
+    await flush();
+    const input = () => q<HTMLInputElement>('.chatgoose-notes-field .chatgoose-notes-input')!;
+    input().value = 'Richard';
+    input().dispatchEvent(new window.Event('input'));
+    input().dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await flush();
+    expect(q('.chatgoose-notes-hint[data-status="unconfirmed"]')).not.toBeNull();
+    expect(input().disabled).toBe(true);
+
+    input().dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await flush();
+    expect(saveCustomName).toHaveBeenCalledTimes(1);
+
+    buttonNamed('Обновить').click();
+    await flush();
+    expect(options.load).toHaveBeenCalledTimes(2);
+    expect(input().disabled).toBe(false);
+  });
+
+  it('the centred window keeps the keyboard inside it', async () => {
+    const outside = document.createElement('textarea');
+    document.body.append(outside);
+    const { controller: notes } = create();
+    notes.applyView('center');
+    notes.sync();
+    notes.toggle();
+    await flush();
+
+    const panel = q('.chatgoose-notes')!;
+    expect(document.activeElement).toBe(panel);
+    panel.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true }));
+    const focusable = [...panel.querySelectorAll<HTMLElement>('button, input, textarea, select')].filter((node) => !(node as HTMLButtonElement).disabled);
+    expect(document.activeElement).toBe(focusable[focusable.length - 1]);
+
+    outside.focus();
+    expect(document.activeElement).toBe(panel);
+  });
+
   it('drops everything read under the previous account, answers in flight included', async () => {
     let answer!: (response: FanNotesResponse) => void;
     const load = vi.fn(() => new Promise<FanNotesResponse>((resolve) => { answer = resolve; }));

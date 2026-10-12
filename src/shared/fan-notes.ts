@@ -18,10 +18,13 @@ export const FANSLY_ACCOUNT_NOTE_TYPE = 12000;
 /** The title Fansly gives the custom-name note. */
 export const FANSLY_CUSTOM_NAME_NOTE_TITLE = 'Custom Username';
 
-/** What a chatter may store in one note; Fansly states no limit of its own. */
-export const FAN_NOTE_TITLE_MAX_CHARS = 200;
-export const FAN_NOTE_TEXT_MAX_CHARS = 5000;
-export const FAN_CUSTOM_NAME_MAX_CHARS = 200;
+/** Sanity bounds for what crosses into the background, in code points. Fansly
+ * states no limit of its own, so these sit far above any real note; a longer
+ * text is refused with a message, never cut (a cut would silently drop the
+ * tail of a note written in Fansly's own modal). */
+export const FAN_NOTE_TITLE_MAX_CHARS = 1_000;
+export const FAN_NOTE_TEXT_MAX_CHARS = 50_000;
+export const FAN_CUSTOM_NAME_MAX_CHARS = 1_000;
 
 /** «+ По шаблону»: the questionnaire the agency's chatters already keep. */
 export const FAN_NOTE_TEMPLATE_TITLE = 'Анкета';
@@ -113,8 +116,7 @@ export function readFanNotes(
   return { customName, notes };
 }
 
-/** Bounded on code points, never splitting a surrogate pair. */
-export function clampChars(text: string, max: number): string {
-  const points = Array.from(text);
-  return points.length > max ? points.slice(0, max).join('') : text;
+/** Length in code points, the unit the bounds count in. */
+export function charCount(text: string): number {
+  return Array.from(text).length;
 }

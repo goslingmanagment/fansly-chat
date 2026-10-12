@@ -444,6 +444,21 @@ export function registerRuntimeApi({
       requestType === 'getFanNotes' ? FAN_NOTES_READ_TIMEOUT_MS : FAN_NOTES_WRITE_TIMEOUT_MS,
     );
     const { signal } = controller;
+    // Every request rides the shared follower lane: reads are paced, and a
+    // 429 on a read or a write starts the cooldown every other Fansly read of
+    // the account respects. Right before each dispatch the lane re-checks
+    // that this tab still works as the same Fansly session; a tab that became
+    // another account meanwhile answers `chat_changed` and nothing is sent.
+    const paced = fanslyClient.followerSession(session, () => {
+      const current = sessionStore.getSessionForTab(tabId!);
+      if (
+        !current?.connected ||
+        current.authorization !== session.authorization ||
+        current.fanslySessionId !== session.fanslySessionId
+      ) {
+        throw new ChatGooseError('chat_changed');
+      }
+    });
     try {
       const creatorId = session.resolvedAccountId ??
         await fanslyClient.getAuthenticatedAccountId(session, signal);
@@ -455,13 +470,12 @@ export function registerRuntimeApi({
           error: createUserError('coach_fan_unresolved'),
         };
         const chatKey = `${creatorId}:${groupId}`;
-        // A generation in this chat resolved the fan already; else one group
-        // read, remembered — the fan is the other member of a chat of two.
-        const cachedContext = tabId !== undefined ? tabContexts.get(tabId) : null;
-        let fanAccountId = fanOfChat.get(chatKey) ??
-          (cachedContext?.groupId === groupId ? cachedContext.fanAccountId ?? null : null);
+        // One group read per chat, remembered: the fan is the other member of
+        // a chat of exactly two. Not the tab's generation context — it takes
+        // the first non-creator member unchecked, and writes follow this read.
+        let fanAccountId = fanOfChat.get(chatKey) ?? null;
         if (!fanAccountId) {
-          const group = await fanslyClient.getGroup(groupId, session, signal, undefined, 'none');
+          const group = await fanslyClient.getGroup(groupId, paced, signal, undefined, 'none');
           fanAccountId = soleFanOfGroup(group, creatorId);
           if (!fanAccountId) return unresolved;
         }
@@ -470,7 +484,7 @@ export function registerRuntimeApi({
         }
         fanOfChat.set(chatKey, fanAccountId);
 
-        const [account] = await fanslyClient.getAccountNames([fanAccountId], session, signal, 'none');
+        const [account] = await fanslyClient.getAccountNames([fanAccountId], paced, signal, 'none');
         if (!account || account.id !== fanAccountId) return unresolved;
         return {
           ok: true,
@@ -494,12 +508,12 @@ export function registerRuntimeApi({
       if (requestType === 'saveFanNote') {
         const { fanAccountId, noteId, title, note } = message as unknown as SaveFanNoteRequest;
         const saved = noteId === null
-          ? await fanslyClient.createAccountNote(fanAccountId, FANSLY_ACCOUNT_NOTE_TYPE, title, note, session, signal)
+          ? await fanslyClient.createAccountNote(fanAccountId, FANSLY_ACCOUNT_NOTE_TYPE, title, note, paced, signal)
           : await fanslyClient.editAccountNote(
               { id: noteId, contentType: FANSLY_ACCOUNT_NOTE_TYPE, contentId: fanAccountId, title, note },
               title,
               note,
-              session,
+              paced,
               signal,
             );
         return { ok: true, note: saved };
@@ -507,10 +521,11 @@ export function registerRuntimeApi({
 
       if (requestType === 'deleteFanNote') {
         const { fanAccountId, note } = message as unknown as DeleteFanNoteRequest;
-        if (note.contentId !== fanAccountId) {
+        // Regular notes only: the custom name goes through saveFanCustomName.
+        if (note.contentId !== fanAccountId || note.contentType !== FANSLY_ACCOUNT_NOTE_TYPE) {
           return { ok: false, error: createUserError('chat_changed') };
         }
-        await fanslyClient.deleteAccountNote(note, session, signal);
+        await fanslyClient.deleteAccountNote(note, paced, signal);
         return { ok: true };
       }
 
@@ -522,17 +537,17 @@ export function registerRuntimeApi({
       let customName: FanNote | null;
       if (!trimmed) {
         // Fansly's own «trash-undo»: no note, the fan's display name again.
-        if (current) await fanslyClient.deleteAccountNote(current, session, signal);
+        if (current) await fanslyClient.deleteAccountNote(current, paced, signal);
         customName = null;
       } else if (current) {
-        customName = await fanslyClient.editAccountNote(current, current.title || FANSLY_CUSTOM_NAME_NOTE_TITLE, trimmed, session, signal);
+        customName = await fanslyClient.editAccountNote(current, current.title || FANSLY_CUSTOM_NAME_NOTE_TITLE, trimmed, paced, signal);
       } else {
         customName = await fanslyClient.createAccountNote(
           fanAccountId,
           FANSLY_CUSTOM_NAME_NOTE_TYPE,
           FANSLY_CUSTOM_NAME_NOTE_TITLE,
           trimmed,
-          session,
+          paced,
           signal,
         );
       }

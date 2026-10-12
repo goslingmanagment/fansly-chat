@@ -146,7 +146,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E154 | 2026-10-11 | The public pages lead to the common ChatGoose home: the header logo of all five links to `../` (it was the top of the landing on `install.html` and the landing on the other four), and `start.html` links to the desktop page as `../desktop/` instead of `https://ext.gosling-agency.ru/desktop/`. Relative, because the pages are read at `chatgoose.gosling-agency.ru/fansly/`, one level below the home (the site is `~/code/1-platform/agency-site`'s); the XPI link stays on `ext.`. Footer logo, texts, deploy scripts and tests untouched; no release. E153 is the icon change (PR #147), open when this was written |
 | E155 | 2026-10-12 | «Новые»: a fan Fansly will not let the model DM (paid DM, unmet DM rules) is `closed`, «Нельзя написать» with the reason, read with Fansly's own `verifyNew` over the chat's `dmPermissionFlags`; nothing is generated, reserved or sent. «Исключить из очереди» on such a row only, remembered in this browser, dropped when the DMs open. A refused Hub reservation names the custody state instead of «Другой чаттер…». 2.8.1 |
 | E156 | 2026-10-12 | Re-vendor the SDK from deployed Core `6ee3d627` (core #567): production answers `03012453…` after core #563 added `GET /api/v1/ops/live`; the deploy gate compares `contractHash` exactly; no source change; unblocks the 2.8.1 release gate, no version bump |
-| E157 | 2026-10-12 | Fan notes panel: the fan's native Fansly notes (12000) and custom name (12002) in a ChatGoose panel — «Заметки» in the header row after «Регистрация» and ⌘⇧K / Ctrl+Alt+K (hub hotkey scheme 2, extensions only). Views «Всегда справа» (docked in Fansly's empty right column, reads each opened chat after 0.7 s), «Справа по кнопке» (default) and «Окно по центру» (read on open); setting `fanNotesView`, storage v21. Reads: group (once per chat) + `/account?ids=`; writes: Fansly's own `POST /notes`, `/notes/edit`, `/notes/delete`; one attempt each, nothing during a cooldown. «+ По шаблону» = the agency questionnaire. Never in a prompt |
+| E157 | 2026-10-12 | Fan notes panel: the fan's native Fansly notes (12000) and custom name (12002) in a ChatGoose panel — «Заметки» in the header row after «Регистрация» and ⌘⇧K / Ctrl+Alt+K (hub hotkey scheme 2, client `fansly`: this extension only). Views «Всегда справа» (docked in Fansly's empty right column, reads each opened chat after 0.7 s), «Справа по кнопке» (default) and «Окно по центру» (read on open); setting `fanNotesView`, storage v21. Reads: group (once per chat) + `/account?ids=`; writes: Fansly's own `POST /notes`, `/notes/edit`, `/notes/delete`; one attempt each, nothing during a cooldown. «+ По шаблону» = the agency questionnaire. Never in a prompt |
 
 ## Entries
 
@@ -5616,11 +5616,14 @@ in the session, 2026-10-12).
   «trash-undo»). The same notes show in Fansly's modal and any tool that
   reads them; nothing ChatGoose-specific is stored. The agency does not use
   FBuddy; its notes, if any, are ordinary 12000 notes here.
-- Cost: reading a chat's notes is the group read (only when the fan is not
-  known: a generation in the chat or an earlier read already resolved it; the
-  background remembers `creator:group → fan`, a chat's members never change)
-  plus one `/account?ids=`. One attempt each, nothing while the follower
-  pacer reports a rate-limit cooldown, the answer kept for the tab's lifetime;
+- Cost: reading a chat's notes is the group read (once per chat: the
+  background remembers `creator:group → fan`, a chat's members never change;
+  not the tab's generation context, which takes the first non-creator member
+  unchecked — writes follow this read, so the fan is the other member of a
+  chat of exactly two) plus one `/account?ids=`. Both ride the follower lane
+  (`followerSession`): paced, and a 429 starts the cooldown every other read
+  of the account respects. One attempt each, nothing during that cooldown,
+  the answer kept for the tab's lifetime;
   «Обновить» rereads, a failed read waits for the chatter. «Справа по
   кнопке» (the default) and «Окно по центру» read nothing until the panel
   opens. «Всегда справа» reads each opened chat — the owner accepted that
@@ -5631,8 +5634,21 @@ in the session, 2026-10-12).
 - Writes go out only on «Создать» / «Сохранить», «Удалить» (after an in-card
   confirmation) or Enter / leaving the custom-name field when its text
   changed — never per keystroke (Fansly's modal saves the name every 300 ms of
-  typing). One attempt (`postOnce`), never retried. A failure keeps the draft
-  and says a reread shows whether it landed. A write names the creator the
+  typing). One attempt (`postOnce`), never retried, on the same follower lane
+  as the reads: a 429 on a write starts the shared cooldown too, and right
+  before the dispatch the lane re-checks that the tab still works as the
+  session the request came under (a tab that became another account while the
+  write waited for its route answers `chat_changed`, nothing is sent). A
+  failure keeps the draft and says a reread shows whether it landed. A failed create (a note or the
+  custom name) is not sent again until «Обновить» has reread the notes — a
+  second create could duplicate one that landed; an edit or a delete may be
+  repeated. No reread starts while a write is in flight (its answer would land
+  on a snapshot that is gone). Texts are never cut: the bounds (title 1 000,
+  text 50 000, name 1 000 code points) sit far above real notes, and a longer
+  text is refused with a message — a cut would drop the tail of a note
+  written in Fansly's modal, which has no limit. A draft of a note deleted
+  elsewhere becomes a new note after a reread. Delete takes regular notes
+  only; the custom name goes through its own request. A write names the creator the
   notes were read under; a tab that became another account answers
   `chat_changed`. The confirmation of a create/edit is the note Fansly
   returns, checked to be the same fan, type and (edit) id; a delete has only
@@ -5644,13 +5660,25 @@ in the session, 2026-10-12).
   «Справа по кнопке» uses the same column or lies over the chat's right edge
   under the header and above the composer; «Окно по центру» is a modal with a
   scrim that closes with its chat. The choice is made in the panel and every
-  tab follows it. The panel root sits at `2147483644`, under every overlay
+  tab follows it; the options page, which writes its whole settings snapshot
+  back, adopts the tab's choice from the storage change itself and re-applies
+  the latest after each of its own writes. Residual: a save the options page
+  dispatches in the milliseconds between a tab's write and the delivery of its
+  change event still carries the old view — the same synchronous-write window
+  the page documents for the schema barrier. The panel root sits at `2147483644`, under every overlay
   (Coach dims it), the launcher moved to `2147483643`. Esc closes it unless
-  another ChatGoose surface is open, and never while a field of the panel or
-  of Fansly (outside the modal) has the focus. Drafts are kept per fan, so a
-  chat switch mid-edit loses nothing.
+  another ChatGoose surface (or «Новые») is open, and never while a field of
+  the panel or of Fansly (outside the modal) has the focus; Esc in the editor
+  leaves the field and keeps the draft. The centred window holds the focus:
+  Tab cycles inside it and focus landing behind the scrim comes back. Drafts are kept per fan, so a chat
+  switch mid-edit loses nothing. The button and the hotkey re-read the open
+  chat from the URL at the press. A panel left by the previous instance of the
+  extension is removed when the new one starts.
 - Hotkey: hub `packages/chatgoose-hotkeys` scheme 2 adds `notes` on KeyK,
-  panel level, extensions only (desktop reserved). N, the mnemonic, is
+  panel level, and a hotkey client `fansly`: this extension runs every
+  `extension` row plus its own, and its engine is created as `fansly`. Notes
+  is `fansly` only, reserved in chat-extension (whose action catalog is
+  pinned to the `extension` rows) and the desktop. N, the mnemonic, is
   forbidden (⌘⇧N reopens a closed window); Firefox's Web Console sits on
   Ctrl+Shift+K / Cmd+Option+K, so ⌘⇧K and Ctrl+Alt+K are free. The other two
   clients re-vendor the same manifest.
@@ -5658,6 +5686,13 @@ in the session, 2026-10-12).
   (the E152 placement logic, moved), each keeping its order in the row.
 - Boundary: notes are chatter-eyes-only; nothing reaches the kernel or a
   prompt.
+- Reviewed independently by Opus 5.5 and by gpt-6-astra (Codex) on the first
+  commit; every finding was checked against the code and fixed here (silent
+  truncation of a long note, unpaced reads and writes, a reread racing a
+  write, a duplicate create after an ambiguous failure, an orphaned edit
+  draft, the polled route at the press, the group-chat fan from the tab
+  context, the options page reverting the view, a dead panel after an update,
+  Esc dropping a draft, the modal leaking focus).
 - Verified: `pnpm check`; the real panel, trigger and stylesheet on a stand
   built from Fansly's header markup, three views, dark and light. Not
   verified: a live Fansly session — the endpoints and bodies come from the
