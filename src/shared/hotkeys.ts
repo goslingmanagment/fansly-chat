@@ -9,7 +9,8 @@
 // - everything that writes into the reply field, plus Cancel — ⌘+key on macOS,
 //   Ctrl+key on Windows (E Reply, I Fix, G Hi, P Ping, . Cancel);
 // - analysis, panels and toggles — ⌘⇧+key on macOS, Ctrl+Alt+key on Windows
-//   (H Help, S Recap, O tone, B Review, L Split, M Spenders, C Coach).
+//   (H Help, S Recap, O tone, B Review, L Split, M Spenders, C Coach,
+//   K fan notes).
 //
 // Keys are matched by physical position (`event.code`), so the Russian layout
 // works without switching. Facts behind the choices, from Firefox's
@@ -50,6 +51,7 @@ export type HotkeyAction =
   | 'toggle-split'
   | 'cancel'
   | 'spenders-board'
+  | 'fan-notes'
   | 'cheatsheet';
 
 /** Every action of the family table, as the extension names it. */
@@ -70,6 +72,7 @@ export const EXTENSION_ACTION: Record<SchemeAction, SchemeHotkeyAction> = {
   split: 'toggle-split',
   spenders: 'spenders-board',
   coach: 'coach',
+  notes: 'fan-notes',
 };
 
 const SCHEME_ACTION = Object.fromEntries(
@@ -112,6 +115,7 @@ export const HOTKEY_ACTION_NAMES: Record<HotkeyAction, string> = {
   'toggle-split': 'Split — Reply и Fix серией из 2–3 сообщений',
   'spenders-board': 'Доска Spenders',
   coach: 'Coach — спросить AI про фана',
+  'fan-notes': 'Заметки о фане (заметки Fansly)',
   cheatsheet: 'Шпаргалка хоткеев',
 };
 

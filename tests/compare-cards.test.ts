@@ -27,6 +27,7 @@ function createStorage(overrides?: Partial<PersistedState>): PersistedState {
       followSoundEnabled: true,
       followSoundTone: 'double',
       fanslyViaTab: false,
+      fanNotesView: 'drawer',
     },
     personalities: [],
     personaCatalog: [],

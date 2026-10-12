@@ -543,6 +543,11 @@ export class OverlayController {
     this.callbacks.onClose();
   }
 
+  /** True while any overlay surface (a result, Coach, the Recap picker) shows. */
+  isVisible(): boolean {
+    return this.model.kind !== 'hidden';
+  }
+
   render(model: OverlayViewModel, options?: OverlayRenderOptions | boolean): void {
     const opts: OverlayRenderOptions =
       typeof options === 'boolean' ? { preserveInlineError: options } : (options ?? {});

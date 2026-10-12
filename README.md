@@ -78,6 +78,21 @@ from prose when checking what is installed or live; verify the signed update fee
   read until the chatter clicks; the answer stays until the page reloads or
   the tab changes account. One-to-one chats only
   (`src/content/fan-registration.ts`).
+- **Заметки** (E157) — the fan's native Fansly notes (what Fansly's own «Edit
+  User Notes» modal shows, two clicks deep in the name menu) in a ChatGoose
+  panel: «Заметки» after «Регистрация» in the header row, or ⌘⇧K /
+  Ctrl+Alt+K. Regular notes (contentType 12000) are listed, added, edited and
+  deleted with an in-card confirmation; the custom name (12002) is edited in
+  place; «+ По шаблону» starts the agency's questionnaire. Three views, chosen
+  in the panel and kept in settings (`fanNotesView`, v21): «Всегда справа»
+  docks in the empty column Fansly leaves right of the chat and reads each
+  opened chat once it stayed open 0.7 s; «Справа по кнопке» (default) and
+  «Окно по центру» read nothing until opened. A read is the group read (only
+  when the fan is not known yet) plus `GET /account?ids=`, one attempt each,
+  none during a rate-limit cooldown, kept for the tab's lifetime; writes are
+  Fansly's own `POST /notes`, `/notes/edit`, `/notes/delete`, one attempt on an
+  explicit save or delete. Chatter-eyes-only: notes never reach a prompt
+  (`src/content/fan-notes/`, `src/shared/fan-notes.ts`).
 - **Vault uploader** — on `/creator/vault`, a folder of media goes into the open
   album one file at a time through Fansly's own upload form, each confirmed by
   its album card, with a per-account/per-album checkpoint for resuming; an

@@ -130,6 +130,7 @@ describe('isDebugEnabled', () => {
       followSoundEnabled: true,
       followSoundTone: 'double',
       fanslyViaTab: false,
+      fanNotesView: 'drawer',
     })).toBe(true);
   });
 
@@ -154,6 +155,7 @@ describe('isDebugEnabled', () => {
       followSoundEnabled: true,
       followSoundTone: 'double',
       fanslyViaTab: false,
+      fanNotesView: 'drawer',
     })).toBe(false);
   });
 

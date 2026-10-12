@@ -3135,3 +3135,207 @@ describe('runtime-api accounts view', () => {
     expect((mockStorage.settings as Record<string, unknown>).accountLabels).toBeUndefined();
   });
 });
+
+describe('runtime-api fan notes (E157)', () => {
+  beforeEach(() => {
+    mockStorage = {};
+    vi.clearAllMocks();
+  });
+
+  const creatorId = '700000000000000001';
+  const fanAccountId = '905593157180223488';
+  const groupId = '818181818181818181';
+  const note = (id: string, contentType: number, title: string, text: string) => ({
+    id,
+    accountId: creatorId,
+    contentType,
+    contentId: fanAccountId,
+    title,
+    note: text,
+  });
+
+  function makeFanslyClient(account: unknown = {
+    id: fanAccountId,
+    username: 'richard24',
+    displayName: 'Richard',
+    notes: [
+      note('900000000000000001', 12000, 'Анкета', 'Имя: Richard'),
+      note('900000000000000002', 12002, 'Custom Username', '💰 | Richard/US/24'),
+      note('900000000000000003', 12000, '', 'Летит в San Diego'),
+    ],
+  }) {
+    return {
+      getAuthenticatedAccount: vi.fn(async () => undefined),
+      getAuthenticatedAccountId: vi.fn(async () => creatorId),
+      getGroup: vi.fn(async () => ({ users: [{ userId: creatorId }, { userId: fanAccountId }] })),
+      getAccountNames: vi.fn(async () => (account ? [account] : [])),
+      createAccountNote: vi.fn(async (contentId: string, contentType: number, title: string, text: string) => ({
+        id: '900000000000000009', contentType, contentId, title, note: text,
+      })),
+      editAccountNote: vi.fn(async (existing: { id: string; contentType: number; contentId: string }, title: string, text: string) => ({
+        ...existing, title, note: text,
+      })),
+      deleteAccountNote: vi.fn(async () => undefined),
+      followerReadStatus: vi.fn<() => { cooldownUntil: number; intervalMs: number } | undefined>(
+        () => undefined,
+      ),
+    };
+  }
+
+  async function harness(fanslyClient = makeFanslyClient()) {
+    const installed = await installRuntimeApiHarness(fanslyClient);
+    installed.sessionStore.registerCapture(7, makeCapture(creatorId)).resolvedAccountId = creatorId;
+    return { ...installed, fanslyClient };
+  }
+
+  const send = (message: Record<string, unknown>) => onMessageListener?.(message, { tab: { id: 7 } });
+
+  it('reads the chat\'s fan once, then the account, and splits notes from the custom name', async () => {
+    const { fanslyClient } = await harness();
+
+    const response = await send({ type: 'getFanNotes', groupId });
+
+    expect(response).toEqual({
+      ok: true,
+      creatorId,
+      fan: { accountId: fanAccountId, username: 'richard24', displayName: 'Richard' },
+      customName: { id: '900000000000000002', contentType: 12002, contentId: fanAccountId, title: 'Custom Username', note: '💰 | Richard/US/24' },
+      notes: [
+        { id: '900000000000000001', contentType: 12000, contentId: fanAccountId, title: 'Анкета', note: 'Имя: Richard' },
+        { id: '900000000000000003', contentType: 12000, contentId: fanAccountId, title: '', note: 'Летит в San Diego' },
+      ],
+    });
+    expect(fanslyClient.getGroup).toHaveBeenCalledWith(groupId, expect.anything(), expect.any(AbortSignal), undefined, 'none');
+    expect(fanslyClient.getAccountNames).toHaveBeenCalledWith([fanAccountId], expect.anything(), expect.any(AbortSignal), 'none');
+
+    // The chat's fan is remembered: a reread costs only the account read.
+    await send({ type: 'getFanNotes', groupId });
+    expect(fanslyClient.getGroup).toHaveBeenCalledTimes(1);
+    expect(fanslyClient.getAccountNames).toHaveBeenCalledTimes(2);
+  });
+
+  it('takes the fan a generation already resolved in this chat', async () => {
+    const { fanslyClient, tabContexts } = await harness();
+    tabContexts.setRoute(7, groupId, 1);
+    tabContexts.setFan(7, groupId, fanAccountId, 'Richard');
+
+    const response = await send({ type: 'getFanNotes', groupId });
+
+    expect(response).toMatchObject({ ok: true, fan: { accountId: fanAccountId } });
+    expect(fanslyClient.getGroup).not.toHaveBeenCalled();
+  });
+
+  it('sends nothing while Fansly is rate-limiting the account\'s reads — writes included', async () => {
+    const { fanslyClient } = await harness();
+    const cooldownUntil = Date.now() + 60_000;
+    fanslyClient.followerReadStatus.mockReturnValue({ cooldownUntil, intervalMs: 500 });
+
+    for (const message of [
+      { type: 'getFanNotes', groupId },
+      { type: 'saveFanNote', creatorId, fanAccountId, noteId: null, title: '', note: 'x' },
+    ]) {
+      expect(await send(message)).toEqual({
+        ok: false,
+        error: createUserError('rate_limited', { retryAtMs: cooldownUntil }),
+      });
+    }
+    expect(fanslyClient.getGroup).not.toHaveBeenCalled();
+    expect(fanslyClient.createAccountNote).not.toHaveBeenCalled();
+  });
+
+  it('never guesses the fan, and refuses an account answer about somebody else', async () => {
+    const groupChat = makeFanslyClient();
+    groupChat.getGroup.mockResolvedValue({ users: [{ userId: creatorId }, { userId: fanAccountId }, { userId: '111111111111111111' }] });
+    await harness(groupChat);
+    expect(await send({ type: 'getFanNotes', groupId })).toEqual({ ok: false, error: createUserError('coach_fan_unresolved') });
+    expect(groupChat.getAccountNames).not.toHaveBeenCalled();
+
+    const stranger = makeFanslyClient({ id: '111111111111111111', notes: [] });
+    await harness(stranger);
+    expect(await send({ type: 'getFanNotes', groupId })).toEqual({ ok: false, error: createUserError('coach_fan_unresolved') });
+  });
+
+  it('creates and edits a regular note with Fansly\'s own fields', async () => {
+    const { fanslyClient } = await harness();
+
+    const created = await send({ type: 'saveFanNote', creatorId, fanAccountId, noteId: null, title: 'Анкета', note: 'Имя: ' });
+    expect(created).toEqual({
+      ok: true,
+      note: { id: '900000000000000009', contentType: 12000, contentId: fanAccountId, title: 'Анкета', note: 'Имя: ' },
+    });
+    expect(fanslyClient.createAccountNote).toHaveBeenCalledWith(fanAccountId, 12000, 'Анкета', 'Имя: ', expect.anything(), expect.any(AbortSignal));
+
+    const edited = await send({ type: 'saveFanNote', creatorId, fanAccountId, noteId: '900000000000000001', title: 'Анкета', note: 'Имя: Richard' });
+    expect(edited).toMatchObject({ ok: true, note: { id: '900000000000000001', note: 'Имя: Richard' } });
+    expect(fanslyClient.editAccountNote).toHaveBeenCalledWith(
+      { id: '900000000000000001', contentType: 12000, contentId: fanAccountId, title: 'Анкета', note: 'Имя: Richard' },
+      'Анкета',
+      'Имя: Richard',
+      expect.anything(),
+      expect.any(AbortSignal),
+    );
+  });
+
+  it('refuses a write read under another creator: the tab became another account', async () => {
+    const { fanslyClient } = await harness();
+
+    const response = await send({ type: 'saveFanNote', creatorId: '700000000000000002', fanAccountId, noteId: null, title: '', note: 'x' });
+
+    expect(response).toEqual({ ok: false, error: createUserError('chat_changed') });
+    expect(fanslyClient.createAccountNote).not.toHaveBeenCalled();
+  });
+
+  it('deletes only a note of the named fan', async () => {
+    const { fanslyClient } = await harness();
+    const target = { id: '900000000000000001', contentType: 12000, contentId: fanAccountId, title: 'Анкета', note: 'Имя: Richard' };
+
+    expect(await send({ type: 'deleteFanNote', creatorId, fanAccountId, note: target })).toEqual({ ok: true });
+    expect(fanslyClient.deleteAccountNote).toHaveBeenCalledWith(target, expect.anything(), expect.any(AbortSignal));
+
+    const foreign = { ...target, contentId: '111111111111111111' };
+    expect(await send({ type: 'deleteFanNote', creatorId, fanAccountId, note: foreign })).toEqual({ ok: false, error: createUserError('chat_changed') });
+    expect(fanslyClient.deleteAccountNote).toHaveBeenCalledTimes(1);
+  });
+
+  it('creates, renames and clears the custom name the way Fansly\'s modal does', async () => {
+    const { fanslyClient } = await harness();
+    const current = { id: '900000000000000002', contentType: 12002, contentId: fanAccountId, title: 'Custom Username', note: 'Old' };
+
+    expect(await send({ type: 'saveFanCustomName', creatorId, fanAccountId, current: null, name: '  Richard/US/24 ' })).toMatchObject({
+      ok: true,
+      customName: { contentType: 12002, title: 'Custom Username', note: 'Richard/US/24' },
+    });
+    expect(fanslyClient.createAccountNote).toHaveBeenCalledWith(fanAccountId, 12002, 'Custom Username', 'Richard/US/24', expect.anything(), expect.any(AbortSignal));
+
+    expect(await send({ type: 'saveFanCustomName', creatorId, fanAccountId, current, name: 'New' })).toMatchObject({
+      ok: true,
+      customName: { id: current.id, note: 'New' },
+    });
+    expect(fanslyClient.editAccountNote).toHaveBeenCalledWith(current, 'Custom Username', 'New', expect.anything(), expect.any(AbortSignal));
+
+    // Empty is Fansly's «trash-undo»: the note goes, the display name returns.
+    expect(await send({ type: 'saveFanCustomName', creatorId, fanAccountId, current, name: '   ' })).toEqual({ ok: true, customName: null });
+    expect(fanslyClient.deleteAccountNote).toHaveBeenCalledWith(current, expect.anything(), expect.any(AbortSignal));
+
+    // A regular note is never treated as the custom name.
+    const regular = { ...current, contentType: 12000 };
+    expect(await send({ type: 'saveFanCustomName', creatorId, fanAccountId, current: regular, name: 'x' })).toEqual({ ok: false, error: createUserError('chat_changed') });
+  });
+
+  it('names a failed write the way the chatter can act on', async () => {
+    const { fanslyClient } = await harness();
+    const { ChatGooseError } = await import('../src/shared/errors.js');
+    fanslyClient.createAccountNote.mockRejectedValue(new ChatGooseError('fansly_server_error', undefined, { status: 500 }));
+
+    const response = await send({ type: 'saveFanNote', creatorId, fanAccountId, noteId: null, title: '', note: 'x' });
+
+    expect(response).toMatchObject({ ok: false, error: { key: 'fansly_server_error' } });
+  });
+
+  it('remembers the chosen view in settings', async () => {
+    await harness();
+
+    expect(await send({ type: 'setFanNotesView', view: 'docked' })).toEqual({ ok: true });
+    expect(mockStorage.settings).toMatchObject({ fanNotesView: 'docked' });
+  });
+});

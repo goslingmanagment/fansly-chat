@@ -65,6 +65,9 @@ describe('the family table, as the extension sees it', () => {
     expect(hotkeyComboLabel('cheatsheet', 'win')).toBe('?');
     expect(hotkeyAriaLabel('toggle-split', 'mac')).toBe('Meta+Shift+L');
     expect(hotkeyAriaLabel('coach', 'win')).toBe('Control+Alt+C');
+    // E157: notes on K — N reopens a closed window in Firefox.
+    expect(hotkeyComboLabel('fan-notes', 'mac')).toBe('⌘⇧K');
+    expect(hotkeyComboLabel('fan-notes', 'win')).toBe('Ctrl+Alt+K');
   });
 
   it('gives the toolbar features a chip: the bare key for text actions, ⇧/Alt for panels', () => {
@@ -110,6 +113,8 @@ describe('resolveHotkeyKeydown', () => {
       .toEqual({ kind: 'action', action: 'spenders-board', repeat: false });
     expect(resolveHotkeyKeydown(key('KeyC', 'c', { metaKey: true, shiftKey: true }), true, pressed('mac')))
       .toEqual({ kind: 'action', action: 'coach', repeat: false });
+    expect(resolveHotkeyKeydown(key('KeyK', 'л', { ctrlKey: true, altKey: true }), true, pressed('win')))
+      .toEqual({ kind: 'action', action: 'fan-notes', repeat: false });
   });
 
   it('keeps the macOS ⌘⇧E / ⌘⇧I / ⌘⇧G / ⌘⇧X habits and swallows ⌘⇧D / ⌘⇧F', () => {

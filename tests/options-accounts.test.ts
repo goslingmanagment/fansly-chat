@@ -84,6 +84,7 @@ function makeState(overrides?: Partial<PersistedState>): PersistedState {
       followSoundEnabled: true,
       followSoundTone: 'double',
       fanslyViaTab: false,
+      fanNotesView: 'drawer',
     },
     personalities: [{ id: 'p1', name: 'Closer', content: 'be nice', updatedAt: 1 }],
     personaCatalog: [{

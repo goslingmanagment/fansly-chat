@@ -14,7 +14,7 @@
 export type HotkeyPlatform = "mac" | "win";
 export type HotkeyClient = "extension" | "desktop";
 export type HotkeyLevel = "text" | "panel";
-export type HotkeyAction = "reply" | "fix" | "hi" | "ping" | "cancel" | "help" | "recap" | "tone" | "review" | "split" | "spenders" | "coach";
+export type HotkeyAction = "reply" | "fix" | "hi" | "ping" | "cancel" | "help" | "recap" | "tone" | "review" | "split" | "spenders" | "coach" | "notes";
 export interface HotkeyDef {
     readonly action: HotkeyAction;
     readonly level: HotkeyLevel;
@@ -36,7 +36,7 @@ export interface HotkeyDef {
     readonly guarded: boolean;
 }
 /** Bumped whenever an assignment changes; both clients must ship the same value. */
-export declare const HOTKEY_SCHEME_VERSION = 1;
+export declare const HOTKEY_SCHEME_VERSION = 2;
 export declare const HOTKEYS: readonly HotkeyDef[];
 /** macOS only: the extension's pre-v1 Cmd+Shift habits (both clients honour
  * them, since the desktop users also work in the extension).

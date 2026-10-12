@@ -918,6 +918,7 @@ export class OperationCoordinator {
       signedIn: storage.settings.agencyHubDeviceToken.trim().length > 0,
       voiceNotesCapable,
       showToolbarHints: storage.settings.showToolbarHints,
+      fanNotesView: storage.settings.fanNotesView,
       hasPersonalities: getActivePersonaCatalog(storage.personaCatalog).length > 0,
       mappedPersonalityId,
       mappedPersonalityName,

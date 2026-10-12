@@ -8,22 +8,11 @@
 // shows it again without asking.
 //
 // The control lives inside Angular's header, which Fansly both reuses across
-// chats and tears down (the Gallery view, a route change). It therefore trusts
-// neither: every sync re-reads the open chat from the URL and re-homes the
-// element, driven by the conversation subtree's mutations and a slow timer.
+// chats and tears down; header-row-slot.ts keeps it in place.
 
-import {
-  CONVERSATION_ATTACH_RETRY_MS,
-  CONVERSATION_ATTACH_SLOW_RETRY_MS,
-  CONVERSATION_ATTACH_TIMEOUT_MS,
-} from '../shared/constants.js';
-import { parseGroupIdFromPath } from '../shared/fansly-routes.js';
 import type { FanRegistrationResponse } from '../shared/types.js';
+import { HeaderRowSlot } from './header-row-slot.js';
 
-const ROUTE_ROOT_SELECTOR = 'app-messages-conversation-route';
-/** The row under the fan's name. Fansly renders it only for a one-to-one chat. */
-const SUB_ROW_SELECTOR =
-  `${ROUTE_ROOT_SELECTOR} .message-content-header-contact .content-header-sub-row`;
 /** Answers kept per tab; a chatter does not open more chats than this at once. */
 const KNOWN_LIMIT = 500;
 
@@ -90,17 +79,11 @@ export class FanRegistrationControl {
   private readonly valueText: HTMLSpanElement;
   private readonly known = new Map<string, number>();
   private readonly loading = new Set<string>();
+  private readonly slot: HeaderRowSlot;
 
-  private readonly cleanedRows = new WeakSet<HTMLElement>();
-
-  private groupId: string | null = null;
   /** Bumped by `reset()`: an answer asked for before it is not kept. */
   private epoch = 0;
   private rendered = '';
-  private checkTimer: number | null = null;
-  private attachDeadlineMs: number | null = null;
-  private observedRoot: HTMLElement | null = null;
-  private stopObserver: (() => void) | null = null;
 
   constructor(private readonly options: FanRegistrationControlOptions) {
     this.root = document.createElement('span');
@@ -125,33 +108,17 @@ export class FanRegistrationControl {
     this.value.append(createCalendarIcon(), this.valueText);
 
     this.root.append(divider, this.button, this.value);
+    this.slot = new HeaderRowSlot(this.root, {
+      className: 'chatgoose-fan-registration',
+      order: 10,
+      render: (groupId) => this.render(groupId),
+    });
   }
 
   /** Re-read the page: which chat is open, and is the control still in its
    * row. Safe to call at any time; it only touches the DOM on a change. */
   sync(): void {
-    const groupId = parseGroupIdFromPath(window.location.pathname);
-    this.clearCheck();
-    if (groupId !== this.groupId) {
-      this.groupId = groupId;
-      this.attachDeadlineMs = null;
-    }
-    if (!groupId) {
-      this.stopObserving();
-      this.root.remove();
-      return;
-    }
-
-    this.render(groupId);
-    const row = document.querySelector(SUB_ROW_SELECTOR);
-    if (!(row instanceof HTMLElement)) {
-      this.root.remove();
-    } else if (this.root.parentElement !== row) {
-      this.dropStaleControls(row);
-      row.append(this.root);
-    }
-    this.observe();
-    this.scheduleCheck();
+    this.slot.sync();
   }
 
   /** The tab now works as another Fansly account: the same chat id may show a
@@ -164,16 +131,13 @@ export class FanRegistrationControl {
   }
 
   destroy(): void {
-    this.clearCheck();
-    this.stopObserving();
-    this.groupId = null;
-    this.root.remove();
+    this.slot.destroy();
   }
 
   private async reveal(): Promise<void> {
     // The click decides the chat: the app's polled route may lag a switch.
     this.sync();
-    const groupId = this.groupId;
+    const groupId = this.slot.groupId;
     if (!groupId || this.known.has(groupId) || this.loading.has(groupId)) {
       return;
     }
@@ -204,7 +168,7 @@ export class FanRegistrationControl {
     this.loading.delete(groupId);
     this.sync();
     // A failure in a chat the chatter already left is not worth a toast.
-    if (!this.known.has(groupId) && this.groupId === groupId) {
+    if (!this.known.has(groupId) && this.slot.groupId === groupId) {
       this.options.onError(failure);
     }
   }
@@ -243,86 +207,5 @@ export class FanRegistrationControl {
       hour: '2-digit',
       minute: '2-digit',
     })}`;
-  }
-
-  /** An extension update leaves the previous instance's control in a header
-   * Fansly keeps reusing, frozen on whatever fan it last showed. Once per row:
-   * a second look could only ever meet a control that is alive. */
-  private dropStaleControls(row: HTMLElement): void {
-    if (this.cleanedRows.has(row)) {
-      return;
-    }
-    this.cleanedRows.add(row);
-    for (const stale of row.querySelectorAll('.chatgoose-fan-registration')) {
-      if (stale !== this.root) {
-        stale.remove();
-      }
-    }
-  }
-
-  private observe(): void {
-    const routeRoot = document.querySelector(ROUTE_ROOT_SELECTOR);
-    const target = routeRoot instanceof HTMLElement
-      ? routeRoot.parentElement ?? routeRoot
-      : null;
-    if (target === this.observedRoot && target?.isConnected) {
-      return;
-    }
-    this.stopObserving();
-    if (!target) {
-      return;
-    }
-
-    let timer: number | null = null;
-    const observer = new MutationObserver((records) => {
-      // Our own re-render lives in the observed subtree and changes nothing
-      // about where the control belongs.
-      if (timer !== null || records.every(({ target: node }) => this.root.contains(node))) {
-        return;
-      }
-      timer = window.setTimeout(() => {
-        timer = null;
-        this.sync();
-      }, 0);
-    });
-    // Angular repaints a reused header by rewriting text nodes in place.
-    observer.observe(target, { childList: true, characterData: true, subtree: true });
-    this.observedRoot = target;
-    this.stopObserver = () => {
-      observer.disconnect();
-      if (timer !== null) {
-        window.clearTimeout(timer);
-      }
-    };
-  }
-
-  private stopObserving(): void {
-    this.stopObserver?.();
-    this.stopObserver = null;
-    this.observedRoot = null;
-  }
-
-  /** The next look at the page without waiting for a mutation. Fast while the
-   * header is missing inside the attach window (the chat is still rendering);
-   * otherwise a slow keep-alive, for a subtree Fansly swaps out from above the
-   * observed one. */
-  private scheduleCheck(): void {
-    if (this.root.isConnected) {
-      this.attachDeadlineMs = null;
-    } else {
-      this.attachDeadlineMs ??= Date.now() + CONVERSATION_ATTACH_TIMEOUT_MS;
-    }
-    const waiting = this.attachDeadlineMs !== null && Date.now() < this.attachDeadlineMs;
-    this.checkTimer = window.setTimeout(() => {
-      this.checkTimer = null;
-      this.sync();
-    }, waiting ? CONVERSATION_ATTACH_RETRY_MS : CONVERSATION_ATTACH_SLOW_RETRY_MS);
-  }
-
-  private clearCheck(): void {
-    if (this.checkTimer !== null) {
-      window.clearTimeout(this.checkTimer);
-      this.checkTimer = null;
-    }
   }
 }

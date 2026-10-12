@@ -60,6 +60,7 @@ function makeState(overrides?: Partial<PersistedState['settings']>): PersistedSt
       followSoundEnabled: true,
       followSoundTone: 'double',
       fanslyViaTab: false,
+      fanNotesView: 'drawer',
       ...overrides,
     },
     personalities: [
