@@ -10,7 +10,7 @@ import type {
 
 // ─── Enums & Literal Unions ───────────────────────────────────────────────
 
-export type FeatureType = 'fast-reply' | 'improve-draft' | 'help-me' | 'fan-summary' | 'chat-review' | 'ping' | 'hi-greeting' | 'coach-chat' | 'voice-script';
+export type FeatureType = 'fast-reply' | 'improve-draft' | 'help-me' | 'fan-summary' | 'chat-review' | 'ping' | 'hi-greeting' | 'coach-chat' | 'voice-script' | 'fan-notes-fill';
 export type OperationPhase = 'idle' | 'loading-messages' | 'loading-earnings' | 'generating' | 'completed' | 'cancelled' | 'error';
 export type PingSegment = 'segment-a' | 'segment-b' | 'active';
 export type RouteKey = 'message' | 'group' | 'account' | 'earnings' | 'messagingGroups' | 'subscribers' | 'media';
@@ -1665,6 +1665,10 @@ export interface OperationStartPayload extends PortEnvelopeBase {
   forceRegenerate?: boolean;
   replyMode?: ReplyMode;
   replyTone?: ReplyTone;
+  /** fan-notes-fill only (E159): the labels of the questionnaire being
+   * filled («Имя», «Локация», …). The kernel answers one `Label: value` line
+   * per label, from the chat alone — the chatter's values never travel. */
+  noteFields?: string[];
   /** coach-chat: the chatter's live question for this turn. */
   chatterQuestion?: string;
   /** coach-chat: ask the kernel to substitute its pinned situation question. */

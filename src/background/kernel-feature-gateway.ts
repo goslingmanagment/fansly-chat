@@ -90,6 +90,9 @@ export interface KernelFeatureRequest {
   /** hi-greeting only (Core Decision 379): 3 variants for the chat overlay,
    * 1 ready draft for the New Followers window. */
   variantCount?: 1 | 3;
+  /** fan-notes-fill only (E159): the questionnaire labels; the kernel
+   * requires them there and rejects them elsewhere. */
+  noteFields?: string[];
   /** The REQUESTED transcript window (deepMessageCount for a full recap, the
    * short const for a short recap, the quick window otherwise) — distinct from
    * `clientContext.messageCount` (the KEPT count). The kernel records it as the
@@ -476,6 +479,9 @@ export function createKernelFeatureGateway(
             ...(request.summaryMode === 'short' ? { summaryMode: 'short' } : {}),
             ...(greetingFields && request.variantCount !== undefined
               ? { variantCount: request.variantCount }
+              : {}),
+            ...(request.feature === 'fan-notes-fill' && request.noteFields !== undefined
+              ? { noteFields: request.noteFields }
               : {}),
             // Top-level REQUESTED window (kernel records it as requestedCount);
             // clientContext.messageCount below is the KEPT count.

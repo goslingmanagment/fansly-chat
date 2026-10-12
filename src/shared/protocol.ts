@@ -9,6 +9,7 @@ import {
   FAN_NOTE_TEXT_MAX_CHARS,
   FAN_NOTE_TITLE_MAX_CHARS,
   FAN_NOTES_VIEWS,
+  isValidNoteFields,
   type FanNotesView,
 } from './fan-notes.js';
 import { isOptionsPaneKey } from './options-routes.js';
@@ -266,7 +267,16 @@ function isOperationStartMessage(record: Record<string, unknown>): boolean {
     isOptionalSummaryMode(record) &&
     isOptionalString(record, 'coachSessionId') &&
     isOptionalNumber(record, 'transcriptEpoch') &&
-    isOptionalBoolean(record, 'viewCachedOnly');
+    isOptionalBoolean(record, 'viewCachedOnly') &&
+    hasNoteFieldsForFeature(record);
+}
+
+/** E159: the questionnaire labels ride `fan-notes-fill` only, and that feature
+ * never runs without them. */
+function hasNoteFieldsForFeature(record: Record<string, unknown>): boolean {
+  return record.feature === 'fan-notes-fill'
+    ? isValidNoteFields(record.noteFields)
+    : record.noteFields === undefined;
 }
 
 /** coach-chat operation:complete turn context (spec §8.2). Typed, minimized shape —

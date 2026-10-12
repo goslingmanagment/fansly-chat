@@ -148,6 +148,8 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E156 | 2026-10-12 | Re-vendor the SDK from deployed Core `6ee3d627` (core #567): production answers `03012453…` after core #563 added `GET /api/v1/ops/live`; the deploy gate compares `contractHash` exactly; no source change; unblocks the 2.8.1 release gate, no version bump |
 | E157 | 2026-10-12 | Fan notes panel: the fan's native Fansly notes (12000) and custom name (12002) in a ChatGoose panel — «Заметки» in the header row after «Регистрация» and ⌘⇧K / Ctrl+Alt+K (hub hotkey scheme 2, client `fansly`: this extension only). Views «Всегда справа» (docked in Fansly's empty right column, reads each opened chat after 0.7 s), «Справа по кнопке» (default) and «Окно по центру» (read on open); setting `fanNotesView`, storage v21. Reads: group (once per chat) + `/account?ids=`; writes: Fansly's own `POST /notes`, `/notes/edit`, `/notes/delete`; one attempt each, nothing during a cooldown. «+ По шаблону» = the agency questionnaire. Never in a prompt |
 | E158 | 2026-10-12 | Release 2.9.0 = E157 (fan notes panel). The owner ordered the release («да выпускай канеш и релиз») without a number; 2.9.0 because it is a feature, as 2.8.0 was. Vendored SDK equals production (`03012453…`); hotkeys from hub `0a96105d` in all three clients. No new permission |
+| E159 | 2026-10-12 | «✨ Заполнить из чата» in the notes editor: the kernel feature `fan-notes-fill` (Core, Sonnet 5.5 by default) fills a questionnaire (`Label: value` lines) from the whole chat, read like a full Recap (deep window, spending, subscription), no 30-message minimum. Only the labels travel (`noteFields`); empty fields are filled, a filled field is never overwritten — a different answer is offered as «было → станет». Nothing is saved until the chatter saves. Rides the tab's one operation; routed to the panel, not the overlay |
+| E160 | 2026-10-12 | Release 2.10.0 = E159 (AI fill of the notes questionnaire). Core `fan-notes-fill` deployed first (Core `a3449f77`, #572, contract `a6f77fbb…`; Core keeps serving the SDK of 2.8.1/2.9.0, `030124…`), then the SDK re-vendored from the deployed commit. Version by the 2.9.0 rule (a feature), the owner ordered the chain |
 
 ## Entries
 
@@ -5709,3 +5711,53 @@ clients (hub `0a96105d`, sha256 `7850406c…`). Not verified before the
 release: a live Fansly session — the note endpoints and bodies come from the
 bundle, not from captured traffic; the first thing to compare if a chatter
 reports a note that does not save.
+
+**E159 (2026-10-12).** The owner asked, on the 2.9.0 panel, for a button
+that fills the questionnaire «with the neural net from the whole chat», on
+Sonnet by default. His rulings: a field the chatter filled is not touched,
+but a different answer may be offered «что на что»; only what the fan said,
+nothing invented; «Медиа» is what he bought and what content he likes;
+«Характеристика» is what he likes and what he pays for.
+
+- Kernel: a new AI feature `fan-notes-fill` (Core PR, default model
+  `anthropic:claude-sonnet-5-5`, overridable like the others). The request
+  carries the questionnaire's labels (`noteFields`, required there, refused
+  elsewhere) and the usual Fansly `clientContext`; the answer is one
+  `Label: value` line per label, an empty value where the chat has nothing.
+  The template, the rules above and the transcript framing live in Core.
+- Extension: the feature is an ordinary operation of the tab (one at a time,
+  as every AI action) that reads the chat the way a full Recap does — the
+  deep window, spending and subscription — but without the 30-message
+  minimum: a fan's name in his fifth message is worth a field. Canonical refs
+  (`conversationRef` = group, `fanRef` = fan), `transcriptCoverage` sent. Its
+  port messages are routed to the notes panel (`ownsOperation`), never to the
+  overlay or the inline surface; `surfaceKind: 'panel-only'`.
+- Only the labels travel, never the chatter's values (the model answers from
+  the chat alone, and nothing the chatter typed reaches a prompt). The panel
+  merges: an empty field takes the answer; a filled one keeps the chatter's
+  value and, when the answer differs, shows «было → станет» with «Заменить»
+  / «Заменить все» / «Скрыть». A suggestion applies only while the field
+  still holds the value it was made for.
+- The editor is locked while the fill runs (status «Читаю переписку… N/M»,
+  then «Заполняю анкету…», «Остановить»); a stopped fill drops its late
+  answer. Nothing goes to Fansly until «Создать»/«Сохранить» — AI never
+  writes a note by itself.
+- A note is a questionnaire when at least two lines read `Label: value`
+  (labels 1–60 characters with a letter, at most 30); the button shows only
+  then.
+- The bootstrap bundle ceiling rose 28 → 29 KB: the feature-policy table it
+  carries gained the row; no UI entered the bootstrap.
+- Not verified: a live Fansly session and the kernel feature on production
+  data — checked on a stand with the real panel and a synthetic answer.
+
+**E160 (2026-10-12).** Release 2.10.0 ships E159. The owner approved the
+whole chain («4. ок делай»: Core deploy, re-vendor, release) and declined
+model reviews for it («ревью моделями не надо»). Order: Core #572 merged
+(`a3449f77`) and deployed dist-only to agency-de; production health then
+answered the new contract `a6f77fbb…` and still listed `030124…` among
+`compatibleClientSdks` (the released 2.8.1/2.9.0 SDK is registered in Core's
+client-SDK registry as bundle `64a972fd6222`, so the retention gate keeps it
+from now on). The SDK was re-vendored from that deployed commit, so the
+release gate (`contractHash` == production) holds. Version 2.10.0: a feature,
+by the rule 2.9.0 followed. Not verified before the release: the feature on a
+live Fansly chat and production data.

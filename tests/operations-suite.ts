@@ -26,6 +26,7 @@ import {
 import type {
   AggregatedEarnings,
   BackgroundPortMessage,
+  OperationStartPayload,
   CompareModelCard,
   FanSubscriptionContext,
   FanslyMessagePageResponse,
@@ -7588,6 +7589,61 @@ describe(`OperationCoordinator (${part})`, () => {
     await coordinator.startOperation(1, coachStart({ operationId: 'coach-op-3', transcriptEpoch: 1 }));
     const loadsAfterBump = fanslyClient.loadMessages.mock.calls.length;
     expect(loadsAfterBump).toBeGreaterThan(loadsAfterSecond);
+  });
+
+  describe('fan-notes-fill (E159)', () => {
+    function fillStart(overrides: Partial<OperationStartPayload> = {}): OperationStartPayload {
+      return {
+        type: 'operation:start',
+        operationId: 'fill-op',
+        feature: 'fan-notes-fill',
+        groupId: 'group-1',
+        routeNonce: 1,
+        domFanDisplayName: 'alice',
+        forceRegenerate: false,
+        noteFields: ['Имя', 'Локация', 'Медиа'],
+        ...overrides,
+      };
+    }
+
+    it('reads the whole chat like a full Recap and asks the kernel for the labels only', async () => {
+      const { coordinator, kernelGateway, fanslyClient, port } = await createCoordinatorHarness({
+        anthropicRawText: 'Имя: Alice\nЛокация: \nМедиа: видео',
+      });
+      // Twelve messages: under the deep minimum, still worth a questionnaire.
+      fanslyClient.loadMessages.mockResolvedValue({
+        pages: buildMessagePages(12),
+        pagesLoaded: 1,
+        targetPages: 1,
+        reachedEnd: true,
+      });
+
+      await coordinator.startOperation(1, fillStart());
+
+      expect(kernelGateway.streamFeature).toHaveBeenCalledTimes(1);
+      const request = kernelRequestFromStreamCall(kernelGateway);
+      expect(request).toMatchObject({
+        feature: 'fan-notes-fill',
+        conversationRef: 'group-1',
+        fanRef: 'fan-1',
+        noteFields: ['Имя', 'Локация', 'Медиа'],
+        clientContext: { transcriptCoverage: 'full-history' },
+      });
+      // The deep window (the harness sets deepMessageCount 500), as a full Recap asks for it.
+      expect(fanslyClient.loadMessages.mock.calls[0]?.[1]).toBe(500);
+      const complete = postedMessages(port).find((message) => message.type === 'operation:complete');
+      expect(complete).toMatchObject({ operationId: 'fill-op', result: { rawText: 'Имя: Alice\nЛокация: \nМедиа: видео' } });
+    });
+
+    it('never sends the labels for another feature', async () => {
+      const { coordinator, kernelGateway } = await createCoordinatorHarness({
+        anthropicRawText: 'Recap text',
+      });
+
+      await coordinator.startOperation(1, fillStart({ feature: 'fan-summary', noteFields: undefined, operationId: 'recap-op' }));
+
+      expect(kernelRequestFromStreamCall(kernelGateway)).not.toHaveProperty('noteFields');
+    });
   });
   }
 });

@@ -335,6 +335,7 @@ export const FEATURE_LABELS: Record<FeatureType, string> = {
   'hi-greeting': 'Hi',
   'voice-script': 'Voice',
   'coach-chat': 'Coach',
+  'fan-notes-fill': 'Notes fill',
 };
 
 // ─── Default Settings ───────────────────────────────────────────────────

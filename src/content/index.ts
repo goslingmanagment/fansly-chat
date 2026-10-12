@@ -745,6 +745,22 @@ export class ChatGooseContentApp {
       document.activeElement?.closest('#chatgoose-followers') != null,
     headerName: () => getActiveConversationDisplayName(),
     hotkeyLabel: hotkeyComboLabel('fan-notes', detectLabelPlatform()),
+    // E159: «✨ Заполнить из чата» is an ordinary operation of the tab; its
+    // port messages are routed to the panel (handlePortMessage), never to the
+    // overlay or inline surfaces.
+    startFill: ({ operationId, groupId, noteFields }) => {
+      this.port.send({
+        type: 'operation:start',
+        operationId,
+        feature: 'fan-notes-fill',
+        groupId,
+        routeNonce: this.routeNonce,
+        domFanDisplayName: getActiveConversationDisplayName(),
+        forceRegenerate: false,
+        noteFields,
+      });
+    },
+    cancelFill: (operationId) => this.port.send({ type: 'operation:cancel', operationId }),
   });
 
   constructor() {
@@ -3358,6 +3374,12 @@ export class ChatGooseContentApp {
     if (this.voiceReconnectPending && this.voiceController) {
       this.voiceReconnectPending = false;
       this.runVoiceControllerTask(this.voiceController.handlePortReconnect());
+    }
+    // E159: the notes panel's questionnaire fill owns its operation's messages.
+    if ('operationId' in message && typeof message.operationId === 'string' &&
+        message.type.startsWith('operation:') && this.fanNotes.ownsOperation(message.operationId)) {
+      this.fanNotes.handleOperationMessage(message);
+      return;
     }
     switch (message.type) {
       case 'tab:state':
