@@ -225,7 +225,8 @@ Important references:
 
 ## Release
 
-Release 2.10.0 (E159, E160) adds «✨ Заполнить из чата» to the notes panel:
+Release 2.10.1 (E159, E160, E161; 2.10.0 was signed but never served) adds
+«✨ Заполнить из чата» to the notes panel:
 the Core feature `fan-notes-fill` (Sonnet 5.5 by default, Core `a3449f77`,
 #572) fills a questionnaire from the whole chat. SDK re-vendored from the
 deployed Core (contract `a6f77fbb…`); Core keeps serving the SDK of 2.8.1 and

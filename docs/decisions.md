@@ -150,6 +150,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E158 | 2026-10-12 | Release 2.9.0 = E157 (fan notes panel). The owner ordered the release («да выпускай канеш и релиз») without a number; 2.9.0 because it is a feature, as 2.8.0 was. Vendored SDK equals production (`03012453…`); hotkeys from hub `0a96105d` in all three clients. No new permission |
 | E159 | 2026-10-12 | «✨ Заполнить из чата» in the notes editor: the kernel feature `fan-notes-fill` (Core, Sonnet 5.5 by default) fills a questionnaire (`Label: value` lines) from the whole chat, read like a full Recap (deep window, spending, subscription), no 30-message minimum. Only the labels travel (`noteFields`); empty fields are filled, a filled field is never overwritten — a different answer is offered as «было → станет». Nothing is saved until the chatter saves. Rides the tab's one operation; routed to the panel, not the overlay |
 | E160 | 2026-10-12 | Release 2.10.0 = E159 (AI fill of the notes questionnaire). Core `fan-notes-fill` deployed first (Core `a3449f77`, #572, contract `a6f77fbb…`; Core keeps serving the SDK of 2.8.1/2.9.0, `030124…`), then the SDK re-vendored from the deployed commit. Version by the 2.9.0 rule (a feature), the owner ordered the chain |
+| E161 | 2026-10-12 | 2.10.0 was signed by AMO but never served: the session running `deploy.sh` ended while it waited for the approval, before the upload, the feed and the tag. AMO versions are single-use and the script has no resume path, so the same build ships as 2.10.1 through the ordinary `deploy.sh`; the changelog names 2.10.1 only. No code change |
 
 ## Entries
 
@@ -5761,3 +5762,15 @@ from now on). The SDK was re-vendored from that deployed commit, so the
 release gate (`contractHash` == production) holds. Version 2.10.0: a feature,
 by the rule 2.9.0 followed. Not verified before the release: the feature on a
 live Fansly chat and production data.
+
+**E161 (2026-10-12).** The 2.10.0 release stopped half-way: the Claude
+session running `scripts/deploy.sh` ended while web-ext waited for AMO's
+approval. AMO then signed 2.10.0 (unlisted, file sha256 `98a9ef69…`), but
+nothing was uploaded: the feed stayed at 2.9.0, no tag, no announce.
+`deploy.sh` cannot resume from a signed file (web-ext submits a new version
+every time, and AMO refuses a version it already has), and completing the
+upload by hand would skip the script's checks. The same build therefore ships
+as 2.10.1 through the ordinary path; the CHANGELOG section, the changelog page
+and the announce name 2.10.1, and 2.10.0 is left unused in AMO. Lesson for the
+procedure: run `deploy.sh` where it outlives the session (a detached shell),
+since the AMO wait is the longest step.
