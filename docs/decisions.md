@@ -152,6 +152,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E160 | 2026-10-12 | Release 2.10.0 = E159 (AI fill of the notes questionnaire). Core `fan-notes-fill` deployed first (Core `a3449f77`, #572, contract `a6f77fbb…`; Core keeps serving the SDK of 2.8.1/2.9.0, `030124…`), then the SDK re-vendored from the deployed commit. Version by the 2.9.0 rule (a feature), the owner ordered the chain |
 | E161 | 2026-10-12 | 2.10.0 was signed by AMO but never served: the session running `deploy.sh` ended while it waited for the approval, before the upload, the feed and the tag. AMO versions are single-use and the script has no resume path, so the same build ships as 2.10.1 through the ordinary `deploy.sh`; the changelog names 2.10.1 only. No code change |
 | E162 | 2026-10-13 | Chrome DevTools MCP по умолчанию для Fansly; карта исходников и общий справочник с chat-extension (X38), бандл и исследования; правило проверено в новой сессии Claude |
+| E163 | 2026-10-13 | AGENTS.md — единственный файл правил; CLAUDE.md перенесён без потери инструкций, актуальные ссылки обновлены |
 
 ## Entries
 
@@ -5785,3 +5786,19 @@ Fansly вместо Claude in Chrome и знал, где бандл/исслед
 API/WS, FBuddy, хаб и материалы `~/code/8-docs`). Новая сессия Claude автоматически прочитала
 инструкцию и выбрала DevTools; доступ к Fansly ранее проверен через этот MCP. Проверка сайта
 в Chrome не заменяет проверку Firefox MV3. Код расширения, релиз и настройки аккаунтов не менялись.
+
+**E163 (2026-10-13).** Владелец уточнил, что инструкции должны работать через `AGENTS.md`.
+Файл теперь содержит полный прежний `CLAUDE.md` (изменён только заголовок), включая правило
+Chrome DevTools MCP и справочник из E162; прежний `AGENTS.md` был лишь указателем.
+`CLAUDE.md` удалён как заменённый документ: его единственный преемник —
+[AGENTS.md](../AGENTS.md). Это tombstone по правилу сохранения документации выше.
+Актуальные ссылки в README, справочнике Fansly, баннере исторической спецификации и двух
+комментариях к коду/тестам обновлены.
+Старые записи журнала и датированные исследования сохраняют имя `CLAUDE.md` как факт своего
+времени; прежний файл доступен в истории Git.
+
+На машине владельца Claude Code 2.1.296 настроен на `claude-md-or-agents-md`: наличие
+проектного `CLAUDE.md` давало ему приоритет, без него нативно загружается `AGENTS.md`.
+[Правило загрузки Claude Code](https://code.claude.com/docs/en/memory#agentsmd) проверено
+на дату записи. Настройки пользователя не менялись; отдельный файл-обёртка не нужен.
+Поведение, проверки и релизный процесс расширения не менялись.
