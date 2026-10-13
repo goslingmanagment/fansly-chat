@@ -833,6 +833,7 @@ export declare const voiceNoteParamsSchema: z.ZodObject<{
 export declare const voiceNoteCreateBodySchema: z.ZodObject<{
     clientRequestId: z.ZodString;
     conversationRef: z.ZodString;
+    fanRef: z.ZodOptional<z.ZodString>;
     sourceGenerationRef: z.ZodString;
     script: z.ZodString;
 }, z.core.$strip>;
@@ -16644,6 +16645,7 @@ declare const baseRouteSchemas: {
         readonly body: z.ZodObject<{
             clientRequestId: z.ZodString;
             conversationRef: z.ZodString;
+            fanRef: z.ZodOptional<z.ZodString>;
             sourceGenerationRef: z.ZodString;
             script: z.ZodString;
         }, z.core.$strip>;

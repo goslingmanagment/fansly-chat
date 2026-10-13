@@ -82,7 +82,7 @@ from prose when checking what is installed or live; verify the signed update fee
   read until the chatter clicks; the answer stays until the page reloads or
   the tab changes account. One-to-one chats only
   (`src/content/fan-registration.ts`).
-- **Заметки** (2.9.0, E157; AI fill 2.10.0, E159) — the fan's native Fansly notes (what Fansly's own «Edit
+- **Заметки** (2.9.0, E157; AI fill 2.10.0, E159; merge and quotes 2.11.0, E164) — the fan's native Fansly notes (what Fansly's own «Edit
   User Notes» modal shows, two clicks deep in the name menu) in a ChatGoose
   panel: «Заметки» after «Регистрация» in the header row, or ⌘⇧K /
   Ctrl+Alt+K. Regular notes (contentType 12000) are listed, added, edited and
@@ -238,6 +238,14 @@ Important references:
   architecture.
 
 ## Release
+
+Release 2.11.0 (E164, E165) makes «✨ Заполнить из чата» merge into the
+questionnaire instead of overwriting it and show the fan's own words behind
+each fact: Core's `fan-notes-fill` merge mode (hub #593, Core `bc0f6dbc`),
+the questionnaire's values travel to Core (`noteValues`), the template gains
+«График», «Планы и даты», «Другое». SDK re-vendored from the deployed Core
+(contract `663d132f…`); Core keeps serving the SDK of 2.10.1 (`a6f77fbb…`).
+No new permission. Tabs opened before the update need a reload.
 
 Release 2.10.1 (E159, E160, E161; 2.10.0 was signed but never served) adds
 «✨ Заполнить из чата» to the notes panel:

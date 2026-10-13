@@ -27,14 +27,22 @@ import { z } from "zod";
 export declare const clientOpenToken: z.ZodString;
 /**
  * The ONE shape of a platform numeric id a client sends: an OnlyFans fan id
- * (== chat id) or message id. No leading zero, at most 30 digits. Every client
- * field that carries such an id (fanRef, the feed, fresh text, known message
- * ids) uses this schema, so the hub never holds two spellings of one id.
+ * (== chat id) or message id, a Fansly account or group id. No leading zero, at
+ * most 30 digits. Every client field that carries such an id (fanRef,
+ * conversationRef, the feed, fresh text, known message ids) uses this schema,
+ * so the hub never holds two spellings of one id.
  */
 export declare const CLIENT_NUMERIC_ID_PATTERN: RegExp;
 export declare const clientNumericIdSchema: z.ZodString;
-/** OnlyFans fan id (== chat_id). */
+/** The platform's fan id: on OnlyFans the fan id (== chat_id), on Fansly the fan's account id. */
 export declare const clientFanRefSchema: z.ZodString;
+/**
+ * R20 HF-10: the chat that a read by conversation names apart from its fan
+ * (`conversation-recaps-v1`): on Fansly the group id; on OnlyFans the chat id
+ * IS the fan id, so it equals `fanRef` or is left out. See "reads by
+ * conversation" below.
+ */
+export declare const clientConversationRefSchema: z.ZodString;
 export declare const clientPageParamsSchema: z.ZodObject<{
     pageLabel: z.ZodString;
 }, z.core.$strip>;
@@ -68,7 +76,7 @@ export type ClientCursorRefusalReason = (typeof CLIENT_CURSOR_REFUSAL_REASONS)[n
  * OnlyFans only.
  */
 export declare const CLIENT_FEATURE_FLAG_NAMES: readonly ["insertion", "freshText", "newcomers", "spenders", "stats", "preview", "previewSend", "previewSendMarkAiGenerated", "fanPanel", "navigation", "wsTap", "sound", "coach", "recap", "review", "splitAll", "drafts", "voice", "notesFill"];
-export declare const CLIENT_HUB_CAPABILITY_NAMES: readonly ["context-v1", "live-text-v1", "split-all-v1", "shared-recaps-v1", "recap-profile-v1", "archive-feed-v1", "spenders-stats-v1", "awaiting-reply-v1", "audience-new-v1", "preview-send-custody-v1", "client-health-perf-v1", "ai-usage-v1", "manual-greeting-v1", "coverage-check-v1"];
+export declare const CLIENT_HUB_CAPABILITY_NAMES: readonly ["context-v1", "live-text-v1", "split-all-v1", "shared-recaps-v1", "recap-profile-v1", "archive-feed-v1", "spenders-stats-v1", "awaiting-reply-v1", "audience-new-v1", "preview-send-custody-v1", "client-health-perf-v1", "ai-usage-v1", "manual-greeting-v1", "coverage-check-v1", "conversation-recaps-v1"];
 /**
  * Append-only. `client_outdated` (the caller's `x-client-version` is below the
  * owner's minimum, or unreadable) is answered by the server-side check of
@@ -185,6 +193,7 @@ export declare const CLIENT_RECAP_TRANSCRIPT_COVERAGES: readonly ["full-history"
 export type ClientRecapTranscriptCoverage = (typeof CLIENT_RECAP_TRANSCRIPT_COVERAGES)[number];
 export declare const clientConversationRecapsQuerySchema: z.ZodObject<{
     personaDefinitionId: z.ZodOptional<z.ZodString>;
+    conversationRef: z.ZodOptional<z.ZodString>;
 }, z.core.$strict>;
 export declare const clientRecapBodySchema: z.ZodObject<{
     generationRef: z.ZodString;
@@ -250,6 +259,7 @@ export type ClientGenerationNotEligibleReason = (typeof CLIENT_GENERATION_NOT_EL
 export declare const clientFanProfileFromGenerationBodySchema: z.ZodObject<{
     generationRef: z.ZodString;
     clientRequestId: z.ZodOptional<z.ZodString>;
+    conversationRef: z.ZodOptional<z.ZodString>;
 }, z.core.$strict>;
 export declare const clientFanProfileFromGenerationResponseSchema: z.ZodObject<{
     outcome: z.ZodEnum<{
@@ -289,6 +299,7 @@ export declare const clientConversationFeedQuerySchema: z.ZodObject<{
     cursor: z.ZodOptional<z.ZodString>;
     limit: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
     summaryWindow: z.ZodOptional<z.ZodCoercedNumber<unknown>>;
+    conversationRef: z.ZodOptional<z.ZodString>;
 }, z.core.$strict>;
 export declare const clientFeedItemSchema: z.ZodObject<{
     messageId: z.ZodString;
@@ -321,6 +332,7 @@ export declare const clientConversationFeedResponseSchema: z.ZodObject<{
     target: z.ZodObject<{
         pageLabel: z.ZodString;
         fanRef: z.ZodString;
+        conversationRef: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>;
     source: z.ZodString;
     snapshotRevision: z.ZodString;
@@ -1392,6 +1404,7 @@ export declare const clientRouteSchemas: {
         }, z.core.$strip>;
         readonly querystring: z.ZodObject<{
             personaDefinitionId: z.ZodOptional<z.ZodString>;
+            conversationRef: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>;
         readonly response: {
             readonly 200: z.ZodObject<{
@@ -1472,12 +1485,14 @@ export declare const clientRouteSchemas: {
             cursor: z.ZodOptional<z.ZodString>;
             limit: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
             summaryWindow: z.ZodOptional<z.ZodCoercedNumber<unknown>>;
+            conversationRef: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>;
         readonly response: {
             readonly 200: z.ZodObject<{
                 target: z.ZodObject<{
                     pageLabel: z.ZodString;
                     fanRef: z.ZodString;
+                    conversationRef: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>;
                 source: z.ZodString;
                 snapshotRevision: z.ZodString;
@@ -1564,6 +1579,7 @@ export declare const clientRouteSchemas: {
         readonly body: z.ZodObject<{
             generationRef: z.ZodString;
             clientRequestId: z.ZodOptional<z.ZodString>;
+            conversationRef: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>;
         readonly response: {
             readonly 200: z.ZodObject<{

@@ -154,6 +154,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E162 | 2026-10-13 | Chrome DevTools MCP по умолчанию для Fansly; карта исходников и общий справочник с chat-extension (X38), бандл и исследования; правило проверено в новой сессии Claude |
 | E163 | 2026-10-13 | AGENTS.md — единственный файл правил; CLAUDE.md перенесён без потери инструкций, актуальные ссылки обновлены |
 | E164 | 2026-10-13 | «✨ Заполнить из чата» merges instead of overwriting (release A, extension half): the questionnaire's values travel to Core (`noteValues`, merge mode on every fill; a narrowing of E157/E159 — the custom name and other notes still never travel), the template gains «График», «Планы и даты», «Другое», new lines and up to five AI-named fields (with «В Другое») go straight into the draft, rewrites stay «было → станет», a fact that cannot get a line goes into «Другое»; the fill's transcript carries day lines; each fact shows the fan's quote, dated by the background from the transcript it sent («не нашлось в переписке» otherwise), never saved. SDK vendored from Core `2ac5d541` for development |
+| E165 | 2026-10-13 | Release 2.11.0 = E164 (the notes fill merges and shows its sources). The owner ordered the chain («мержи и выкатывай все») and chose to deploy the whole Core `main`: #593 merged as `bc0f6dbc` and deployed dist-only to agency-de together with 23 commits of other work merged since `a3449f77` (Project Browser, R20 HF; six migrations, 0270–0275, all dormant by their own PRs). Contract `663d132f…`; Core now registers the 2.10.1 SDK (`a6f77fbb…`) and keeps serving it. SDK re-vendored from the deployed commit. Version by the 2.9.0 rule (a feature) |
 
 ## Entries
 
@@ -5903,3 +5904,23 @@ records its half in the `fan-notes-fill` note of `prompt-manifest.json` and
   the window (only grows, so the chatter's typing and drag never jump it),
   and «В Другое» restates the notice («Другое» created, first filled or
   grown).
+
+**E165 (2026-10-13).** Release 2.11.0 ships E164. The owner ordered the whole
+chain («мержи и выкатывай все»). Core #593 was rebased twice over contract
+changes other sessions merged meanwhile (#592, #594) and merged as
+`bc0f6dbc`. Production still ran `a3449f77` (the E160 deploy), so deploying
+`main` also shipped 23 commits of other work (Project Browser PRs 2–12, R20
+HF) with six migrations (0270–0275); asked, the owner chose the whole `main`
+over a side branch with this change alone. Those PRs state they are dormant
+at merge (flags off, no page selects the new transport), and the deploy
+script lists the six migrations as rollback-compatible. The dist-only deploy
+to agency-de verified in 157 s: health `contractHash` `663d132f…`,
+`compatibleClientSdks` lists `a6f77fbb…` (2.10.1, registered in Core by #593
+after E159 left it out), `030124…` and `b95b765c…`; the app containers
+healthy on `bc0f6dbc`. The SDK was re-vendored from that commit, so the
+release gate (`contractHash` == production) holds. Version 2.11.0: a feature,
+by the rule 2.9.0 followed. `guide.html`: the notes card no longer says «Без
+AI» (it has had the AI fill since 2.10). Not verified before the release:
+the merge-mode prompt on a real model and the feature on a live Fansly chat
+(a production smoke run would write generation and spend rows nobody asked
+for); the first filled questionnaire in the released extension is the check.
