@@ -5889,3 +5889,17 @@ records its half in the `fan-notes-fill` note of `prompt-manifest.json` and
   expanded, after «В Другое»; dark and light). Not verified: a live Fansly
   session and the prompt on production data; the owner or a chatter checks a
   real filled questionnaire before the release is called done.
+- Review follow-ups (same day, Opus review of both halves): Core answers an
+  unchanged field `Label: =` instead of echoing it, so the answer no longer
+  grows with the questionnaire (a 30 × 2 000 echo could hit `max_tokens`) and
+  an unchanged English value cannot come back translated; `=` reads as
+  nothing for that field, its quotes are dropped, and `+ Label: =` is no
+  proposed field. A label's leading list marker («- Имя») no longer counts,
+  so a questionnaire written as a list matches the template instead of
+  getting duplicate lines. An asked label that starts with «+» is that
+  field, not a proposed one. A proposed field with no place at all is named
+  in the notice («Не хватило места в анкете: …»). «Заменить» finds its field
+  past 30 `Label: value` lines. The editor grows with its text up to half
+  the window (only grows, so the chatter's typing and drag never jump it),
+  and «В Другое» restates the notice («Другое» created, first filled or
+  grown).

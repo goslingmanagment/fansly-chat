@@ -768,7 +768,7 @@ describe('FanNotesController (E157)', () => {
 });
 
 describe('the fill notice after «В Другое» (E164)', () => {
-  const summary = { filledCount: 0, addedLabels: ['График', 'Происхождение'], appendedToOther: false };
+  const summary = { filledCount: 0, addedLabels: ['График', 'Происхождение'], appendedToOther: false, unplacedLabels: [] };
 
   it('names «Другое» as a new line when the move created it', () => {
     const next = summaryAfterMoveToOther(summary, 'Происхождение', 'created');
@@ -784,11 +784,27 @@ describe('the fill notice after «В Другое» (E164)', () => {
 
   it('keeps «Другое» an added line when the fill had added it already', () => {
     const next = summaryAfterMoveToOther({ ...summary, addedLabels: ['Другое', 'Происхождение'] }, 'Происхождение', 'appended');
-    expect(next).toEqual({ filledCount: 0, addedLabels: ['Другое'], appendedToOther: false });
+    expect(next).toEqual({ filledCount: 0, addedLabels: ['Другое'], appendedToOther: false, unplacedLabels: [] });
+  });
+
+  it('counts an empty «Другое» that got its first value as filled, not grown', () => {
+    const next = summaryAfterMoveToOther(summary, 'Происхождение', 'filled');
+    expect(fillNoticeText({ ...next, suggestions: [] }))
+      .toBe('Заполнено полей: 1. Добавлены строки: График. Проверьте и сохраните.');
+  });
+
+  it('never names «Другое» twice when the chatter deleted the line the fill had added', () => {
+    const next = summaryAfterMoveToOther({ ...summary, addedLabels: ['Другое', 'Происхождение'] }, 'Происхождение', 'created');
+    expect(next.addedLabels).toEqual(['Другое']);
+  });
+
+  it('names a proposed field that found no place', () => {
+    expect(fillNoticeText({ filledCount: 0, addedLabels: [], appendedToOther: false, unplacedLabels: ['Происхождение'], suggestions: [] }))
+      .toBe('Не хватило места в анкете: Происхождение. Проверьте и сохраните.');
   });
 
   it('only drops the line when an empty proposed line left nothing to move', () => {
     expect(summaryAfterMoveToOther(summary, 'Происхождение', 'unchanged'))
-      .toEqual({ filledCount: 0, addedLabels: ['График'], appendedToOther: false });
+      .toEqual({ filledCount: 0, addedLabels: ['График'], appendedToOther: false, unplacedLabels: [] });
   });
 });

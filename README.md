@@ -107,7 +107,9 @@ from prose when checking what is installed or live; verify the signed update fee
   fields are filled and new lines (template fields, a field the AI names
   itself, with «В Другое») go straight into the draft; a filled field is
   never overwritten — a rewrite is offered as «было → станет» with
-  «Заменить». Each fact comes with the fan's own words and the date the
+  «Заменить» — except «Другое», which takes a fact moved out of another field
+  straight away. Core answers an unchanged field `Label: =`, so the answer
+  does not grow with the questionnaire. Each fact comes with the fan's own words and the date the
   extension found them in the chat it sent («не нашлось в переписке»
   otherwise); quotes are shown, never saved. Nothing is saved until the
   chatter saves the note.

@@ -171,7 +171,8 @@ export interface NoteTemplateField {
 /** Labels compare trimmed, case-insensitively and composed (NFC): a model
  * may echo «й» decomposed. */
 function labelKey(label: string): string {
-  return label.trim().normalize('NFC').toLocaleLowerCase('ru');
+  // «- Имя» in a questionnaire written as a list is the template's «Имя».
+  return label.trim().replace(/^[-*•]+\s*/, '').normalize('NFC').toLocaleLowerCase('ru');
 }
 
 const OTHER_KEY = labelKey(FAN_NOTE_OTHER_LABEL);
@@ -315,6 +316,11 @@ function quoteText(raw: string): string {
  * lines are ignored; an empty value means the chat had nothing for that
  * field. A `>` line belongs to the field or proposed line above it; one with
  * nothing above it, or a fourth, is ignored. */
+/** Merge mode's answer for a field the chat adds nothing to: Core answers
+ * `Label: =` instead of echoing the value, so the answer stays small however
+ * long the questionnaire. Read as "nothing for this field". */
+export const FAN_NOTE_UNCHANGED_MARK = '=';
+
 export function parseFilledFields(rawText: string, labels: readonly string[]): FillAnswer {
   const wanted = new Map(labels.map((label) => [labelKey(label), label] as const));
   const fields = new Map<string, FilledField>();
@@ -329,21 +335,28 @@ export function parseFilledFields(rawText: string, labels: readonly string[]): F
       continue;
     }
     anchor = null;
-    const plus = PROPOSED_LINE.exec(raw);
+    // An asked label is a field even when it starts with «+» («+7 телефон»);
+    // only a `+` line for a label nobody asked is a proposed field.
+    const match = FIELD_LINE.exec(raw);
+    const label = match ? wanted.get(labelKey(match[1]!)) : undefined;
+    const plus = label ? null : PROPOSED_LINE.exec(raw);
     if (plus) {
       const value = decodeEntities(plus[2]!.trim());
-      if (value && proposed.length < FAN_NOTE_PROPOSED_MAX) {
+      if (value && value !== FAN_NOTE_UNCHANGED_MARK && proposed.length < FAN_NOTE_PROPOSED_MAX) {
         const entry: ProposedNoteField = { label: decodeEntities(plus[1]!.trim()), value, quotes: [] };
         proposed.push(entry);
         anchor = entry;
       }
       continue;
     }
-    const match = FIELD_LINE.exec(raw);
-    if (!match) continue;
-    const label = wanted.get(labelKey(match[1]!.replace(/^[-*•\s]+/, '')));
-    if (!label || fields.has(label)) continue;
-    const entry: FilledField = { value: decodeEntities(match[2]!.trim()), quotes: [] };
+    if (!match || !label || fields.has(label)) continue;
+    const value = decodeEntities(match[2]!.trim());
+    if (value === FAN_NOTE_UNCHANGED_MARK) {
+      // Nothing for this field, and no quotes to hang under it.
+      fields.set(label, { value: '', quotes: [] });
+      continue;
+    }
+    const entry: FilledField = { value, quotes: [] };
     fields.set(label, entry);
     anchor = entry;
   }
@@ -410,6 +423,10 @@ export interface NoteFillMerge {
   proposedLabels: string[];
   /** A filled «Другое» got a moved fact appended to it. */
   appendedToOther: boolean;
+  /** Proposed fields with no place at all (no room for a line and no usable
+   * «Другое»): named in the notice, so a fact a rewrite moved out of a field
+   * is not lost unseen. */
+  unplacedLabels: string[];
   suggestions: NoteFieldSuggestion[];
   /** Quotes behind what went straight into the draft. */
   sources: NoteFillSource[];
@@ -430,7 +447,7 @@ export function mergeFilledFields(text: string, answer: FillAnswer): NoteFillMer
   const lines = text.split('\n');
   const fields = parseNoteTemplate(text);
   if (fields.length === 0) {
-    return { text, filledCount: 0, addedLabels: [], proposedLabels: [], appendedToOther: false, suggestions: [], sources: [] };
+    return { text, filledCount: 0, addedLabels: [], proposedLabels: [], appendedToOther: false, unplacedLabels: [], suggestions: [], sources: [] };
   }
   const byKey = new Map(fields.map((field) => [labelKey(field.label), field] as const));
   const asked = new Set(answer.labels.map(labelKey));
@@ -477,6 +494,7 @@ export function mergeFilledFields(text: string, answer: FillAnswer): NoteFillMer
   });
 
   let appendedToOther = false;
+  const unplacedLabels: string[] = [];
   const movedSources: NoteFillSource[] = [];
   if (overflow.length > 0) {
     const otherField = byKey.get(OTHER_KEY);
@@ -522,6 +540,8 @@ export function mergeFilledFields(text: string, answer: FillAnswer): NoteFillMer
     }
     if (landed) {
       for (const field of moved) movedSources.push({ label: field.label, quotes: field.quotes });
+    } else {
+      unplacedLabels.push(...moved.map((field) => field.label));
     }
   }
 
@@ -536,6 +556,7 @@ export function mergeFilledFields(text: string, answer: FillAnswer): NoteFillMer
     addedLabels: [...additions, ...proposedLines].map((entry) => entry.label),
     proposedLabels: proposedLines.map((field) => field.label),
     appendedToOther,
+    unplacedLabels,
     suggestions,
     sources,
   };
@@ -544,7 +565,9 @@ export function mergeFilledFields(text: string, answer: FillAnswer): NoteFillMer
 /** Accept one suggestion: the field takes the proposed value. A field the
  * chatter has since edited away is left alone. */
 export function applyFieldSuggestion(text: string, suggestion: NoteFieldSuggestion): string {
-  const field = parseNoteTemplate(text).find((entry) => labelKey(entry.label) === labelKey(suggestion.label));
+  // fieldLines, not parseNoteTemplate: a draft the chatter grew past 30
+  // `Label: value` lines still takes the replacement it was offered.
+  const field = fieldLines(text).find((entry) => labelKey(entry.label) === labelKey(suggestion.label));
   if (!field || !sameValue(field.value, suggestion.current)) return text;
   const lines = text.split('\n');
   lines[field.line] = withValue(lines[field.line]!, suggestion.proposed);

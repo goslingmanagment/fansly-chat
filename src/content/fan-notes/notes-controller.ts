@@ -107,23 +107,27 @@ interface Draft {
   sourcesOpen: boolean;
 }
 
-type FillSummary = Pick<NoteFillMerge, 'filledCount' | 'addedLabels' | 'appendedToOther'>;
+type FillSummary = Pick<NoteFillMerge, 'filledCount' | 'addedLabels' | 'appendedToOther' | 'unplacedLabels'>;
 
 function emptyFillState(): Pick<Draft, 'suggestions' | 'fillNotice' | 'fillSummary' | 'proposed' | 'sources' | 'quoteDates' | 'sourcesOpen'> {
   return { suggestions: [], fillNotice: null, fillSummary: null, proposed: [], sources: [], quoteDates: null, sourcesOpen: false };
 }
 
 /** The notice's counts after «В Другое» took `label`'s line away: it is no
- * longer an added line, and «Другое» became a new line, grew, or (an empty
- * proposed line) stayed as it was. */
+ * longer an added line, and «Другое» became a new line, an empty «Другое»
+ * got its first value, a filled one grew, or (an empty proposed line) nothing
+ * changed. */
 export function summaryAfterMoveToOther(
   summary: FillSummary,
   label: string,
-  other: 'created' | 'appended' | 'unchanged',
+  other: 'created' | 'filled' | 'appended' | 'unchanged',
 ): FillSummary {
   const addedLabels = summary.addedLabels.filter((entry) => entry !== label);
-  if (other === 'created') return { ...summary, addedLabels: [...addedLabels, FAN_NOTE_OTHER_LABEL] };
-  const otherAdded = addedLabels.some((entry) => entry.trim().normalize('NFC').toLocaleLowerCase('ru') === FAN_NOTE_OTHER_LABEL.toLocaleLowerCase('ru'));
+  const otherAdded = addedLabels.some((entry) => isOtherLabel(entry));
+  if (other === 'created') {
+    return { ...summary, addedLabels: otherAdded ? addedLabels : [...addedLabels, FAN_NOTE_OTHER_LABEL] };
+  }
+  if (other === 'filled') return { ...summary, addedLabels, filledCount: summary.filledCount + 1 };
   return {
     ...summary,
     addedLabels,
@@ -131,18 +135,26 @@ export function summaryAfterMoveToOther(
   };
 }
 
+function isOtherLabel(label: string): boolean {
+  return label.trim().normalize('NFC').toLocaleLowerCase('ru') === FAN_NOTE_OTHER_LABEL.toLocaleLowerCase('ru');
+}
+
 function otherValue(text: string): string | null {
-  const key = FAN_NOTE_OTHER_LABEL.toLocaleLowerCase('ru');
-  return parseNoteTemplate(text).find((field) => field.label.trim().normalize('NFC').toLocaleLowerCase('ru') === key)?.value ?? null;
+  return parseNoteTemplate(text).find((field) => isOtherLabel(field.label))?.value ?? null;
 }
 
 /** «Заполнено полей: 2. Добавлены строки: График, Другое. Предложений: 1.
  * Проверьте и сохраните.» — parts with nothing to say are left out. */
-export function fillNoticeText(merged: Pick<NoteFillMerge, 'filledCount' | 'addedLabels' | 'appendedToOther' | 'suggestions'>): string {
+export function fillNoticeText(
+  merged: Pick<NoteFillMerge, 'filledCount' | 'addedLabels' | 'appendedToOther' | 'suggestions'> &
+    Partial<Pick<NoteFillMerge, 'unplacedLabels'>>,
+): string {
+  const unplaced = merged.unplacedLabels ?? [];
   const parts = [
     merged.filledCount > 0 ? `Заполнено полей: ${merged.filledCount}` : null,
     merged.addedLabels.length > 0 ? `Добавлены строки: ${merged.addedLabels.join(', ')}` : null,
     merged.appendedToOther ? 'Дополнено поле: Другое' : null,
+    unplaced.length > 0 ? `Не хватило места в анкете: ${unplaced.join(', ')}` : null,
     merged.suggestions.length > 0 ? `Предложений: ${merged.suggestions.length}` : null,
   ].filter((part): part is string => part !== null);
   return parts.length === 0
@@ -830,7 +842,12 @@ export class FanNotesController {
     draft.quoteDates = quotes ? new Map(quotes.map((entry) => [entry.quote, entry.sentAt] as const)) : null;
     draft.sourcesOpen = false;
     draft.fillNotice = fillNoticeText(merged);
-    draft.fillSummary = { filledCount: merged.filledCount, addedLabels: merged.addedLabels, appendedToOther: merged.appendedToOther };
+    draft.fillSummary = {
+      filledCount: merged.filledCount,
+      addedLabels: merged.addedLabels,
+      appendedToOther: merged.appendedToOther,
+      unplacedLabels: merged.unplacedLabels,
+    };
     this.render();
   }
 
@@ -887,7 +904,7 @@ export class FanNotesController {
     if (draft.fillSummary) {
       const other = otherBefore === null && otherAfter !== null
         ? 'created'
-        : otherBefore !== otherAfter ? 'appended' : 'unchanged';
+        : otherBefore === otherAfter ? 'unchanged' : otherBefore === '' ? 'filled' : 'appended';
       draft.fillSummary = summaryAfterMoveToOther(draft.fillSummary, label, other);
       draft.fillNotice = fillNoticeText({ ...draft.fillSummary, suggestions: draft.suggestions });
     }

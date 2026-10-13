@@ -97,15 +97,16 @@ export interface NotesPanelCallbacks {
 
 
 /** The editor grows with its text up to half the window, so the lines a fill
- * adds below a long questionnaire are in sight, not under a scroll. Detached
- * or unlaid-out (scrollHeight 0) it keeps its CSS height. */
+ * adds below a long questionnaire are in sight, not under a scroll. It only
+ * grows: never shrinks under the chatter's typing, keeps a height they dragged
+ * it to, and never resets to measure (that would jump the panel's scroll).
+ * Detached or unlaid-out (scrollHeight 0) it keeps its CSS height. */
 function fitNoteTextarea(text: HTMLTextAreaElement): void {
   if (!text.isConnected) return;
-  text.style.height = '';
   const content = text.scrollHeight;
-  if (content <= 0) return;
-  const max = Math.max(text.clientHeight, Math.round(window.innerHeight / 2));
-  if (content > text.clientHeight) text.style.height = `${Math.min(content + 2, max)}px`;
+  const max = Math.round(window.innerHeight / 2);
+  if (content <= 0 || content <= text.clientHeight || text.clientHeight >= max) return;
+  text.style.height = `${Math.min(content + 2, max)}px`;
 }
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,

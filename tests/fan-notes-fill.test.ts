@@ -177,6 +177,49 @@ describe('merging the kernel\'s answer (E164)', () => {
     expect(merged.addedLabels).toEqual([]);
   });
 
+  it('matches a questionnaire written as a list to the template, without duplicate lines', () => {
+    const draft = '- Имя: Рич\n- Работа: \n- Характеристика: маори';
+    const request = buildFillRequest(draft)!;
+    expect(request.noteFields.slice(0, 3)).toEqual(['- Имя', '- Работа', '- Характеристика']);
+    expect(request.noteFields).not.toContain('Имя');
+    expect(request.noteFields).not.toContain('Характеристика');
+    const merged = merge(draft, [
+      '- Имя: =',
+      '- Работа: медбрат',
+      '- Характеристика: любит GFE; маори',
+      'Имя: Richard',
+    ].join('\n'));
+    expect(merged.text).toBe('- Имя: Рич\n- Работа: медбрат\n- Характеристика: маори');
+    expect(merged.addedLabels).toEqual([]);
+    expect(merged.suggestions.map((entry) => entry.label)).toEqual(['- Характеристика']);
+  });
+
+  it('reads an asked label that starts with «+» as that field, not a proposed one', () => {
+    const draft = 'Имя: Рич\n+7 телефон: \nВозраст: 24';
+    const merged = merge(draft, 'Имя: =\n+7 телефон: есть WhatsApp\nВозраст: =');
+    expect(merged.text.split('\n').slice(0, 3)).toEqual(['Имя: Рич', '+7 телефон: есть WhatsApp', 'Возраст: 24']);
+    expect(merged.proposedLabels).toEqual([]);
+  });
+
+  it('reads «Label: =» as nothing for that field: no suggestion, no line, no quotes', () => {
+    const draft = 'Имя: Рич\nЛокация: \nВозраст: 24';
+    const merged = merge(draft, [
+      'Имя: =',
+      '> «call me Richard»',
+      'Локация: =',
+      'Возраст: = ',
+      'График: =',
+      '+ Происхождение: =',
+      'Хобби: сон',
+    ].join('\n'));
+    expect(merged.text).toBe('Имя: Рич\nЛокация: \nВозраст: 24\nХобби: сон');
+    expect(merged.filledCount).toBe(0);
+    expect(merged.suggestions).toEqual([]);
+    expect(merged.proposedLabels).toEqual([]);
+    expect(merged.addedLabels).toEqual(['Хобби']);
+    expect(merged.sources).toEqual([{ label: 'Хобби', quotes: [] }]);
+  });
+
   it('compares after decoding the prompt\'s escaping, whitespace and case', () => {
     const merged = merge('Имя: Tom & Jerry\nМедиа: Sexting 1', 'Имя: tom &amp;  JERRY\nМедиа: Sexting 1');
     expect(merged.suggestions).toEqual([]);
@@ -266,6 +309,9 @@ describe('merging the kernel\'s answer (E164)', () => {
     const lost = merge(full, 'Поле 1: v1\n+ Происхождение: маори');
     expect(lost.text).toBe(full);
     expect(lost.sources).toEqual([]);
+    // …and the notice names it, so it is not lost unseen.
+    expect(lost.unplacedLabels).toEqual(['Происхождение']);
+    expect(merged.unplacedLabels).toEqual([]);
   });
 
   it('gives «Другое» the last free place when a moved fact needs it', () => {
@@ -295,6 +341,9 @@ describe('merging the kernel\'s answer (E164)', () => {
     expect(applyFieldSuggestion('Имя: Рич\nВозраст: 24', suggestion)).toBe('Имя: Richard\nВозраст: 24');
     // The chatter retyped the field meanwhile: left alone.
     expect(applyFieldSuggestion('Имя: Ричард\nВозраст: 24', suggestion)).toBe('Имя: Ричард\nВозраст: 24');
+    // A draft grown past 30 `Label: value` lines still takes it.
+    const long = `Имя: Рич\n${bigNote(30)}`;
+    expect(applyFieldSuggestion(long, suggestion).split('\n')[0]).toBe('Имя: Richard');
   });
 });
 

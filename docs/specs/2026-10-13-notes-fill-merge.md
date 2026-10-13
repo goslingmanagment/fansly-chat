@@ -132,9 +132,11 @@ Rules added (wording is Core's; the substance is fixed here):
 - A current value is what the chatter recorded. He may know it from outside
   this chat, so it stays true unless the fan himself contradicts it later in
   the conversation.
-- When the chat adds nothing to a field and nothing in it has to move, output
-  the current value exactly as given, character for character, even if it is
-  in English.
+- When the chat adds nothing to a field and nothing in it has to move, answer
+  `Label: =` (a single `=`), not the value: the answer stays small however
+  long the questionnaire, and an unchanged English value cannot come back
+  "translated" (amended 2026-10-13 after review; first drafted as a
+  verbatim echo).
 - Otherwise rewrite the field in Russian: every fact of the current value
   (translated, names, places and brands as written) plus the new ones. A fact
   the fan contradicted is replaced by his latest statement.
@@ -182,8 +184,8 @@ that value, in the fan's language, at most 200 characters, cut only at its
 ends. No quote for a value returned unchanged, and none for a fact taken from
 the bio or the spending data (those have no message to quote).
 
-Output format: one `Label: value` line per listed field in the listed order,
-each followed by its `>` quote lines, then zero to two `+ Label: value` lines,
+Output format: one `Label: value` line (or `Label: =`) per listed field in the
+listed order, each followed by its `>` quote lines (none under `=`), then zero to two `+ Label: value` lines,
 each followed by its `>` quote lines; nothing else.
 
 ### 4.3 Extension: request
@@ -229,6 +231,7 @@ not dropped: it goes into «Другое» as below.
 | Answer for | Result |
 |---|---|
 | note field, empty, non-empty answer | filled in place (today) |
+| note field, `=` | nothing |
 | note field, filled, same value (whitespace/case-insensitive, after decoding `&lt; &gt; &amp;`) | nothing |
 | note field, filled, different | suggestion «было → станет» (today) |
 | template label the note lacks, non-empty answer | new line appended |
@@ -284,8 +287,12 @@ the panel gets `quote → date | null` with the fill's result.
 - A questionnaire at 30 fields: no template additions; a proposed field goes
   into «Другое» if the note has it, else the fact stays where it was (the
   model's rewrite of that field is still only a suggestion).
-- The chatter typed a label that matches a template label with other case:
-  matched, no duplicate line.
+- The chatter typed a label that matches a template label with other case, or
+  wrote the questionnaire as a list («- Имя: …»): matched, no duplicate line.
+- An asked label that starts with «+» («+7 телефон») is that field, never a
+  proposed one.
+- A proposed field with no place at all (30 fields and no usable «Другое») is
+  named in the notice: «Не хватило места в анкете: …».
 - «Другое» already filled: a fact moved there arrives as a rewrite of
   «Другое». Accepting the source field's rewrite but not this one drops the
   fact; accepted by the owner (the chatter approves every replacement,
