@@ -47,10 +47,11 @@ describe('fan notes (E157)', () => {
     expect(normalizeFanNotesView('always')).toBe('drawer');
   });
 
-  it('keeps the questionnaire the chatters already use', () => {
+  it('keeps the questionnaire the chatters already use, with schedule, plans and «Другое» (E164)', () => {
     expect(FAN_NOTE_TEMPLATE_TITLE).toBe('Анкета');
     expect(FAN_NOTE_TEMPLATE_TEXT.split('\n')).toEqual([
-      'Имя: ', 'Локация: ', 'Возраст: ', 'Работа: ', 'Хобби: ', 'Фетиши: ', 'Характеристика: ', 'Медиа: ',
+      'Имя: ', 'Локация: ', 'Возраст: ', 'Работа: ', 'График: ', 'Хобби: ', 'Планы и даты: ', 'Фетиши: ',
+      'Характеристика: ', 'Медиа: ', 'Другое: ',
     ]);
   });
 

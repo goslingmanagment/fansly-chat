@@ -3754,6 +3754,93 @@ body.chatgoose-voice-studio-lock {
   gap: 6px;
 }
 
+/* E164: a field the fill named itself, with «В Другое». */
+.chatgoose-notes-proposed {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 4px 4px 10px;
+  border: 1px dashed var(--chatgoose-clay-line);
+  border-radius: var(--chatgoose-radius-chip);
+  background: var(--chatgoose-clay-bg);
+  color: var(--chatgoose-clay-ink);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.chatgoose-notes-proposed[hidden] {
+  display: none;
+}
+
+.chatgoose-notes-proposed-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The fan's own words behind a fact: shown while reviewing, never saved. */
+.chatgoose-notes-quotes {
+  display: grid;
+  gap: 2px;
+  margin-top: 4px;
+}
+
+.chatgoose-notes-quote {
+  color: var(--chatgoose-ink-low);
+  font-size: 11px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.chatgoose-notes-quote-label {
+  color: var(--chatgoose-ink-mid);
+  font-weight: 600;
+}
+
+.chatgoose-notes-quote-date {
+  font-family: var(--chatgoose-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.chatgoose-notes-quote-missing {
+  color: var(--chatgoose-bad);
+  font-weight: 600;
+}
+
+.chatgoose-notes-quote-text {
+  font-style: italic;
+}
+
+.chatgoose-notes-sources {
+  font-size: 12px;
+}
+
+.chatgoose-notes-sources-summary {
+  color: var(--chatgoose-ink-mid);
+  cursor: pointer;
+  list-style: none;
+}
+
+.chatgoose-notes-sources-summary::-webkit-details-marker {
+  display: none;
+}
+
+.chatgoose-notes-sources-summary::before {
+  content: '▶ ';
+  font-size: 8px;
+  vertical-align: 1px;
+}
+
+.chatgoose-notes-sources[open] .chatgoose-notes-sources-summary::before {
+  content: '▼ ';
+}
+
+.chatgoose-notes-sources-list {
+  display: grid;
+  gap: 4px;
+  margin: 6px 0 0 12px;
+}
+
 /* ─── Voice (лента) ──────────────────────────────────────────────
    Family theme: terracotta accent, a serif script editor, mono numbers.
    Colours come from the tokens, so the dark twin is a pure variable swap. */

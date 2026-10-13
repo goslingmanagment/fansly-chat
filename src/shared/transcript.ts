@@ -609,6 +609,71 @@ function formatLocalTime(createdAtSeconds: number): string {
   return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+/** The day line before a day's first message (E164, the notes fill only):
+ * `--- YYYY-MM-DD ---` in the browser's own clock, the one the `[HH:MM]`
+ * prefixes use. */
+export function formatTranscriptDayLine(createdAtSeconds: number): string {
+  const date = new Date(createdAtSeconds * 1000);
+  return `--- ${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ---`;
+}
+
+/** Kernel-bound formatting options. `dayLines`: the notes fill's day lines
+ * (E164); every other feature leaves it off and gets the legacy bytes. */
+export interface KernelTranscriptOptions {
+  dayLines?: boolean;
+}
+
+/** How many of the newest messages fit under the cap, oldest dropped first,
+ * and what they cost (lines plus `\n` joiners). With day lines, a day's line
+ * is paid together with its first kept message, so the budget counts it and
+ * no day line is ever left without a message after it. */
+function keepNewestWithinBudget(
+  messages: readonly NormalizedTranscriptMessage[],
+  lineLength: (message: NormalizedTranscriptMessage) => number,
+  maxChars: number,
+  dayLines: boolean,
+): { kept: number; totalChars: number } {
+  let kept = 0;
+  let totalChars = 0;
+  let oldestDay: string | null = null;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]!;
+    let cost = lineLength(message) + (kept > 0 ? 1 : 0); // +1 = '\n' joiner
+    const day = dayLines ? formatTranscriptDayLine(message.createdAt) : null;
+    if (day !== null && day !== oldestDay) {
+      cost += day.length + 1;
+    }
+    if (totalChars + cost > maxChars) {
+      break;
+    }
+    kept += 1;
+    totalChars += cost;
+    oldestDay = day;
+  }
+  return { kept, totalChars };
+}
+
+/** Lines in order, a day line before each day's first message when asked. */
+function joinTranscriptLines(
+  messages: readonly NormalizedTranscriptMessage[],
+  line: (message: NormalizedTranscriptMessage) => string,
+  dayLines: boolean,
+): string {
+  const out: string[] = [];
+  let previousDay: string | null = null;
+  for (const message of messages) {
+    if (dayLines) {
+      const day = formatTranscriptDayLine(message.createdAt);
+      if (day !== previousDay) {
+        out.push(day);
+        previousDay = day;
+      }
+    }
+    out.push(line(message));
+  }
+  return out.join('\n');
+}
+
 function formatTranscriptLine(message: NormalizedTranscriptMessage): string {
   const labels = message.labels.join(' ').trim();
   const payload = [labels, message.text].filter(Boolean).join(' ').trim();
@@ -632,33 +697,35 @@ export function formatTranscript(messages: NormalizedTranscriptMessage[]): strin
 export function formatTranscriptForKernel(
   messages: NormalizedTranscriptMessage[],
   maxChars = KERNEL_TRANSCRIPT_MAX_CHARS,
+  options: KernelTranscriptOptions = {},
 ): { transcript: string; messageCount: number } {
   if (messages.length === 0) {
     return { transcript: 'No conversation history.', messageCount: 0 };
   }
+  const dayLines = options.dayLines === true;
 
-  const keptLines: string[] = [];
-  let totalChars = 0;
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const line = formatTranscriptLine(messages[index]!);
-    const cost = line.length + (keptLines.length > 0 ? 1 : 0); // +1 = '\n' joiner
-    if (totalChars + cost > maxChars) {
-      break;
-    }
-    keptLines.push(line);
-    totalChars += cost;
-  }
+  const { kept } = keepNewestWithinBudget(
+    messages,
+    (message) => formatTranscriptLine(message).length,
+    maxChars,
+    dayLines,
+  );
 
-  if (keptLines.length === 0) {
+  if (kept === 0) {
     // Even the newest message alone exceeds the cap: keep its TAIL (the most
     // recent content) so the generation still sees something real.
-    const newest = formatTranscriptLine(messages[messages.length - 1]!);
+    const newestMessage = messages[messages.length - 1]!;
+    const newest = formatTranscriptLine(newestMessage);
+    const day = dayLines ? formatTranscriptDayLine(newestMessage.createdAt) : null;
+    if (day !== null && maxChars > day.length + 1) {
+      return { transcript: `${day}\n${newest.slice(-(maxChars - day.length - 1))}`, messageCount: 1 };
+    }
     return { transcript: newest.slice(-maxChars), messageCount: 1 };
   }
 
   return {
-    transcript: keptLines.reverse().join('\n'),
-    messageCount: keptLines.length,
+    transcript: joinTranscriptLines(messages.slice(messages.length - kept), formatTranscriptLine, dayLines),
+    messageCount: kept,
   };
 }
 
@@ -713,30 +780,28 @@ export function formatTranscriptWithMediaForKernel(
   messages: NormalizedTranscriptMessage[],
   groupRef: string | null,
   maxChars = KERNEL_TRANSCRIPT_MAX_CHARS,
+  options: KernelTranscriptOptions = {},
 ): { transcript: string; messageCount: number; media?: KernelClientMedia } {
   const hasSlots = messages.some((message) => (message.mediaSlots?.length ?? 0) > 0);
   if (!groupRef || !/^[0-9]{1,32}$/.test(groupRef) || !hasSlots || messages.length === 0) {
-    return formatTranscriptForKernel(messages, maxChars);
+    return formatTranscriptForKernel(messages, maxChars, options);
   }
+  const dayLines = options.dayLines === true;
   const neutralized = messages.map((message) => ({ ...message, text: neutralizeMediaLabelText(message.text) }));
 
   // Keep exactly the lines the legacy formatter keeps (same cost, same cap),
   // so a kernel that restores the plain labels rebuilds the legacy window.
-  const kept: NormalizedTranscriptMessage[] = [];
-  let totalChars = 0;
-  for (let index = neutralized.length - 1; index >= 0; index -= 1) {
-    const message = neutralized[index]!;
-    const cost = formatTranscriptLine(message).length + (kept.length > 0 ? 1 : 0);
-    if (totalChars + cost > maxChars) {
-      break;
-    }
-    kept.push(message);
-    totalChars += cost;
+  const budget = keepNewestWithinBudget(
+    neutralized,
+    (message) => formatTranscriptLine(message).length,
+    maxChars,
+    dayLines,
+  );
+  let totalChars = budget.totalChars;
+  if (budget.kept === 0) {
+    return formatTranscriptForKernel(messages, maxChars, options);
   }
-  if (kept.length === 0) {
-    return formatTranscriptForKernel(messages, maxChars);
-  }
-  kept.reverse();
+  const kept = neutralized.slice(neutralized.length - budget.kept);
 
   // Only slots whose token will actually render (an inline slot needs the
   // plain `[Photo]`/`[Video]` label it replaces). Number the newest ones
@@ -782,9 +847,11 @@ export function formatTranscriptWithMediaForKernel(
       paid: slot.paid,
     });
   }
-  const transcript = kept
-    .map((message) => formatTranscriptLine({ ...message, labels: numberedLabels(message, numbers) }))
-    .join('\n');
+  const transcript = joinTranscriptLines(
+    kept,
+    (message) => formatTranscriptLine({ ...message, labels: numberedLabels(message, numbers) }),
+    dayLines,
+  );
   return {
     transcript,
     messageCount: kept.length,

@@ -82,7 +82,7 @@ from prose when checking what is installed or live; verify the signed update fee
   read until the chatter clicks; the answer stays until the page reloads or
   the tab changes account. One-to-one chats only
   (`src/content/fan-registration.ts`).
-- **Заметки** (2.9.0, E157; AI fill 2.10.0, E159) — the fan's native Fansly notes (what Fansly's own «Edit
+- **Заметки** (2.9.0, E157; AI fill 2.10.0, E159; merge and quotes 2.11.0, E164) — the fan's native Fansly notes (what Fansly's own «Edit
   User Notes» modal shows, two clicks deep in the name menu) in a ChatGoose
   panel: «Заметки» after «Регистрация» in the header row, or ⌘⇧K /
   Ctrl+Alt+K. Regular notes (contentType 12000) are listed, added, edited and
@@ -95,14 +95,24 @@ from prose when checking what is installed or live; verify the signed update fee
   when the fan is not known yet) plus `GET /account?ids=`, one attempt each,
   none during a rate-limit cooldown, kept for the tab's lifetime; writes are
   Fansly's own `POST /notes`, `/notes/edit`, `/notes/delete`, one attempt on an
-  explicit save or delete. Chatter-eyes-only: notes never reach a prompt
-  (`src/content/fan-notes/`, `src/shared/fan-notes.ts`).
-  «✨ Заполнить из чата» (E159) in the editor of a questionnaire (a note of
-  `Label: value` lines) runs the kernel feature `fan-notes-fill` (Sonnet by
-  default) over the whole chat, read like a full Recap: only the labels
-  travel, never the chatter's values. Empty fields are filled; a filled field
-  is never overwritten — a different answer is offered as «было → станет»
-  with «Заменить». Nothing is saved until the chatter saves the note.
+  explicit save or delete. Chatter-eyes-only: the custom name and free notes
+  never reach a prompt; the questionnaire's labels and values go to Core for
+  the fill only (E164) (`src/content/fan-notes/`, `src/shared/fan-notes.ts`).
+  «✨ Заполнить из чата» (E159, E164) in the editor of a questionnaire (a note
+  of `Label: value` lines) runs the kernel feature `fan-notes-fill` (Sonnet by
+  default) over the whole chat, read like a full Recap, with day lines
+  (`--- YYYY-MM-DD ---`) in its transcript. It sends the labels with the
+  chatter's current values (`noteFields` + `noteValues`; a value over 2 000
+  characters is left out) and the template labels the note lacks. Empty
+  fields are filled and new lines (template fields, a field the AI names
+  itself, with «В Другое») go straight into the draft; a filled field is
+  never overwritten — a rewrite is offered as «было → станет» with
+  «Заменить» — except «Другое», which takes a fact moved out of another field
+  straight away. Core answers an unchanged field `Label: =`, so the answer
+  does not grow with the questionnaire. Each fact comes with the fan's own words and the date the
+  extension found them in the chat it sent («не нашлось в переписке»
+  otherwise); quotes are shown, never saved. Nothing is saved until the
+  chatter saves the note.
 - **Vault uploader** — on `/creator/vault`, a folder of media goes into the open
   album one file at a time through Fansly's own upload form, each confirmed by
   its album card, with a per-account/per-album checkpoint for resuming; an
@@ -228,6 +238,14 @@ Important references:
   architecture.
 
 ## Release
+
+Release 2.11.0 (E164, E165) makes «✨ Заполнить из чата» merge into the
+questionnaire instead of overwriting it and show the fan's own words behind
+each fact: Core's `fan-notes-fill` merge mode (hub #593, Core `bc0f6dbc`),
+the questionnaire's values travel to Core (`noteValues`), the template gains
+«График», «Планы и даты», «Другое». SDK re-vendored from the deployed Core
+(contract `663d132f…`); Core keeps serving the SDK of 2.10.1 (`a6f77fbb…`).
+No new permission. Tabs opened before the update need a reload.
 
 Release 2.10.1 (E159, E160, E161; 2.10.0 was signed but never served) adds
 «✨ Заполнить из чата» to the notes panel:

@@ -6,9 +6,11 @@
 import {
   FAN_NOTES_VIEW_LABELS,
   FAN_NOTES_VIEWS,
+  hasFieldLine,
   parseNoteTemplate,
   type FanNotesView,
   type NoteFieldSuggestion,
+  type NoteFillSource,
 } from '../../shared/fan-notes.js';
 import { makeKbd } from '../ui/kbd.js';
 import type { NotesPlacement } from './placement.js';
@@ -34,6 +36,14 @@ export interface NotesPanelEditor {
   fillBusy: boolean;
   suggestions: NoteFieldSuggestion[];
   fillNotice: string | null;
+  /** Fields the fill named itself, still in the draft: «В Другое» each. */
+  proposed: string[];
+  /** The quotes behind what the fill wrote straight into the draft. */
+  sources: NoteFillSource[];
+  /** When the fan said each quote; null: not found in the chat. A quote
+   * missing from the map (or no map) shows without a date. */
+  quoteDates: ReadonlyMap<string, number | null> | null;
+  sourcesOpen: boolean;
 }
 
 export interface NotesPanelModel {
@@ -81,8 +91,23 @@ export interface NotesPanelCallbacks {
   onApplySuggestion: (index: number) => void;
   onApplyAllSuggestions: () => void;
   onDismissSuggestions: () => void;
+  onMoveToOther: (label: string) => void;
+  onToggleSources: (open: boolean) => void;
 }
 
+
+/** The editor grows with its text up to half the window, so the lines a fill
+ * adds below a long questionnaire are in sight, not under a scroll. It only
+ * grows: never shrinks under the chatter's typing, keeps a height they dragged
+ * it to, and never resets to measure (that would jump the panel's scroll).
+ * Detached or unlaid-out (scrollHeight 0) it keeps its CSS height. */
+function fitNoteTextarea(text: HTMLTextAreaElement): void {
+  if (!text.isConnected) return;
+  const content = text.scrollHeight;
+  const max = Math.round(window.innerHeight / 2);
+  if (content <= 0 || content <= text.clientHeight || text.clientHeight >= max) return;
+  text.style.height = `${Math.min(content + 2, max)}px`;
+}
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
   className?: string,
@@ -99,6 +124,31 @@ function button(className: string, text: string, onClick: () => void): HTMLButto
   node.type = 'button';
   node.addEventListener('click', onClick);
   return node;
+}
+
+function pad(value: number): string {
+  return String(value).padStart(2, '0');
+}
+
+/** «14.09.2026» in the browser's clock, the one the fill's day lines use. */
+function formatQuoteDate(sentAt: number): string {
+  const date = new Date(sentAt);
+  return `${pad(date.getDate())}.${pad(date.getMonth() + 1)}.${date.getFullYear()}`;
+}
+
+/** One quote as a muted line: «14.09.2026 · I work nights», or «не нашлось в
+ * переписке · …» so an invented fact stands out. */
+function quoteLine(className: string, quote: string, dates: NotesPanelEditor['quoteDates'], label?: string): HTMLElement {
+  const line = el('div', className);
+  if (label) line.append(el('span', 'chatgoose-notes-quote-label', `${label} — `));
+  const sentAt = dates?.get(quote);
+  if (sentAt === null) {
+    line.append(el('span', 'chatgoose-notes-quote-missing', 'не нашлось в переписке'), ' · ');
+  } else if (sentAt !== undefined) {
+    line.append(el('span', 'chatgoose-notes-quote-date', formatQuoteDate(sentAt)), ' · ');
+  }
+  line.append(el('span', 'chatgoose-notes-quote-text', quote));
+  return line;
 }
 
 const NAME_STATUS: Record<NotesPanelModel['customName']['status'], string> = {
@@ -202,6 +252,7 @@ export class NotesPanel {
     this.scrim.classList.toggle('chatgoose-hidden', model.view !== 'center');
     this.applyPlacement();
     this.panel.replaceChildren(this.header(model), this.body(model), this.footer(model));
+    for (const text of this.panel.querySelectorAll<HTMLTextAreaElement>('.chatgoose-note-textarea')) fitNoteTextarea(text);
     this.restoreFocus(focus);
     // A delete question below the fold would wait unseen.
     this.panel.querySelector('.chatgoose-note-confirm-row')?.scrollIntoView?.({ block: 'nearest' });
@@ -350,7 +401,7 @@ export class NotesPanel {
     text.disabled = editor.saving || editor.filling !== null;
 
     const fill = button('chatgoose-button chatgoose-button-ai', '✨ Заполнить из чата', () => this.callbacks.onFill());
-    fill.title = 'ИИ заполнит пустые поля анкеты по всей переписке; заполненные не тронет';
+    fill.title = 'ИИ дополнит анкету по всей переписке: заполнит пустые поля, допишет новые строки, переписать заполненные предложит';
     const syncFill = () => {
       fill.hidden = editor.filling !== null || parseNoteTemplate(text.value).length === 0;
     };
@@ -358,9 +409,13 @@ export class NotesPanel {
     fill.disabled = editor.saving || editor.fillBusy;
     if (editor.fillBusy) fill.title = 'Сейчас заполняется анкета в другом чате';
 
+    // A proposed field's row leaves with its line, as the chatter types.
+    const proposedRows: Array<{ label: string; row: HTMLElement }> = [];
     const report = () => {
       this.callbacks.onEditorInput(title.value, text.value);
+      fitNoteTextarea(text);
       syncFill();
+      for (const { label, row } of proposedRows) row.hidden = !hasFieldLine(text.value, label);
     };
     title.addEventListener('input', report);
     text.addEventListener('input', report);
@@ -398,15 +453,45 @@ export class NotesPanel {
     }
     card.append(title, text, actions);
     if (editor.fillNotice) card.append(el('div', 'chatgoose-notes-fill-notice', editor.fillNotice));
+    for (const label of editor.proposed) {
+      const row = el('div', 'chatgoose-notes-proposed');
+      row.append(el('span', 'chatgoose-notes-proposed-text', `Гусь завёл поле «${label}»`));
+      const move = button('chatgoose-text-button', 'В Другое', () => this.callbacks.onMoveToOther(label));
+      move.title = 'Убрать строку и дописать её в поле «Другое»';
+      move.disabled = editor.saving || editor.filling !== null;
+      row.append(move);
+      proposedRows.push({ label, row });
+      card.append(row);
+    }
+    const sources = this.sourcesBlock(editor);
+    if (sources) card.append(sources);
     if (editor.suggestions.length > 0) card.append(this.suggestionsBlock(editor));
     if (editor.error) card.append(el('div', 'chatgoose-notes-inline-error', editor.error));
     return card;
   }
 
-  /** The fill's answers for fields the chatter had filled: «было → станет». */
+  /** «Откуда Гусь это взял (N)»: the quotes behind what the fill wrote
+   * straight into the draft, collapsed. Null when there are none. */
+  private sourcesBlock(editor: NotesPanelEditor): HTMLElement | null {
+    const lines = editor.sources.flatMap((source) => source.quotes.map((quote) => ({ label: source.label, quote })));
+    if (lines.length === 0) return null;
+    const details = el('details', 'chatgoose-notes-sources');
+    details.open = editor.sourcesOpen;
+    details.addEventListener('toggle', () => this.callbacks.onToggleSources(details.open));
+    details.append(el('summary', 'chatgoose-notes-sources-summary', `Откуда Гусь это взял (${lines.length})`));
+    const list = el('div', 'chatgoose-notes-sources-list');
+    for (const { label, quote } of lines) {
+      list.append(quoteLine('chatgoose-notes-quote', quote, editor.quoteDates, label));
+    }
+    details.append(list);
+    return details;
+  }
+
+  /** The fill's rewrites of fields the chatter had filled: «было → станет»,
+   * each with the fan's words behind it. */
   private suggestionsBlock(editor: NotesPanelEditor): HTMLElement {
     const block = el('div', 'chatgoose-notes-suggestions');
-    block.append(el('div', 'chatgoose-notes-suggestions-title', 'В чате нашлось другое — заполненные поля Гусь не трогал:'));
+    block.append(el('div', 'chatgoose-notes-suggestions-title', 'Гусь предлагает переписать:'));
     editor.suggestions.forEach((suggestion, index) => {
       const row = el('div', 'chatgoose-notes-suggestion');
       const change = el('div', 'chatgoose-notes-suggestion-change');
@@ -416,6 +501,11 @@ export class NotesPanel {
         el('span', 'chatgoose-notes-suggestion-arrow', '→'),
         el('span', 'chatgoose-notes-suggestion-new', suggestion.proposed),
       );
+      if (suggestion.quotes.length > 0) {
+        const quotes = el('div', 'chatgoose-notes-quotes');
+        for (const quote of suggestion.quotes) quotes.append(quoteLine('chatgoose-notes-quote', quote, editor.quoteDates));
+        change.append(quotes);
+      }
       const apply = button('chatgoose-text-button', 'Заменить', () => this.callbacks.onApplySuggestion(index));
       apply.disabled = editor.saving;
       row.append(change, apply);

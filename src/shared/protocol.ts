@@ -9,8 +9,11 @@ import {
   FAN_NOTE_TEXT_MAX_CHARS,
   FAN_NOTE_TITLE_MAX_CHARS,
   FAN_NOTES_VIEWS,
+  NOTE_QUOTE_LOCATIONS_MAX,
   isValidNoteFields,
+  isValidNoteValues,
   type FanNotesView,
+  type NoteQuoteLocation,
 } from './fan-notes.js';
 import { isOptionsPaneKey } from './options-routes.js';
 import {
@@ -271,12 +274,25 @@ function isOperationStartMessage(record: Record<string, unknown>): boolean {
     hasNoteFieldsForFeature(record);
 }
 
-/** E159: the questionnaire labels ride `fan-notes-fill` only, and that feature
- * never runs without them. */
+/** E159/E164: the questionnaire labels and their values ride
+ * `fan-notes-fill` only, and that feature never runs without both (merge
+ * mode on every fill). */
 function hasNoteFieldsForFeature(record: Record<string, unknown>): boolean {
   return record.feature === 'fan-notes-fill'
-    ? isValidNoteFields(record.noteFields)
-    : record.noteFields === undefined;
+    ? isValidNoteFields(record.noteFields) && isValidNoteValues(record.noteValues, record.noteFields)
+    : record.noteFields === undefined && record.noteValues === undefined;
+}
+
+/** E164: the fill's quote locations as the notes panel consumes them. An
+ * invalid list degrades to «absent» at the consumer (the quotes show without
+ * a date), never drops the fill's result. */
+export function isNoteQuoteLocations(value: unknown): value is NoteQuoteLocation[] {
+  return Array.isArray(value) &&
+    value.length <= NOTE_QUOTE_LOCATIONS_MAX &&
+    value.every((entry) => isObjectRecord(entry) &&
+      hasExactKeys(entry, ['quote', 'sentAt']) &&
+      isString(entry.quote) &&
+      (entry.sentAt === null || isNumber(entry.sentAt)));
 }
 
 /** coach-chat operation:complete turn context (spec §8.2). Typed, minimized shape —

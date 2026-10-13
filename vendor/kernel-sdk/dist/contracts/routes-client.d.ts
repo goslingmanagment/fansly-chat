@@ -27,14 +27,22 @@ import { z } from "zod";
 export declare const clientOpenToken: z.ZodString;
 /**
  * The ONE shape of a platform numeric id a client sends: an OnlyFans fan id
- * (== chat id) or message id. No leading zero, at most 30 digits. Every client
- * field that carries such an id (fanRef, the feed, fresh text, known message
- * ids) uses this schema, so the hub never holds two spellings of one id.
+ * (== chat id) or message id, a Fansly account or group id. No leading zero, at
+ * most 30 digits. Every client field that carries such an id (fanRef,
+ * conversationRef, the feed, fresh text, known message ids) uses this schema,
+ * so the hub never holds two spellings of one id.
  */
 export declare const CLIENT_NUMERIC_ID_PATTERN: RegExp;
 export declare const clientNumericIdSchema: z.ZodString;
-/** OnlyFans fan id (== chat_id). */
+/** The platform's fan id: on OnlyFans the fan id (== chat_id), on Fansly the fan's account id. */
 export declare const clientFanRefSchema: z.ZodString;
+/**
+ * R20 HF-10: the chat that a read by conversation names apart from its fan
+ * (`conversation-recaps-v1`): on Fansly the group id; on OnlyFans the chat id
+ * IS the fan id, so it equals `fanRef` or is left out. See "reads by
+ * conversation" below.
+ */
+export declare const clientConversationRefSchema: z.ZodString;
 export declare const clientPageParamsSchema: z.ZodObject<{
     pageLabel: z.ZodString;
 }, z.core.$strip>;
@@ -58,9 +66,17 @@ export declare const clientCursorSchema: z.ZodString;
  */
 export declare const CLIENT_CURSOR_REFUSAL_REASONS: readonly ["cursor_invalid"];
 export type ClientCursorRefusalReason = (typeof CLIENT_CURSOR_REFUSAL_REASONS)[number];
-/** Known names: documentation and the client's narrowing. On the wire they are open strings. */
-export declare const CLIENT_FEATURE_FLAG_NAMES: readonly ["insertion", "freshText", "newcomers", "spenders", "stats", "preview", "previewSend", "previewSendMarkAiGenerated", "fanPanel", "navigation", "wsTap", "sound", "coach", "recap", "review", "splitAll"];
-export declare const CLIENT_HUB_CAPABILITY_NAMES: readonly ["context-v1", "live-text-v1", "split-all-v1", "shared-recaps-v1", "recap-profile-v1", "archive-feed-v1", "spenders-stats-v1", "awaiting-reply-v1", "audience-new-v1", "preview-send-custody-v1", "client-health-perf-v1", "ai-usage-v1"];
+/**
+ * Known names: documentation and the client's narrowing. On the wire they are open strings.
+ *
+ * `drafts`, `voice` and `notesFill` exist on Fansly only (R20 HF-12): the
+ * narrow token's Reply, Fix, Hi and Ping, its voice script and its notes fill
+ * on a Fansly page. On OnlyFans those generations need no flag of their own.
+ * `freshText` exists on both (Fansly since R20 HF-8б); every other flag on
+ * OnlyFans only.
+ */
+export declare const CLIENT_FEATURE_FLAG_NAMES: readonly ["insertion", "freshText", "newcomers", "spenders", "stats", "preview", "previewSend", "previewSendMarkAiGenerated", "fanPanel", "navigation", "wsTap", "sound", "coach", "recap", "review", "splitAll", "drafts", "voice", "notesFill"];
+export declare const CLIENT_HUB_CAPABILITY_NAMES: readonly ["context-v1", "live-text-v1", "split-all-v1", "shared-recaps-v1", "recap-profile-v1", "archive-feed-v1", "spenders-stats-v1", "awaiting-reply-v1", "audience-new-v1", "preview-send-custody-v1", "client-health-perf-v1", "ai-usage-v1", "manual-greeting-v1", "coverage-check-v1", "conversation-recaps-v1"];
 /**
  * Append-only. `client_outdated` (the caller's `x-client-version` is below the
  * owner's minimum, or unreadable) is answered by the server-side check of
@@ -116,6 +132,7 @@ export declare const clientBootstrapLimitsSchema: z.ZodObject<{
     claimRenewSec: z.ZodNumber;
     claimActivityWindowSec: z.ZodNumber;
     previewSendPerMinute: z.ZodNumber;
+    greetingSendPerMinute: z.ZodOptional<z.ZodNumber>;
     navInsertTimeoutSec: z.ZodNumber;
     dispatchTicketSec: z.ZodNumber;
     previewSendReceiptProfiles: z.ZodArray<z.ZodObject<{
@@ -160,6 +177,7 @@ export declare const clientBootstrapResponseSchema: z.ZodObject<{
         claimRenewSec: z.ZodNumber;
         claimActivityWindowSec: z.ZodNumber;
         previewSendPerMinute: z.ZodNumber;
+        greetingSendPerMinute: z.ZodOptional<z.ZodNumber>;
         navInsertTimeoutSec: z.ZodNumber;
         dispatchTicketSec: z.ZodNumber;
         previewSendReceiptProfiles: z.ZodArray<z.ZodObject<{
@@ -175,6 +193,7 @@ export declare const CLIENT_RECAP_TRANSCRIPT_COVERAGES: readonly ["full-history"
 export type ClientRecapTranscriptCoverage = (typeof CLIENT_RECAP_TRANSCRIPT_COVERAGES)[number];
 export declare const clientConversationRecapsQuerySchema: z.ZodObject<{
     personaDefinitionId: z.ZodOptional<z.ZodString>;
+    conversationRef: z.ZodOptional<z.ZodString>;
 }, z.core.$strict>;
 export declare const clientRecapBodySchema: z.ZodObject<{
     generationRef: z.ZodString;
@@ -240,6 +259,7 @@ export type ClientGenerationNotEligibleReason = (typeof CLIENT_GENERATION_NOT_EL
 export declare const clientFanProfileFromGenerationBodySchema: z.ZodObject<{
     generationRef: z.ZodString;
     clientRequestId: z.ZodOptional<z.ZodString>;
+    conversationRef: z.ZodOptional<z.ZodString>;
 }, z.core.$strict>;
 export declare const clientFanProfileFromGenerationResponseSchema: z.ZodObject<{
     outcome: z.ZodEnum<{
@@ -258,7 +278,7 @@ export declare const CLIENT_FEED_DEFAULT_LIMIT = 50;
 /** The first page's summary reads this many of the newest messages unless the query says otherwise: the Ping window. */
 export declare const CLIENT_FEED_SUMMARY_WINDOW_DEFAULT = 100;
 export declare const CLIENT_FEED_SUMMARY_WINDOW_MIN = 5;
-/** The transcript readers' own cap. The deeper read (3000) is the full Recap's alone: a feed page never makes it. */
+/** The transcript readers' own cap. The deeper read (up to 5000) is the full Recap's and the notes fill's alone: a feed page never makes it. */
 export declare const CLIENT_FEED_SUMMARY_WINDOW_MAX = 1500;
 /** Known values of the feed's `source`. On the wire an open token. The AI
  *  context frame names the same readers (`AI_CONTEXT_SOURCES` in routes.ts). */
@@ -279,6 +299,7 @@ export declare const clientConversationFeedQuerySchema: z.ZodObject<{
     cursor: z.ZodOptional<z.ZodString>;
     limit: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
     summaryWindow: z.ZodOptional<z.ZodCoercedNumber<unknown>>;
+    conversationRef: z.ZodOptional<z.ZodString>;
 }, z.core.$strict>;
 export declare const clientFeedItemSchema: z.ZodObject<{
     messageId: z.ZodString;
@@ -311,6 +332,7 @@ export declare const clientConversationFeedResponseSchema: z.ZodObject<{
     target: z.ZodObject<{
         pageLabel: z.ZodString;
         fanRef: z.ZodString;
+        conversationRef: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>;
     source: z.ZodString;
     snapshotRevision: z.ZodString;
@@ -792,6 +814,13 @@ export declare const CLIENT_SEND_FAILURE_REASONS: readonly ["not_enqueued", "nat
 /** A group has at most this many variants (Hi) and parts. */
 export declare const CLIENT_CLAIM_MAX_VARIANTS = 3;
 export declare const CLIENT_CLAIM_MAX_PARTS = 10;
+/**
+ * How a manual group's `generationRef` reads in an answer: this prefix and the
+ * group's `textFingerprint`. An AI group's `generationRef` never starts with it.
+ */
+export declare const CLIENT_MANUAL_GROUP_REF_PREFIX = "manual:";
+/** A manual group's `textFingerprint`: the sha256 of the exact text, lower-case hex. */
+export declare const CLIENT_TEXT_FINGERPRINT_PATTERN: RegExp;
 export type ClientClaimAction = (typeof CLIENT_CLAIM_ACTIONS)[number];
 export type ClientCustodyState = (typeof CLIENT_CUSTODY_STATES)[number];
 export type ClientGreetingSource = (typeof CLIENT_GREETING_SOURCES)[number];
@@ -802,6 +831,23 @@ export declare const clientClaimGroupSchema: z.ZodObject<{
     variant: z.ZodNumber;
     partCount: z.ZodNumber;
 }, z.core.$strict>;
+/**
+ * A greeting with no AI generation behind it (`manual-greeting-v1`): one part,
+ * named by the sha256 of its exact text. Only for a greeting.
+ */
+export declare const clientManualClaimGroupSchema: z.ZodObject<{
+    kind: z.ZodLiteral<"manual">;
+    textFingerprint: z.ZodString;
+}, z.core.$strict>;
+/** The group a send names: an AI generation's, or a manual one. */
+export declare const clientClaimSendGroupSchema: z.ZodUnion<readonly [z.ZodObject<{
+    generationRef: z.ZodString;
+    variant: z.ZodNumber;
+    partCount: z.ZodNumber;
+}, z.core.$strict>, z.ZodObject<{
+    kind: z.ZodLiteral<"manual">;
+    textFingerprint: z.ZodString;
+}, z.core.$strict>]>;
 export declare const clientFanClaimBodySchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     action: z.ZodLiteral<"claim">;
     leaseToken: z.ZodString;
@@ -822,11 +868,14 @@ export declare const clientFanClaimBodySchema: z.ZodDiscriminatedUnion<[z.ZodObj
         greeting: "greeting";
         "preview-reply": "preview-reply";
     }>;
-    group: z.ZodObject<{
+    group: z.ZodUnion<readonly [z.ZodObject<{
         generationRef: z.ZodString;
         variant: z.ZodNumber;
         partCount: z.ZodNumber;
-    }, z.core.$strict>;
+    }, z.core.$strict>, z.ZodObject<{
+        kind: z.ZodLiteral<"manual">;
+        textFingerprint: z.ZodString;
+    }, z.core.$strict>]>;
     partIndex: z.ZodNumber;
     textRevision: z.ZodNumber;
     leaseToken: z.ZodOptional<z.ZodString>;
@@ -854,11 +903,14 @@ export declare const clientFanClaimBodySchema: z.ZodDiscriminatedUnion<[z.ZodObj
         greeting: "greeting";
         "preview-reply": "preview-reply";
     }>;
-    group: z.ZodObject<{
+    group: z.ZodUnion<readonly [z.ZodObject<{
         generationRef: z.ZodString;
         variant: z.ZodNumber;
         partCount: z.ZodNumber;
-    }, z.core.$strict>;
+    }, z.core.$strict>, z.ZodObject<{
+        kind: z.ZodLiteral<"manual">;
+        textFingerprint: z.ZodString;
+    }, z.core.$strict>]>;
     partIndex: z.ZodNumber;
     platformMessageId: z.ZodString;
 }, z.core.$strict>], "action">;
@@ -1311,6 +1363,7 @@ export declare const clientRouteSchemas: {
                     claimRenewSec: z.ZodNumber;
                     claimActivityWindowSec: z.ZodNumber;
                     previewSendPerMinute: z.ZodNumber;
+                    greetingSendPerMinute: z.ZodOptional<z.ZodNumber>;
                     navInsertTimeoutSec: z.ZodNumber;
                     dispatchTicketSec: z.ZodNumber;
                     previewSendReceiptProfiles: z.ZodArray<z.ZodObject<{
@@ -1351,6 +1404,7 @@ export declare const clientRouteSchemas: {
         }, z.core.$strip>;
         readonly querystring: z.ZodObject<{
             personaDefinitionId: z.ZodOptional<z.ZodString>;
+            conversationRef: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>;
         readonly response: {
             readonly 200: z.ZodObject<{
@@ -1431,12 +1485,14 @@ export declare const clientRouteSchemas: {
             cursor: z.ZodOptional<z.ZodString>;
             limit: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
             summaryWindow: z.ZodOptional<z.ZodCoercedNumber<unknown>>;
+            conversationRef: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>;
         readonly response: {
             readonly 200: z.ZodObject<{
                 target: z.ZodObject<{
                     pageLabel: z.ZodString;
                     fanRef: z.ZodString;
+                    conversationRef: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>;
                 source: z.ZodString;
                 snapshotRevision: z.ZodString;
@@ -1523,6 +1579,7 @@ export declare const clientRouteSchemas: {
         readonly body: z.ZodObject<{
             generationRef: z.ZodString;
             clientRequestId: z.ZodOptional<z.ZodString>;
+            conversationRef: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>;
         readonly response: {
             readonly 200: z.ZodObject<{
@@ -1930,11 +1987,14 @@ export declare const clientRouteSchemas: {
                 greeting: "greeting";
                 "preview-reply": "preview-reply";
             }>;
-            group: z.ZodObject<{
+            group: z.ZodUnion<readonly [z.ZodObject<{
                 generationRef: z.ZodString;
                 variant: z.ZodNumber;
                 partCount: z.ZodNumber;
-            }, z.core.$strict>;
+            }, z.core.$strict>, z.ZodObject<{
+                kind: z.ZodLiteral<"manual">;
+                textFingerprint: z.ZodString;
+            }, z.core.$strict>]>;
             partIndex: z.ZodNumber;
             textRevision: z.ZodNumber;
             leaseToken: z.ZodOptional<z.ZodString>;
@@ -1962,11 +2022,14 @@ export declare const clientRouteSchemas: {
                 greeting: "greeting";
                 "preview-reply": "preview-reply";
             }>;
-            group: z.ZodObject<{
+            group: z.ZodUnion<readonly [z.ZodObject<{
                 generationRef: z.ZodString;
                 variant: z.ZodNumber;
                 partCount: z.ZodNumber;
-            }, z.core.$strict>;
+            }, z.core.$strict>, z.ZodObject<{
+                kind: z.ZodLiteral<"manual">;
+                textFingerprint: z.ZodString;
+            }, z.core.$strict>]>;
             partIndex: z.ZodNumber;
             platformMessageId: z.ZodString;
         }, z.core.$strict>], "action">;
@@ -2553,6 +2616,8 @@ export type ClientSpenderAwaitingReplyQuery = z.infer<typeof clientSpenderAwaiti
 export type ClientSpenderAwaitingReplyItem = z.infer<typeof clientSpenderAwaitingReplyItemSchema>;
 export type ClientSpenderAwaitingReplyResponse = z.infer<typeof clientSpenderAwaitingReplyResponseSchema>;
 export type ClientClaimGroup = z.infer<typeof clientClaimGroupSchema>;
+export type ClientManualClaimGroup = z.infer<typeof clientManualClaimGroupSchema>;
+export type ClientClaimSendGroup = z.infer<typeof clientClaimSendGroupSchema>;
 export type ClientFanClaimBody = z.infer<typeof clientFanClaimBodySchema>;
 export type ClientFanClaimResponse = z.infer<typeof clientFanClaimResponseSchema>;
 export type ClientSendCustodyResolveBody = z.infer<typeof clientSendCustodyResolveBodySchema>;
@@ -2574,14 +2639,19 @@ export declare const CLIENT_HEALTH_INGEST_KIND = "client_health";
  */
 export declare const CLIENT_HEALTH_CODE_PATTERN: RegExp;
 /**
- * The perf metrics and the fixed upper bounds (ms) of their buckets, as the
- * client froze them (`PERF_METRICS`, contracts v1.0.0): the client builds every
- * histogram from these, and the hub checks a histogram against them before it
- * merges one.
+ * The perf metrics and the fixed upper bounds (ms) of their buckets: the client
+ * builds every histogram from these, and the hub checks a histogram against
+ * them before it merges one. The first eleven are as the client froze them
+ * (`PERF_METRICS`, contracts v1.0.0); the hub holds the Fansly ones below first,
+ * and the client adopts the same names and bounds before it sends them.
  *
  * Buckets: a histogram with n bounds has n + 1 counts. counts[0] holds values
  * ≤ bounds[0]; counts[i] values in (bounds[i-1], bounds[i]]; counts[n] values
  * above bounds[n-1] (that bucket tops out at the histogram's `max`).
+ *
+ * A metric names no host: the intake keys every rollup row by the report's
+ * host kind and build, so one metric measured on two host pages is two rows
+ * and never one set of buckets.
  *
  * The bounds and meaning of one (metric, schemaVersion) never change: new
  * bounds or a new meaning are a new schemaVersion, and the registry is
@@ -2653,6 +2723,30 @@ export declare const CLIENT_HEALTH_PERF_METRICS: {
         readonly unit: "ms";
         readonly schemaVersion: 1;
         readonly bounds: readonly [1, 2, 4, 8, 16, 32, 50, 100, 250];
+    };
+    /** One socket frame of the host page parsed by the client's tap in the page. */
+    readonly frameParseMs: {
+        readonly unit: "ms";
+        readonly schemaVersion: 1;
+        readonly bounds: readonly [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 16, 50, 100];
+    };
+    /** One XHR response of the host page parsed by the client's observer: one task, deferred or not. */
+    readonly xhrParseMs: {
+        readonly unit: "ms";
+        readonly schemaVersion: 1;
+        readonly bounds: readonly [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 16, 50, 100];
+    };
+    /** The generation snapshot's one synchronous step in the page. */
+    readonly snapshotMs: {
+        readonly unit: "ms";
+        readonly schemaVersion: 1;
+        readonly bounds: readonly [0.1, 0.25, 0.5, 1, 2, 3, 4, 5, 8, 16, 32, 50, 100, 250];
+    };
+    /** Click → the generation request ready, the snapshot's round trip through the page included. */
+    readonly snapshotRoundTripMs: {
+        readonly unit: "ms";
+        readonly schemaVersion: 1;
+        readonly bounds: readonly [1, 2, 5, 8, 16, 32, 50, 75, 100, 150, 250, 500, 1000, 2500, 5000];
     };
 };
 export type ClientHealthPerfMetricName = keyof typeof CLIENT_HEALTH_PERF_METRICS;

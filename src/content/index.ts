@@ -748,7 +748,7 @@ export class ChatGooseContentApp {
     // E159: «✨ Заполнить из чата» is an ordinary operation of the tab; its
     // port messages are routed to the panel (handlePortMessage), never to the
     // overlay or inline surfaces.
-    startFill: ({ operationId, groupId, noteFields }) => {
+    startFill: ({ operationId, groupId, noteFields, noteValues }) => {
       this.port.send({
         type: 'operation:start',
         operationId,
@@ -758,6 +758,8 @@ export class ChatGooseContentApp {
         domFanDisplayName: getActiveConversationDisplayName(),
         forceRegenerate: false,
         noteFields,
+        // E164: merge mode on every fill — the questionnaire's values only.
+        noteValues,
       });
     },
     cancelFill: (operationId) => this.port.send({ type: 'operation:cancel', operationId }),
