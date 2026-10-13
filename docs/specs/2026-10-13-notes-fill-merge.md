@@ -337,4 +337,6 @@ sends a field Core refuses.
 - Extension: one E entry (number taken from `origin/main` at implementation)
   for the merge, recording ruling 1 as a narrowing of E157/E159; one for the
   release.
-- Core: a Decision for the contract and prompt change.
+- Core keeps no decision log (its AGENTS.md): the change is recorded in the
+  `fan-notes-fill` note of `prompt-manifest.json`, in
+  `docs/ai-gateway-contract.md` and in the PR.
