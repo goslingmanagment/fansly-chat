@@ -155,7 +155,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E163 | 2026-10-13 | AGENTS.md — единственный файл правил; CLAUDE.md перенесён без потери инструкций, актуальные ссылки обновлены |
 | E164 | 2026-10-13 | «✨ Заполнить из чата» merges instead of overwriting (release A, extension half): the questionnaire's values travel to Core (`noteValues`, merge mode on every fill; a narrowing of E157/E159 — the custom name and other notes still never travel), the template gains «График», «Планы и даты», «Другое», new lines and up to five AI-named fields (with «В Другое») go straight into the draft, rewrites stay «было → станет», a fact that cannot get a line goes into «Другое»; the fill's transcript carries day lines; each fact shows the fan's quote, dated by the background from the transcript it sent («не нашлось в переписке» otherwise), never saved. SDK vendored from Core `2ac5d541` for development |
 | E165 | 2026-10-13 | Release 2.11.0 = E164 (the notes fill merges and shows its sources). The owner ordered the chain («мержи и выкатывай все») and chose to deploy the whole Core `main`: #593 merged as `bc0f6dbc` and deployed dist-only to agency-de together with 23 commits of other work merged since `a3449f77` (Project Browser, R20 HF; six migrations, 0270–0275, all dormant by their own PRs). Contract `663d132f…`; Core now registers the 2.10.1 SDK (`a6f77fbb…`) and keeps serving it. SDK re-vendored from the deployed commit. Version by the 2.9.0 rule (a feature) |
-| E166 | 2026-10-13 | The notes panel reshaped after the owner's look at 2.11.0 on a live fan («элементы жирные», «сплошной текст нечитаем»): a questionnaire reads as a table (the label, its facts one per line, the month apart, empty fields folded) and is edited as fields, the one text kept under «Текстом»; the fill's rewrite sits under its field as the facts it adds or drops; the custom name is the panel's title, edited in place; a one-row footer; «✨ Заполнить из чата» becomes «✨ Дополнить из чата» and also starts from the note being read. The note's text, the Core contract and what travels to Core are unchanged; how the AI writes is Core's half (hub #601) |
+| E166 | 2026-10-13 | The notes panel reshaped after the owner's look at 2.11.0 on a live fan («элементы жирные», «сплошной текст нечитаем»): a questionnaire reads as a table (the label, its facts one per line, the month apart, empty fields folded) and is edited as fields, the one text kept under «Текстом»; the fill's rewrite sits under its field as the facts it adds or drops; the custom name is the panel's title, edited in place; a one-row footer; «✨ Заполнить из чата» becomes «✨ Дополнить из чата» and also starts from the note being read. The note's text, the Core contract and what travels to Core are unchanged. Core's half (hub #601) is which field a fact goes to; the owner kept the length of what the AI writes |
 
 ## Entries
 
@@ -5930,12 +5930,19 @@ for); the first filled questionnaire in the released extension is the check.
 screenshots with three complaints: the panel's elements are heavy and untidy,
 some of the AI's notes are not useful, and the result is a wall of text. He
 allowed any size of rework. A «Было/Стало» mockup (the real 2.11.0 panel and
-a prototype in one frame, on a synthetic fan) was approved with five rulings:
-edit by fields, the custom name as in the mockup, «Характеристика» is the
-kind of fan and not his purchases, day episodes are dropped, one release for
-both halves. This entry is the extension half: how the note is shown and
-typed. How the AI writes (short facts, an importance bar, one fact in one
-field, the fields' definitions) is Core's prompt, hub #601.
+a prototype in one frame, on a synthetic fan) was approved: edit by fields,
+the custom name as in the mockup, «Характеристика» is the kind of fan and
+not his purchases, one release for both halves. This entry is the extension
+half: how the note is shown and typed.
+
+The mockup also proposed that the AI write less (short facts, an importance
+bar, at most three new facts a field). Shown the old and the new prompt's
+answer for the same real fan side by side, the owner turned that down («не
+надо вывод короче, лучше вывод как был»): the fuller answer is the useful
+one, and reading it is this panel's job. Core's half (hub #601) is therefore
+only where a fact goes: «Характеристика» is who the fan is, purchases live
+in «Медиа» alone, one fact in one field. Do not propose shortening the fill
+again without a new reason.
 
 - A questionnaire is read as fields. `parseNoteForm` gives each field its
   facts: the parts of its value between «; », then the lines without a label
