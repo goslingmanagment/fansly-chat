@@ -63,3 +63,19 @@ declare module 'node:crypto' {
   }
   export function createHash(algorithm: 'sha256'): Hash;
 }
+
+declare module 'node:module' {
+  interface Require {
+    (id: string): unknown;
+    resolve(id: string): string;
+  }
+  export function createRequire(filename: string | URL): Require;
+}
+
+declare module 'node:vm' {
+  export function runInNewContext(
+    code: string,
+    context: Record<string, unknown>,
+    options?: { timeout?: number },
+  ): unknown;
+}
