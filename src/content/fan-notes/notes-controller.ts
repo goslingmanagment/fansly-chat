@@ -30,6 +30,7 @@ import { formatUserFacingError, getUserErrorDescription, toUserError } from '../
 import { parseGroupIdFromPath } from '../../shared/fansly-routes.js';
 import {
   FAN_CUSTOM_NAME_MAX_CHARS,
+  FAN_NOTE_OTHER_LABEL,
   FAN_NOTE_TEMPLATE_TEXT,
   FAN_NOTE_TEMPLATE_TITLE,
   FAN_NOTE_TEXT_MAX_CHARS,
@@ -92,6 +93,8 @@ interface Draft {
   suggestions: NoteFieldSuggestion[];
   /** What the last fill did, in a line. */
   fillNotice: string | null;
+  /** The counts behind `fillNotice`, kept so «В Другое» can restate it. */
+  fillSummary: FillSummary | null;
   /** Fields the last fill named itself and put in the draft: each offers
    * «В Другое» while its line is there. */
   proposed: string[];
@@ -104,8 +107,33 @@ interface Draft {
   sourcesOpen: boolean;
 }
 
-function emptyFillState(): Pick<Draft, 'suggestions' | 'fillNotice' | 'proposed' | 'sources' | 'quoteDates' | 'sourcesOpen'> {
-  return { suggestions: [], fillNotice: null, proposed: [], sources: [], quoteDates: null, sourcesOpen: false };
+type FillSummary = Pick<NoteFillMerge, 'filledCount' | 'addedLabels' | 'appendedToOther'>;
+
+function emptyFillState(): Pick<Draft, 'suggestions' | 'fillNotice' | 'fillSummary' | 'proposed' | 'sources' | 'quoteDates' | 'sourcesOpen'> {
+  return { suggestions: [], fillNotice: null, fillSummary: null, proposed: [], sources: [], quoteDates: null, sourcesOpen: false };
+}
+
+/** The notice's counts after «В Другое» took `label`'s line away: it is no
+ * longer an added line, and «Другое» became a new line, grew, or (an empty
+ * proposed line) stayed as it was. */
+export function summaryAfterMoveToOther(
+  summary: FillSummary,
+  label: string,
+  other: 'created' | 'appended' | 'unchanged',
+): FillSummary {
+  const addedLabels = summary.addedLabels.filter((entry) => entry !== label);
+  if (other === 'created') return { ...summary, addedLabels: [...addedLabels, FAN_NOTE_OTHER_LABEL] };
+  const otherAdded = addedLabels.some((entry) => entry.trim().normalize('NFC').toLocaleLowerCase('ru') === FAN_NOTE_OTHER_LABEL.toLocaleLowerCase('ru'));
+  return {
+    ...summary,
+    addedLabels,
+    appendedToOther: summary.appendedToOther || (other === 'appended' && !otherAdded),
+  };
+}
+
+function otherValue(text: string): string | null {
+  const key = FAN_NOTE_OTHER_LABEL.toLocaleLowerCase('ru');
+  return parseNoteTemplate(text).find((field) => field.label.trim().normalize('NFC').toLocaleLowerCase('ru') === key)?.value ?? null;
 }
 
 /** «Заполнено полей: 2. Добавлены строки: График, Другое. Предложений: 1.
@@ -802,6 +830,7 @@ export class FanNotesController {
     draft.quoteDates = quotes ? new Map(quotes.map((entry) => [entry.quote, entry.sentAt] as const)) : null;
     draft.sourcesOpen = false;
     draft.fillNotice = fillNoticeText(merged);
+    draft.fillSummary = { filledCount: merged.filledCount, addedLabels: merged.addedLabels, appendedToOther: merged.appendedToOther };
     this.render();
   }
 
@@ -849,10 +878,19 @@ export class FanNotesController {
     const draft = data ? this.drafts.get(data.fan.accountId) : undefined;
     if (!draft || draft.saving || !draft.proposed.includes(label)) return;
     const rest = draft.proposed.filter((entry) => entry !== label);
+    const otherBefore = otherValue(draft.text);
     const moved = moveFieldToOther(draft.text, label, draft.suggestions, rest);
+    const otherAfter = otherValue(moved.text);
     draft.text = moved.text;
     draft.suggestions = moved.suggestions;
     draft.proposed = rest.filter((entry) => hasFieldLine(moved.text, entry));
+    if (draft.fillSummary) {
+      const other = otherBefore === null && otherAfter !== null
+        ? 'created'
+        : otherBefore !== otherAfter ? 'appended' : 'unchanged';
+      draft.fillSummary = summaryAfterMoveToOther(draft.fillSummary, label, other);
+      draft.fillNotice = fillNoticeText({ ...draft.fillSummary, suggestions: draft.suggestions });
+    }
     this.render();
   }
 

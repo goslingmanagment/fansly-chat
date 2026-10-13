@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 
-import { FanNotesController, FAN_NOTES_FOLLOW_DELAY_MS } from '../src/content/fan-notes/notes-controller.js';
+import { FanNotesController, FAN_NOTES_FOLLOW_DELAY_MS, fillNoticeText, summaryAfterMoveToOther } from '../src/content/fan-notes/notes-controller.js';
 import { FanRegistrationControl } from '../src/content/fan-registration.js';
 import { createUserError } from '../src/shared/errors.js';
 import type { FanNote, FanNotesSnapshot } from '../src/shared/fan-notes.js';
@@ -678,6 +678,9 @@ describe('FanNotesController (E157)', () => {
       ].join('\n'));
       expect(q('.chatgoose-notes-proposed')).toBeNull();
       expect(q<HTMLDetailsElement>('details.chatgoose-notes-sources')?.open).toBe(true);
+      // The notice restates what is in the draft now: «Другое», not the moved line.
+      expect(q('.chatgoose-notes-fill-notice')?.textContent)
+        .toBe('Заполнено полей: 1. Добавлены строки: График, Другое. Предложений: 1. Проверьте и сохраните.');
 
       // «Заменить» keeps its rule and the moved fact stays in «Другое».
       buttonNamed('Заменить').click();
@@ -761,5 +764,31 @@ describe('FanNotesController (E157)', () => {
     vi.advanceTimersByTime(FAN_NOTES_FOLLOW_DELAY_MS);
     await flush();
     expect(load).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('the fill notice after «В Другое» (E164)', () => {
+  const summary = { filledCount: 0, addedLabels: ['График', 'Происхождение'], appendedToOther: false };
+
+  it('names «Другое» as a new line when the move created it', () => {
+    const next = summaryAfterMoveToOther(summary, 'Происхождение', 'created');
+    expect(fillNoticeText({ ...next, suggestions: [] }))
+      .toBe('Добавлены строки: График, Другое. Проверьте и сохраните.');
+  });
+
+  it('says «Другое» grew when the move appended to a filled one', () => {
+    const next = summaryAfterMoveToOther(summary, 'Происхождение', 'appended');
+    expect(fillNoticeText({ ...next, suggestions: [] }))
+      .toBe('Добавлены строки: График. Дополнено поле: Другое. Проверьте и сохраните.');
+  });
+
+  it('keeps «Другое» an added line when the fill had added it already', () => {
+    const next = summaryAfterMoveToOther({ ...summary, addedLabels: ['Другое', 'Происхождение'] }, 'Происхождение', 'appended');
+    expect(next).toEqual({ filledCount: 0, addedLabels: ['Другое'], appendedToOther: false });
+  });
+
+  it('only drops the line when an empty proposed line left nothing to move', () => {
+    expect(summaryAfterMoveToOther(summary, 'Происхождение', 'unchanged'))
+      .toEqual({ filledCount: 0, addedLabels: ['График'], appendedToOther: false });
   });
 });

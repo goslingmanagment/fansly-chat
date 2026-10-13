@@ -95,6 +95,18 @@ export interface NotesPanelCallbacks {
   onToggleSources: (open: boolean) => void;
 }
 
+
+/** The editor grows with its text up to half the window, so the lines a fill
+ * adds below a long questionnaire are in sight, not under a scroll. Detached
+ * or unlaid-out (scrollHeight 0) it keeps its CSS height. */
+function fitNoteTextarea(text: HTMLTextAreaElement): void {
+  if (!text.isConnected) return;
+  text.style.height = '';
+  const content = text.scrollHeight;
+  if (content <= 0) return;
+  const max = Math.max(text.clientHeight, Math.round(window.innerHeight / 2));
+  if (content > text.clientHeight) text.style.height = `${Math.min(content + 2, max)}px`;
+}
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
   className?: string,
@@ -239,6 +251,7 @@ export class NotesPanel {
     this.scrim.classList.toggle('chatgoose-hidden', model.view !== 'center');
     this.applyPlacement();
     this.panel.replaceChildren(this.header(model), this.body(model), this.footer(model));
+    for (const text of this.panel.querySelectorAll<HTMLTextAreaElement>('.chatgoose-note-textarea')) fitNoteTextarea(text);
     this.restoreFocus(focus);
     // A delete question below the fold would wait unseen.
     this.panel.querySelector('.chatgoose-note-confirm-row')?.scrollIntoView?.({ block: 'nearest' });
@@ -399,6 +412,7 @@ export class NotesPanel {
     const proposedRows: Array<{ label: string; row: HTMLElement }> = [];
     const report = () => {
       this.callbacks.onEditorInput(title.value, text.value);
+      fitNoteTextarea(text);
       syncFill();
       for (const { label, row } of proposedRows) row.hidden = !hasFieldLine(text.value, label);
     };
