@@ -93,6 +93,9 @@ export interface KernelFeatureRequest {
   /** fan-notes-fill only (E159): the questionnaire labels; the kernel
    * requires them there and rejects them elsewhere. */
   noteFields?: string[];
+  /** fan-notes-fill only (E164): the current value per label, index-aligned
+   * with `noteFields`; present = merge mode. Refused on other features. */
+  noteValues?: string[];
   /** The REQUESTED transcript window (deepMessageCount for a full recap, the
    * short const for a short recap, the quick window otherwise) — distinct from
    * `clientContext.messageCount` (the KEPT count). The kernel records it as the
@@ -482,6 +485,9 @@ export function createKernelFeatureGateway(
               : {}),
             ...(request.feature === 'fan-notes-fill' && request.noteFields !== undefined
               ? { noteFields: request.noteFields }
+              : {}),
+            ...(request.feature === 'fan-notes-fill' && request.noteValues !== undefined
+              ? { noteValues: request.noteValues }
               : {}),
             // Top-level REQUESTED window (kernel records it as requestedCount);
             // clientContext.messageCount below is the KEPT count.

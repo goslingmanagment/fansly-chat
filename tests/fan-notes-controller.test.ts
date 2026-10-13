@@ -538,11 +538,15 @@ describe('FanNotesController (E157)', () => {
       expect(fillButton.hidden).toBe(false);
       fillButton.click();
 
+      const labels = ['Имя', 'Локация', 'Возраст', 'Работа', 'График', 'Хобби', 'Планы и даты', 'Фетиши', 'Характеристика', 'Медиа', 'Другое'];
       expect(options.startFill).toHaveBeenCalledWith({
         operationId: 'fill-op-1',
         groupId: GROUP_A,
-        noteFields: ['Имя', 'Локация', 'Возраст', 'Работа', 'Хобби', 'Фетиши', 'Характеристика', 'Медиа'],
+        noteFields: labels,
+        // A new questionnaire still sends its (empty) values: merge mode.
+        noteValues: labels.map(() => ''),
       });
+      expect(fillButton.title).toBe('ИИ дополнит анкету по всей переписке: заполнит пустые поля, допишет новые строки, переписать заполненные предложит');
       expect(notes.ownsOperation('fill-op-1')).toBe(true);
       // The fields are locked while the answer is on its way.
       expect(q<HTMLTextAreaElement>('.chatgoose-note-textarea')?.disabled).toBe(true);
@@ -579,6 +583,132 @@ describe('FanNotesController (E157)', () => {
       expect(q('.chatgoose-notes-suggestions')).toBeNull();
       // Nothing went to Fansly: the chatter still saves by hand.
       expect(notes.ownsOperation('fill-op-1')).toBe(false);
+    });
+
+    it('merges into the chatter\'s values, adds lines, proposes a field and shows where each fact came from (E164)', async () => {
+      const made = create({
+        load: vi.fn(async () => ok(snapshot(FAN_A, [
+          note('900000000000000001', 'Анкета', 'Имя: Ethan\nЛокация: Australia, Brisbane\nРабота: \nХарактеристика: маори и голландец\nМедиа: Sexting 1\n\nпросил кастом'),
+        ]))),
+      } as never);
+      const { controller: notes, options } = made;
+      notes.sync();
+      notes.toggle();
+      await flush();
+      buttonNamed('Изменить').click();
+      buttonNamed('✨ Заполнить из чата').click();
+
+      expect(options.startFill).toHaveBeenCalledWith(expect.objectContaining({
+        noteFields: ['Имя', 'Локация', 'Работа', 'Характеристика', 'Медиа', 'Возраст', 'График', 'Хобби', 'Планы и даты', 'Фетиши', 'Другое'],
+        noteValues: ['Ethan', 'Australia, Brisbane', '', 'маори и голландец', 'Sexting 1', '', '', '', '', '', ''],
+      }));
+
+      const day = (d: number) => new Date(2026, 8, d, 12, 0).getTime();
+      notes.handleOperationMessage({
+        type: 'operation:complete',
+        operationId: 'fill-op-1',
+        fanDisplayName: 'Richard',
+        result: { rawText: [
+          'Имя: Ethan',
+          'Локация: Australia, Brisbane',
+          'Работа: медбрат',
+          '> «I\'m a nurse»',
+          'Характеристика: любит GFE, платит за кастомы',
+          '> «I love the gfe vibe»',
+          '> «I made it up»',
+          'Медиа: Sexting 1',
+          'График: ночные смены 4/4 (09.2026)',
+          '> «I work nights, 4 on 4 off»',
+          'Другое: ',
+          '+ Происхождение: маори и голландец',
+          '> «I\'m Maori and Dutch»',
+        ].join('\n') },
+        noteQuotes: [
+          { quote: 'I\'m a nurse', sentAt: day(14) },
+          { quote: 'I love the gfe vibe', sentAt: day(15) },
+          { quote: 'I made it up', sentAt: null },
+          { quote: 'I work nights, 4 on 4 off', sentAt: day(14) },
+          { quote: 'I\'m Maori and Dutch', sentAt: day(16) },
+        ],
+      } as never);
+
+      const textarea = () => q<HTMLTextAreaElement>('.chatgoose-note-textarea')!;
+      expect(textarea().value).toBe([
+        'Имя: Ethan',
+        'Локация: Australia, Brisbane',
+        'Работа: медбрат',
+        'Характеристика: маори и голландец',
+        'Медиа: Sexting 1',
+        'График: ночные смены 4/4 (09.2026)',
+        'Происхождение: маори и голландец',
+        '',
+        'просил кастом',
+      ].join('\n'));
+      // Quotes are shown, never written into the note.
+      expect(textarea().value).not.toContain('nurse');
+      expect(q('.chatgoose-notes-fill-notice')?.textContent)
+        .toBe('Заполнено полей: 1. Добавлены строки: График, Происхождение. Предложений: 1. Проверьте и сохраните.');
+      expect(q('.chatgoose-notes-proposed')?.textContent).toBe('Гусь завёл поле «Происхождение»В Другое');
+      expect(q('.chatgoose-notes-suggestions-title')?.textContent).toBe('Гусь предлагает переписать:');
+      const quotes = [...document.querySelectorAll('.chatgoose-notes-suggestion .chatgoose-notes-quote')].map((node) => node.textContent);
+      expect(quotes).toEqual(['15.09.2026 · I love the gfe vibe', 'не нашлось в переписке · I made it up']);
+      const sources = q<HTMLDetailsElement>('details.chatgoose-notes-sources')!;
+      expect(sources.open).toBe(false);
+      expect(sources.querySelector('summary')?.textContent).toBe('Откуда Гусь это взял (3)');
+      expect([...sources.querySelectorAll('.chatgoose-notes-quote')].map((node) => node.textContent)).toEqual([
+        'Работа — 14.09.2026 · I\'m a nurse',
+        'График — 14.09.2026 · I work nights, 4 on 4 off',
+        'Происхождение — 16.09.2026 · I\'m Maori and Dutch',
+      ]);
+
+      // The list stays open across a repaint.
+      sources.open = true;
+      sources.dispatchEvent(new window.Event('toggle'));
+      buttonNamed('В Другое').click();
+      expect(textarea().value).toBe([
+        'Имя: Ethan',
+        'Локация: Australia, Brisbane',
+        'Работа: медбрат',
+        'Характеристика: маори и голландец',
+        'Медиа: Sexting 1',
+        'График: ночные смены 4/4 (09.2026)',
+        'Другое: Происхождение: маори и голландец',
+        '',
+        'просил кастом',
+      ].join('\n'));
+      expect(q('.chatgoose-notes-proposed')).toBeNull();
+      expect(q<HTMLDetailsElement>('details.chatgoose-notes-sources')?.open).toBe(true);
+
+      // «Заменить» keeps its rule and the moved fact stays in «Другое».
+      buttonNamed('Заменить').click();
+      expect(textarea().value).toContain('Характеристика: любит GFE, платит за кастомы');
+      expect(textarea().value).toContain('Другое: Происхождение: маори и голландец');
+      expect(options.saveNote).not.toHaveBeenCalled();
+    });
+
+    it('drops a proposed field\'s row once its line is gone, and shows quotes undated without locations', async () => {
+      const { controller: notes } = await openTemplate();
+      buttonNamed('✨ Заполнить из чата').click();
+      notes.handleOperationMessage({
+        type: 'operation:complete',
+        operationId: 'fill-op-1',
+        fanDisplayName: 'Richard',
+        // Core escapes what it shows the model: the quote is decoded for display.
+        result: { rawText: 'Имя: Ethan\n> «call me Ethan &amp; co»\n+ Семья: есть сестра' },
+        noteQuotes: [{ quote: 'call me Ethan & co', sentAt: 'yesterday' }],
+      } as never);
+
+      expect(q('.chatgoose-notes-sources .chatgoose-notes-quote')?.textContent).toBe('Имя — call me Ethan & co');
+      const row = q<HTMLElement>('.chatgoose-notes-proposed')!;
+      expect(row.hidden).toBe(false);
+      const text = q<HTMLTextAreaElement>('.chatgoose-note-textarea')!;
+      text.value = text.value.replace('\nСемья: есть сестра', '');
+      text.dispatchEvent(new window.Event('input'));
+      expect(row.hidden).toBe(true);
+      // The next repaint has no row for it either.
+      buttonNamed('✨ Заполнить из чата').click();
+      buttonNamed('Остановить').click();
+      expect(q('.chatgoose-notes-proposed')).toBeNull();
     });
 
     it('stops on demand, and a late answer never lands in the draft', async () => {

@@ -19,6 +19,7 @@ import {
 import { ChatGooseError } from '../src/shared/errors.js';
 import { migrateState, stripSecretSettings } from '../src/shared/migrations.js';
 import { personaCatalogSource } from '../src/shared/persona-catalog.js';
+import { formatTranscriptDayLine, formatTranscriptForKernel } from '../src/shared/transcript.js';
 import {
   createMockRuntimePort,
   postedMessages,
@@ -7643,6 +7644,75 @@ describe(`OperationCoordinator (${part})`, () => {
       await coordinator.startOperation(1, fillStart({ feature: 'fan-summary', noteFields: undefined, operationId: 'recap-op' }));
 
       expect(kernelRequestFromStreamCall(kernelGateway)).not.toHaveProperty('noteFields');
+      expect(kernelRequestFromStreamCall(kernelGateway)).not.toHaveProperty('noteValues');
+    });
+
+    describe('merge mode (E164)', () => {
+      // Two days in the browser's clock: the fan's lines are «message 2», «message 4», …
+      const dayOne = new Date(2026, 8, 13, 22, 0).getTime() / 1000;
+      const dayTwo = new Date(2026, 8, 14, 9, 0).getTime() / 1000;
+      const messages = buildTranscriptMessages(6).map((message, index) => ({
+        ...message,
+        createdAt: (index < 3 ? dayOne : dayTwo) + index * 60,
+      }));
+
+      it('sends the values, dates the transcript by day and dates each quote', async () => {
+        const { coordinator, kernelGateway, fanslyClient, port } = await createCoordinatorHarness({
+          anthropicRawText: 'Имя: Alice\n> «Message 2»\nЛокация: \nМедиа: видео\n> «message 6»\n> «never said»',
+        });
+        fanslyClient.loadMessages.mockResolvedValue({
+          pages: pagesFromTranscript(messages),
+          pagesLoaded: 1,
+          targetPages: 1,
+          reachedEnd: true,
+        });
+
+        await coordinator.startOperation(1, fillStart({ noteValues: ['Alice', '', ''] }));
+
+        const request = kernelRequestFromStreamCall(kernelGateway);
+        expect(request).toMatchObject({
+          noteFields: ['Имя', 'Локация', 'Медиа'],
+          noteValues: ['Alice', '', ''],
+          clientContext: { messageCount: 6 },
+        });
+        const lines = (request.clientContext.transcript as string).split('\n');
+        expect(lines).toHaveLength(8);
+        expect(lines[0]).toBe(formatTranscriptDayLine(dayOne));
+        expect(lines[4]).toBe(formatTranscriptDayLine(dayTwo));
+        expect(lines.filter((line) => line.startsWith('--- '))).toHaveLength(2);
+
+        const complete = postedMessages(port).find(
+          (message): message is Extract<BackgroundPortMessage, { type: 'operation:complete' }> =>
+            message.type === 'operation:complete',
+        );
+        expect(complete?.noteQuotes).toEqual([
+          { quote: 'Message 2', sentAt: (dayOne + 60) * 1000 },
+          { quote: 'message 6', sentAt: (dayTwo + 5 * 60) * 1000 },
+          { quote: 'never said', sentAt: null },
+        ]);
+      });
+
+      it('leaves every other feature\'s transcript byte for byte as before', async () => {
+        const { coordinator, kernelGateway, fanslyClient } = await createCoordinatorHarness({
+          anthropicRawText: 'hey you',
+        });
+        fanslyClient.loadMessages.mockResolvedValue({
+          pages: pagesFromTranscript(messages),
+          pagesLoaded: 1,
+          targetPages: 1,
+          reachedEnd: true,
+        });
+
+        await coordinator.startOperation(1, fillStart({
+          feature: 'fast-reply',
+          noteFields: undefined,
+          operationId: 'reply-op',
+        }));
+
+        const request = kernelRequestFromStreamCall(kernelGateway);
+        expect(request.clientContext.transcript).toBe(formatTranscriptForKernel(messages).transcript);
+        expect(request.clientContext.transcript).not.toContain('--- ');
+      });
     });
   });
   }

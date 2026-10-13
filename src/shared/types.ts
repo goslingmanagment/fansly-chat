@@ -1,7 +1,7 @@
 import type { MessageSoundTone } from './message-sound-protocol.js';
 import type { PaneKey } from './options-routes.js';
 import type { FanslyDmPermissionAccount, FanslyDmPermissionRule } from './fansly-dm-permissions.js';
-import type { FanNote, FanNotesSnapshot, FanNotesView } from './fan-notes.js';
+import type { FanNote, FanNotesSnapshot, FanNotesView, NoteQuoteLocation } from './fan-notes.js';
 import type {
   StoredVoiceAttemptRoute,
   VoiceAttemptStoreEntry,
@@ -1666,9 +1666,14 @@ export interface OperationStartPayload extends PortEnvelopeBase {
   replyMode?: ReplyMode;
   replyTone?: ReplyTone;
   /** fan-notes-fill only (E159): the labels of the questionnaire being
-   * filled («Имя», «Локация», …). The kernel answers one `Label: value` line
-   * per label, from the chat alone — the chatter's values never travel. */
+   * filled («Имя», «Локация», …), then the template labels it lacks. The
+   * kernel answers one `Label: value` line per label. */
   noteFields?: string[];
+  /** fan-notes-fill only, required there (E164): the chatter's current value
+   * per label, index-aligned with `noteFields` (`""` for an empty or appended
+   * field). The questionnaire's values only — never the custom name or
+   * another note. */
+  noteValues?: string[];
   /** coach-chat: the chatter's live question for this turn. */
   chatterQuestion?: string;
   /** coach-chat: ask the kernel to substitute its pinned situation question. */
@@ -1856,6 +1861,10 @@ export interface CompletePayload extends PortEnvelopeBase {
    * rendered as the collapsed «Отправлено коучу…» line. Only coach operations
    * fill it; absent ⇒ the line is not rendered (old-background tolerance). */
   turnContext?: CoachTurnContext;
+  /** fan-notes-fill (E164): when the fan said each quote of the answer,
+   * looked up in the transcript the fill sent. Validated at the consumer:
+   * an invalid list degrades to absent (quotes then show without a date). */
+  noteQuotes?: NoteQuoteLocation[];
 }
 
 export interface ErrorPayload extends PortEnvelopeBase {
