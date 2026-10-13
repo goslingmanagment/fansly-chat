@@ -153,6 +153,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E161 | 2026-10-12 | 2.10.0 was signed by AMO but never served: the session running `deploy.sh` ended while it waited for the approval, before the upload, the feed and the tag. AMO versions are single-use and the script has no resume path, so the same build ships as 2.10.1 through the ordinary `deploy.sh`; the changelog names 2.10.1 only. No code change |
 | E162 | 2026-10-13 | Chrome DevTools MCP по умолчанию для Fansly; карта исходников и общий справочник с chat-extension (X38), бандл и исследования; правило проверено в новой сессии Claude |
 | E163 | 2026-10-13 | AGENTS.md — единственный файл правил; CLAUDE.md перенесён без потери инструкций, актуальные ссылки обновлены |
+| E164 | 2026-10-13 | «✨ Заполнить из чата» merges instead of overwriting (release A, extension half): the questionnaire's values travel to Core (`noteValues`, merge mode on every fill; a narrowing of E157/E159 — the custom name and other notes still never travel), the template gains «График», «Планы и даты», «Другое», new lines and up to five AI-named fields (with «В Другое») go straight into the draft, rewrites stay «было → станет», a fact that cannot get a line goes into «Другое»; the fill's transcript carries day lines; each fact shows the fan's quote, dated by the background from the transcript it sent («не нашлось в переписке» otherwise), never saved. SDK vendored from Core `2ac5d541` for development |
 
 ## Entries
 
@@ -5802,3 +5803,89 @@ Chrome DevTools MCP и справочник из E162; прежний `AGENTS.md
 [Правило загрузки Claude Code](https://code.claude.com/docs/en/memory#agentsmd) проверено
 на дату записи. Настройки пользователя не менялись; отдельный файл-обёртка не нужен.
 Поведение, проверки и релизный процесс расширения не менялись.
+
+**E164 (2026-10-13).** The owner approved release A of the «make the AI
+notes really useful» brainstorm (chat, 2026-10-13): merge instead of
+overwrite, and a quote per fact, in one release because they change the same
+prompt and the same panel. Spec: [docs/specs/2026-10-13-notes-fill-merge.md](specs/2026-10-13-notes-fill-merge.md)
+(owner rulings in its section 2). This entry is the extension half; Core
+records its half in the `fan-notes-fill` note of `prompt-manifest.json` and
+`docs/ai-gateway-contract.md`.
+
+- Owner ruling 1, a narrowing of E157 («never in a prompt») and E159 («only
+  the labels travel»): the questionnaire's values may travel to Core, for
+  this fill now and for Reply/Coach later. The custom name (12002) and every
+  other note still never travel. Rulings 5 and 6 as well: new lines go
+  straight into the draft (only rewrites of filled fields stay suggestions),
+  and the AI never touches the custom name.
+- Request: `noteFields` = the note's labels in note order, then the template
+  labels it lacks (compared as labels are: trimmed, NFC, case-insensitive), in
+  template order; `noteValues` index-aligned, `""` for empty and appended
+  fields. At most 30: missing template labels drop from the end of the
+  template first, counting every field of the note. A value over 2 000 UTF-16
+  code units is left out, label and all, and the merge never touches it. A new
+  client sends `noteValues` on every fill (merge mode, also for an all-empty
+  questionnaire); the content→background protocol now requires it with the
+  labels. Template: Имя, Локация, Возраст, Работа, График, Хобби, Планы и
+  даты, Фетиши, Характеристика, Медиа, Другое.
+- Transcript: for the fill in merge mode only, a day line `--- YYYY-MM-DD ---`
+  before each day's first message, in the browser's clock (the `[HH:MM]`
+  one). The oldest-first 300k budget pays a day line together with its first
+  kept message, so it counts them and never leaves one without a message;
+  `clientContext.messageCount` still counts messages. Every other feature's
+  transcript keeps its bytes (one budget routine with day lines off; tests pin
+  the legacy output and a fast-reply request).
+- Answer: field lines; `> «…»` quote lines attach to the field or `+` line
+  above them (three at most; one with nothing above it is ignored; guillemets
+  or straight/typographic quotes stripped); `+ Label: value` proposed fields,
+  five at most with a value. Core escapes what it shows the model, so `&lt;`,
+  `&gt;`, `&amp;` are decoded in one pass in every value, label and quote
+  before anything is compared, written, located or shown. `Label:` and
+  `Label: ` both read as empty.
+- Merge: an empty field is filled in place; a filled one with the same value
+  (decoded, whitespace- and case-insensitive) gives nothing; a different one
+  gives «было → станет» with its quotes; a template label the note lacked and
+  a usable proposed field become new lines right after the last field line
+  (free text below stays below), template lines first. A proposed field whose
+  label is invalid, repeats an asked or present label, or would take the
+  questionnaire past 30 goes into «Другое» as `Label: value` with «; » (a
+  `+ Другое` by its value alone): appended to the line, to both sides of a
+  pending «Другое» rewrite, or a «Другое» line created at the end of the
+  template lines; if creating it needs the 30th place, the last proposed line
+  gives its place up. With no «Другое» and no room the fact stays where it
+  was (its source rewrite is still only a suggestion). «В Другое» on a
+  proposed field does the same by hand; without «Другое» the line is created
+  before the other proposed lines still in the draft. `applyFieldSuggestion`
+  and «Заменить все» keep their rule (a rewrite applies only to the value it
+  was made for).
+- Quotes: the background parses the answer with the panel's own parser and
+  dates each quote by the newest Fan: message of the window it sent (the kept
+  suffix of the normalized messages) whose text contains it after
+  normalization (NFC, case fold, whitespace collapsed, typographic quotes,
+  apostrophes, dashes and the ellipsis as ASCII; an ellipsis the model put at
+  an end is ignored). The result rides the fill's own `operation:complete` as
+  `noteQuotes: [{ quote, sentAt | null }]` (sentAt in epoch ms), a typed
+  projection like Coach's `turnContext`: no new port message and no state kept
+  between operations, the transcript never leaves the background. The panel
+  validates it at the consumer; an invalid list degrades to undated quotes.
+- Panel: notice «Заполнено полей: N. Добавлены строки: … Предложений: K.
+  Проверьте и сохраните.» (empty parts left out; «Дополнено поле: Другое»
+  when a filled «Другое» got a moved fact without a rewrite, a case the spec
+  does not name); a row «Гусь завёл поле «…»» with «В Другое» per proposed
+  field, gone once clicked or once its line leaves the draft; «Откуда Гусь это
+  взял (N)», collapsed, N = quote lines, «Label — 14.09.2026 · quote» for
+  fields filled in place, new lines and moved facts; quotes under each
+  rewrite; «не нашлось в переписке · …» in the error colour for a quote not
+  found; title «Гусь предлагает переписать:»; the button's new tooltip.
+  Quotes live in the draft's panel state until the next fill or until the
+  editor closes; they are never written into the note.
+- SDK: vendored for development from Core `2ac5d541` («feat(ai):
+  fan-notes-fill accepts noteValues (contract)», contract `1d3e8c62…`); a test
+  pins the extension's bounds to the SDK's `AI_NOTE_*` and checks a built body
+  against the SDK's body schema. The release re-vendors from the deployed Core
+  commit (E160 order: Core first, then the extension).
+- Verified: `pnpm check`; the real controller, panel and stylesheet in a
+  headless-Chromium harness with fixture data (after the fill, the sources
+  expanded, after «В Другое»; dark and light). Not verified: a live Fansly
+  session and the prompt on production data; the owner or a chatter checks a
+  real filled questionnaire before the release is called done.
