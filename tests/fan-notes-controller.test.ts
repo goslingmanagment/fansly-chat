@@ -78,12 +78,35 @@ function q<T extends Element = HTMLElement>(selector: string): T | null {
   return document.querySelector<T>(selector);
 }
 
+/** A button by what it says: its text without the decorative parts (the
+ * key hint, the spark), or its label when it is an icon. */
+function buttonName(node: HTMLButtonElement): string {
+  const copy = node.cloneNode(true) as HTMLElement;
+  for (const extra of copy.querySelectorAll('[aria-hidden="true"]')) extra.remove();
+  return copy.textContent?.trim() || node.getAttribute('aria-label') || '';
+}
+
 function buttonNamed(text: string): HTMLButtonElement {
   const found = [...document.querySelectorAll<HTMLButtonElement>('#chatgoose-notes-root button')]
-    .find((node) => node.textContent?.trim() === text);
+    .find((node) => buttonName(node) === text);
   if (!found) throw new Error(`no button «${text}»`);
   return found;
 }
+
+/** A questionnaire field of the open editor, by its label. */
+function field(label: string): HTMLTextAreaElement {
+  const found = [...document.querySelectorAll<HTMLTextAreaElement>('.chatgoose-note-field')]
+    .find((node) => node.getAttribute('aria-label') === label);
+  if (!found) throw new Error(`no field «${label}»`);
+  return found;
+}
+
+function type(target: HTMLInputElement | HTMLTextAreaElement, value: string): void {
+  target.value = value;
+  target.dispatchEvent(new window.Event('input'));
+}
+
+const TEMPLATE_LABELS = ['Имя', 'Локация', 'Возраст', 'Работа', 'График', 'Хобби', 'Планы и даты', 'Фетиши', 'Характеристика', 'Медиа', 'Другое'];
 
 describe('FanNotesController (E157)', () => {
   let controller: FanNotesController | null = null;
@@ -156,7 +179,10 @@ describe('FanNotesController (E157)', () => {
 
     expect(options.load).toHaveBeenCalledTimes(1);
     expect(options.load).toHaveBeenCalledWith(GROUP_A);
-    expect(q('.chatgoose-notes-fan')?.textContent).toBe('Richard@richard24');
+    // The header is the fan as the chatter names him: the custom name, edited
+    // in place, over Fansly's own name until one is set.
+    expect(q<HTMLInputElement>('.chatgoose-notes-name')?.placeholder).toBe('Richard');
+    expect(q('.chatgoose-notes-handle')?.textContent).toBe('@richard24');
     expect(q('.chatgoose-note-title')?.textContent).toBe('Анкета');
     expect(q('.chatgoose-notes-count')?.textContent).toBe('1');
     expect(q('.chatgoose-notes')?.dataset.placement).toBe('docked');
@@ -230,19 +256,20 @@ describe('FanNotesController (E157)', () => {
     notes.toggle();
     await flush();
 
-    buttonNamed('+ По шаблону').click();
-    const text = q<HTMLTextAreaElement>('.chatgoose-note-textarea')!;
-    expect(text.value.startsWith('Имя: \nЛокация: ')).toBe(true);
-    expect((q<HTMLInputElement>('.chatgoose-note-editing .chatgoose-notes-input'))!.value).toBe('Анкета');
-    expect(document.activeElement).toBe(text);
+    buttonNamed('+ Анкета').click();
+    // The questionnaire opens as its fields, the caret in the first one.
+    expect([...document.querySelectorAll('.chatgoose-note-field')].map((node) => node.getAttribute('aria-label'))).toEqual(TEMPLATE_LABELS);
+    expect(q('.chatgoose-note-textarea')).toBeNull();
+    expect(q<HTMLInputElement>('.chatgoose-note-title-input')!.value).toBe('Анкета');
+    expect(document.activeElement).toBe(field('Имя'));
 
-    text.value = text.value.replace('Имя: ', 'Имя: Brian');
-    text.dispatchEvent(new window.Event('input'));
+    type(field('Имя'), 'Brian');
     buttonNamed('Создать').click();
     await flush();
 
     expect(options.saveNote).toHaveBeenCalledWith(expect.objectContaining({
       creatorId: CREATOR, fanAccountId: FAN_A, noteId: null, title: 'Анкета',
+      note: expect.stringMatching(/^Имя: Brian\nЛокация: \nВозраст: \n/),
     }));
     expect([...document.querySelectorAll('.chatgoose-note-title')].map((node) => node.textContent)).toEqual(['Анкета', 'Анкета']);
     expect(q('.chatgoose-notes-count')?.textContent).toBe('2');
@@ -271,7 +298,7 @@ describe('FanNotesController (E157)', () => {
     notes.sync();
     notes.toggle();
     await flush();
-    buttonNamed('+ Новая заметка').click();
+    buttonNamed('+ Заметка').click();
     const text = q<HTMLTextAreaElement>('.chatgoose-note-textarea')!;
     text.value = 'спросить про учения';
     text.dispatchEvent(new window.Event('input'));
@@ -311,7 +338,7 @@ describe('FanNotesController (E157)', () => {
     notes.toggle();
     await flush();
 
-    const input = q<HTMLInputElement>('.chatgoose-notes-field .chatgoose-notes-input')!;
+    const input = q<HTMLInputElement>('.chatgoose-notes-name')!;
     expect(input.placeholder).toBe('Richard');
     input.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     expect(options.saveCustomName).not.toHaveBeenCalled();
@@ -389,7 +416,7 @@ describe('FanNotesController (E157)', () => {
     notes.sync();
     notes.toggle();
     await flush();
-    buttonNamed('+ По шаблону').click();
+    buttonNamed('+ Анкета').click();
     buttonNamed('Создать').click();
     await flush();
 
@@ -401,7 +428,7 @@ describe('FanNotesController (E157)', () => {
     await flush();
     expect(options.load).toHaveBeenCalledTimes(2);
     expect(buttonNamed('Создать').disabled).toBe(false);
-    expect(q<HTMLTextAreaElement>('.chatgoose-note-textarea')?.value.startsWith('Имя: ')).toBe(true);
+    expect(field('Имя').value).toBe('');
   });
 
   it('starts no reread while a write is in flight, so the confirmed note is not lost', async () => {
@@ -413,7 +440,7 @@ describe('FanNotesController (E157)', () => {
     notes.sync();
     notes.toggle();
     await flush();
-    buttonNamed('+ Новая заметка').click();
+    buttonNamed('+ Заметка').click();
     const text = q<HTMLTextAreaElement>('.chatgoose-note-textarea')!;
     text.value = 'новая';
     text.dispatchEvent(new window.Event('input'));
@@ -450,11 +477,12 @@ describe('FanNotesController (E157)', () => {
     notes.sync();
     notes.toggle();
     await flush();
-    buttonNamed('+ По шаблону').click();
-    const text = q<HTMLTextAreaElement>('.chatgoose-note-textarea')!;
+    buttonNamed('+ Анкета').click();
+    const text = field('Имя');
+    expect(document.activeElement).toBe(text);
     text.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
 
-    expect(q('.chatgoose-note-textarea')).not.toBeNull();
+    expect(q('.chatgoose-note-editing')).not.toBeNull();
     expect(document.activeElement).not.toBe(text);
   });
 
@@ -485,7 +513,7 @@ describe('FanNotesController (E157)', () => {
     notes.sync();
     notes.toggle();
     await flush();
-    const input = () => q<HTMLInputElement>('.chatgoose-notes-field .chatgoose-notes-input')!;
+    const input = () => q<HTMLInputElement>('.chatgoose-notes-name')!;
     input().value = 'Richard';
     input().dispatchEvent(new window.Event('input'));
     input().dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
@@ -522,34 +550,218 @@ describe('FanNotesController (E157)', () => {
     expect(document.activeElement).toBe(panel);
   });
 
-  describe('«✨ Заполнить из чата» (E159)', () => {
+  describe('a questionnaire as fields (E166)', () => {
+    const QUESTIONNAIRE = [
+      'Имя: Ethan',
+      'Локация: Brisbane (09.2026)',
+      'Возраст:',
+      'Работа: медбрат; думает сменить',
+      'Другое: кот Бублик',
+      'мать после больницы',
+      '',
+      'просил кастом',
+    ].join('\n');
+
+    async function openQuestionnaire(title = '') {
+      const made = create({
+        load: vi.fn(async () => ok(snapshot(FAN_A, [
+          note('900000000000000001', title, QUESTIONNAIRE),
+          note('900000000000000002', '', 'есть собака Gigi'),
+        ]))),
+      } as never);
+      made.controller.sync();
+      made.controller.toggle();
+      await flush();
+      return made;
+    }
+
+    it('reads as a table: a label, its facts one per line, the month apart, empty fields folded', async () => {
+      await openQuestionnaire();
+
+      const form = q('.chatgoose-note[data-kind="form"]')!;
+      expect([...form.querySelectorAll('.chatgoose-note-label')].map((node) => node.textContent))
+        .toEqual(['Имя', 'Локация', 'Работа', 'Другое']);
+      const values = [...form.querySelectorAll('.chatgoose-note-value')]
+        .map((value) => [...value.querySelectorAll('.chatgoose-note-fact-text')].map((node) => node.textContent));
+      expect(values).toEqual([['Ethan'], ['Brisbane'], ['медбрат', 'думает сменить'], ['кот Бублик', 'мать после больницы']]);
+      expect(form.querySelector('.chatgoose-note-fact-date')?.textContent).toBe('09.2026');
+      expect(form.querySelector('.chatgoose-note-blank')?.textContent).toBe('Не заполнено: Возраст');
+      expect(form.querySelector('.chatgoose-note-free-line')?.textContent).toBe('просил кастом');
+      // Untitled, it still reads as the questionnaire; a free note has no title row.
+      expect(form.querySelector('.chatgoose-note-title-implied')?.textContent).toBe('Анкета');
+      expect(q('.chatgoose-note[data-kind="text"] .chatgoose-note-head')).toBeNull();
+      expect(q('.chatgoose-note[data-kind="text"] .chatgoose-note-text')?.textContent).toBe('есть собака Gigi');
+      // One questionnaire per fan: only a plain note is offered now.
+      expect(() => buttonNamed('+ Анкета')).toThrow();
+      expect(buttonNamed('+ Заметка').disabled).toBe(false);
+    });
+
+    it('edits field by field and saves the text Fansly stores, other lines untouched', async () => {
+      const { options } = await openQuestionnaire('Анкета');
+      buttonNamed('Изменить').click();
+
+      expect(field('Работа').value).toBe('медбрат\nдумает сменить');
+      expect(field('Другое').value).toBe('кот Бублик\nмать после больницы');
+      expect(field('Возраст').value).toBe('');
+      type(field('Возраст'), '34');
+      // A new line is a new fact; a blank one is not.
+      type(field('Другое'), 'кот Бублик\nмать после больницы\n\nсестра в Сиднее');
+      buttonNamed('Сохранить').click();
+      await flush();
+
+      expect(options.saveNote).toHaveBeenCalledWith(expect.objectContaining({
+        noteId: '900000000000000001',
+        note: [
+          'Имя: Ethan',
+          'Локация: Brisbane (09.2026)',
+          'Возраст: 34',
+          'Работа: медбрат; думает сменить',
+          'Другое: кот Бублик; мать после больницы; сестра в Сиднее',
+          '',
+          'просил кастом',
+        ].join('\n'),
+      }));
+    });
+
+    it('«Текстом» and «Полями» are two views of one draft', async () => {
+      await openQuestionnaire();
+      buttonNamed('Изменить').click();
+      type(field('Имя'), 'Ethan J.');
+
+      buttonNamed('Текстом').click();
+      const raw = q<HTMLTextAreaElement>('.chatgoose-note-textarea')!;
+      expect(raw.value.startsWith('Имя: Ethan J.\nЛокация: Brisbane (09.2026)\nВозраст:\n')).toBe(true);
+      expect(q('.chatgoose-note-field')).toBeNull();
+      expect(document.activeElement).toBe(raw);
+      type(raw, raw.value.replace('Возраст:', 'Возраст: 34'));
+
+      buttonNamed('Полями').click();
+      expect(field('Возраст').value).toBe('34');
+      expect(field('Имя').value).toBe('Ethan J.');
+      // A text that stops being a questionnaire has no fields to go back to.
+      buttonNamed('Текстом').click();
+      type(q<HTMLTextAreaElement>('.chatgoose-note-textarea')!, 'просто заметка');
+      buttonNamed('Отмена').click();
+      buttonNamed('Изменить').click();
+      expect(field('Имя').value).toBe('Ethan');
+    });
+
+    it('«Дополнить из чата» on a questionnaire being read opens it and starts the fill', async () => {
+      const { controller: notes, options } = await openQuestionnaire();
+      buttonNamed('Дополнить из чата').click();
+
+      expect(options.startFill).toHaveBeenCalledWith(expect.objectContaining({
+        operationId: 'fill-op-1',
+        noteFields: ['Имя', 'Локация', 'Возраст', 'Работа', 'Другое', 'График', 'Хобби', 'Планы и даты', 'Фетиши', 'Характеристика', 'Медиа'],
+      }));
+      expect(field('Имя').disabled).toBe(true);
+      expect(q('.chatgoose-notes-fill-status')?.textContent).toBe('Читаю переписку…');
+      expect(notes.ownsOperation('fill-op-1')).toBe(true);
+    });
+
+    it('marks what the fill wrote, flags a quote the chat does not hold, and takes rewrites one by one', async () => {
+      const { controller: notes } = await openQuestionnaire();
+      buttonNamed('Дополнить из чата').click();
+      const day = (d: number) => new Date(2026, 9, d, 12, 0).getTime();
+      notes.handleOperationMessage({
+        type: 'operation:complete',
+        operationId: 'fill-op-1',
+        result: { rawText: [
+          'Имя: =',
+          'Локация: =',
+          'Возраст: 34',
+          '> «turned 34 last week»',
+          '> «made up»',
+          'Работа: медбрат; думает сменить; ночные смены',
+          '> «nights again»',
+          'Другое: кот Бублик; бросает курить',
+          '> «day 9 without a cigarette»',
+          'Хобби: качалка',
+          '> «gym 5 days a week»',
+          '+ Происхождение: маори',
+          '> «im maori»',
+        ].join('\n') },
+        noteQuotes: [
+          { quote: 'turned 34 last week', sentAt: day(11) },
+          { quote: 'made up', sentAt: null },
+          { quote: 'nights again', sentAt: day(12) },
+          { quote: 'day 9 without a cigarette', sentAt: day(12) },
+          { quote: 'gym 5 days a week', sentAt: day(11) },
+          { quote: 'im maori', sentAt: day(12) },
+        ],
+      } as never);
+
+      const row = (label: string) => field(label).closest<HTMLElement>('.chatgoose-note-row')!;
+      const quotesOf = (label: string) => [...row(label).querySelectorAll('.chatgoose-note-cell > .chatgoose-notes-quotes .chatgoose-notes-quote')].map((node) => node.textContent);
+      expect(q('.chatgoose-notes-fill-notice-text')?.textContent)
+        .toBe('✦Гусь вписал: Возраст, Хобби, Происхождение. Предлагает 2 правки.');
+      expect(['Возраст', 'Хобби', 'Происхождение', 'Имя', 'Работа'].map((label) => row(label).dataset.ai)).toEqual(['', '', '', undefined, undefined]);
+      // Closed, «Слова фана» still shows the one quote the chat does not hold.
+      expect(quotesOf('Возраст')).toEqual(['не нашлось в переписке · made up']);
+      expect(quotesOf('Хобби')).toEqual([]);
+      expect(row('Происхождение').querySelector('.chatgoose-notes-proposed')?.textContent).toBe('Это поле завёл ГусьВ Другое');
+      // A rewrite that keeps the field shows the addition alone.
+      const offer = row('Работа').querySelector('.chatgoose-notes-suggestion')!;
+      expect(offer.querySelector('.chatgoose-notes-suggestion-title')?.textContent).toBe('Гусь предлагает добавить');
+      expect([...offer.querySelectorAll('.chatgoose-notes-suggestion-facts > *')].map((node) => node.textContent)).toEqual(['ночные смены']);
+      // The line under «Другое» is still its own: the new lines went below it,
+      // and the rewrite (of the value Core saw) reads as an addition.
+      expect(field('Другое').value).toBe('кот Бублик\nмать после больницы');
+      expect([...row('Другое').querySelectorAll('.chatgoose-notes-suggestion-facts > *')].map((node) => node.textContent)).toEqual(['бросает курить']);
+      expect(buttonNamed('Принять все').disabled).toBe(false);
+
+      buttonNamed('Слова фана').click();
+      expect(quotesOf('Возраст')).toEqual(['11.10.2026 · turned 34 last week', 'не нашлось в переписке · made up']);
+      expect(quotesOf('Хобби')).toEqual(['11.10.2026 · gym 5 days a week']);
+
+      // One rewrite is declined, the other taken: the field is then the fill's too.
+      row('Другое').querySelector<HTMLButtonElement>('button[aria-label="Не нужно"]')!.click();
+      expect(row('Другое').querySelector('.chatgoose-notes-suggestion')).toBeNull();
+      expect(q('.chatgoose-notes-fill-notice-text')?.textContent)
+        .toBe('✦Гусь вписал: Возраст, Хобби, Происхождение. Предлагает 1 правку.');
+      expect(() => buttonNamed('Принять все')).toThrow();
+      buttonNamed('Принять').click();
+      expect(field('Работа').value).toBe('медбрат\nдумает сменить\nночные смены');
+      expect(row('Работа').dataset.ai).toBe('');
+      expect(quotesOf('Работа')).toEqual(['12.10.2026 · nights again']);
+      expect(field('Другое').value).toBe('кот Бублик\nмать после больницы');
+
+      // «В Другое» moves the proposed field's fact, named, into «Другое».
+      buttonNamed('В Другое').click();
+      expect(() => field('Происхождение')).toThrow();
+      expect(field('Другое').value).toBe('кот Бублик\nПроисхождение: маори\nмать после больницы');
+      expect(quotesOf('Другое')).toEqual(['Происхождение — 12.10.2026 · im maori']);
+    });
+  });
+
+  describe('«✨ Дополнить из чата» (E159)', () => {
     async function openTemplate() {
       const made = create();
       made.controller.sync();
       made.controller.toggle();
       await flush();
-      buttonNamed('+ По шаблону').click();
+      buttonNamed('+ Анкета').click();
       return made;
     }
 
     it('offers the fill on a questionnaire and asks for its labels', async () => {
       const { controller: notes, options } = await openTemplate();
-      const fillButton = buttonNamed('✨ Заполнить из чата');
+      const fillButton = buttonNamed('Дополнить из чата');
+      expect(fillButton.textContent).toBe('✨ Дополнить из чата');
       expect(fillButton.hidden).toBe(false);
       fillButton.click();
 
-      const labels = ['Имя', 'Локация', 'Возраст', 'Работа', 'График', 'Хобби', 'Планы и даты', 'Фетиши', 'Характеристика', 'Медиа', 'Другое'];
       expect(options.startFill).toHaveBeenCalledWith({
         operationId: 'fill-op-1',
         groupId: GROUP_A,
-        noteFields: labels,
+        noteFields: TEMPLATE_LABELS,
         // A new questionnaire still sends its (empty) values: merge mode.
-        noteValues: labels.map(() => ''),
+        noteValues: TEMPLATE_LABELS.map(() => ''),
       });
-      expect(fillButton.title).toBe('ИИ дополнит анкету по всей переписке: заполнит пустые поля, допишет новые строки, переписать заполненные предложит');
+      expect(fillButton.title).toBe('Гусь прочитает переписку и допишет анкету. Сохраняете вы');
       expect(notes.ownsOperation('fill-op-1')).toBe(true);
       // The fields are locked while the answer is on its way.
-      expect(q<HTMLTextAreaElement>('.chatgoose-note-textarea')?.disabled).toBe(true);
+      expect(TEMPLATE_LABELS.every((label) => field(label).disabled)).toBe(true);
       expect(buttonNamed('Создать').disabled).toBe(true);
       expect(q('.chatgoose-notes-fill-status')?.textContent).toBe('Читаю переписку…');
 
@@ -557,12 +769,10 @@ describe('FanNotesController (E157)', () => {
       expect(q('.chatgoose-notes-fill-status')?.textContent).toBe('Читаю переписку… 2/5');
     });
 
-    it('fills the empty fields and offers «было → станет» for the ones the chatter filled', async () => {
+    it('fills the empty fields and offers a rewrite under the one the chatter filled', async () => {
       const { controller: notes } = await openTemplate();
-      const text = q<HTMLTextAreaElement>('.chatgoose-note-textarea')!;
-      text.value = text.value.replace('Имя: ', 'Имя: Рич');
-      text.dispatchEvent(new window.Event('input'));
-      buttonNamed('✨ Заполнить из чата').click();
+      type(field('Имя'), 'Рич');
+      buttonNamed('Дополнить из чата').click();
 
       notes.handleOperationMessage({
         type: 'operation:complete',
@@ -570,17 +780,29 @@ describe('FanNotesController (E157)', () => {
         result: { rawText: 'Имя: Richard\nЛокация: Virginia\nВозраст: \nРабота: military\nХобби: \nФетиши: \nХарактеристика: GFE, платит за кастомы\nМедиа: видео в душе' },
       } as never);
 
-      const filled = q<HTMLTextAreaElement>('.chatgoose-note-textarea')!.value;
-      expect(filled).toContain('Имя: Рич');
-      expect(filled).toContain('Локация: Virginia');
-      expect(filled).toContain('Работа: military');
-      expect(filled).toContain('Медиа: видео в душе');
-      expect(q('.chatgoose-notes-fill-notice')?.textContent).toContain('Заполнено полей: 4');
-      expect(q('.chatgoose-notes-suggestion')?.textContent).toBe('Имя:Рич→RichardЗаменить');
+      expect(field('Имя').value).toBe('Рич');
+      expect(field('Локация').value).toBe('Virginia');
+      expect(field('Работа').value).toBe('military');
+      // A value of several facts reads one per line.
+      expect(field('Характеристика').value).toBe('GFE, платит за кастомы');
+      expect(field('Медиа').value).toBe('видео в душе');
+      expect(q('.chatgoose-notes-fill-notice-text')?.textContent)
+        .toBe('✦Гусь вписал: Локация, Работа, Характеристика, Медиа. Предлагает 1 правку.');
+      // What the fill wrote is marked on its row; the chatter's own is not.
+      const marked = [...document.querySelectorAll<HTMLElement>('.chatgoose-note-row[data-ai] .chatgoose-note-label')].map((node) => node.textContent);
+      expect(marked).toEqual(['Локация', 'Работа', 'Характеристика', 'Медиа']);
+      // The rewrite sits under its field and shows what changes.
+      const offer = field('Имя').closest('.chatgoose-note-cell')!.querySelector('.chatgoose-notes-suggestion')!;
+      expect(offer.querySelector('.chatgoose-notes-suggestion-title')?.textContent).toBe('Гусь предлагает заменить');
+      expect([...offer.querySelectorAll('.chatgoose-notes-fact-del, .chatgoose-notes-fact-add')].map((node) => `${node.className.endsWith('del') ? '-' : '+'}${node.textContent}`))
+        .toEqual(['-Рич', '+Richard']);
 
-      buttonNamed('Заменить').click();
-      expect(q<HTMLTextAreaElement>('.chatgoose-note-textarea')!.value).toContain('Имя: Richard');
-      expect(q('.chatgoose-notes-suggestions')).toBeNull();
+      buttonNamed('Принять').click();
+      expect(field('Имя').value).toBe('Richard');
+      expect(q('.chatgoose-notes-suggestion')).toBeNull();
+      expect(q('.chatgoose-notes-fill-notice-text')?.textContent)
+        .toBe('✦Гусь вписал: Локация, Работа, Характеристика, Медиа.');
+      expect(field('Имя').closest<HTMLElement>('.chatgoose-note-row')!.dataset.ai).toBe('');
       // Nothing went to Fansly: the chatter still saves by hand.
       expect(notes.ownsOperation('fill-op-1')).toBe(false);
     });
@@ -596,7 +818,9 @@ describe('FanNotesController (E157)', () => {
       notes.toggle();
       await flush();
       buttonNamed('Изменить').click();
-      buttonNamed('✨ Заполнить из чата').click();
+      // As one text, the way Fansly stores it: the merge is checked line by line.
+      buttonNamed('Текстом').click();
+      buttonNamed('Дополнить из чата').click();
 
       expect(options.startFill).toHaveBeenCalledWith(expect.objectContaining({
         noteFields: ['Имя', 'Локация', 'Работа', 'Характеристика', 'Медиа', 'Возраст', 'График', 'Хобби', 'Планы и даты', 'Фетиши', 'Другое'],
@@ -646,24 +870,23 @@ describe('FanNotesController (E157)', () => {
       ].join('\n'));
       // Quotes are shown, never written into the note.
       expect(textarea().value).not.toContain('nurse');
-      expect(q('.chatgoose-notes-fill-notice')?.textContent)
-        .toBe('Заполнено полей: 1. Добавлены строки: График, Происхождение. Предложений: 1. Проверьте и сохраните.');
+      expect(q('.chatgoose-notes-fill-notice-text')?.textContent)
+        .toBe('✦Гусь вписал: Работа, График, Происхождение. Предлагает 1 правку.');
       expect(q('.chatgoose-notes-proposed')?.textContent).toBe('Гусь завёл поле «Происхождение»В Другое');
-      expect(q('.chatgoose-notes-suggestions-title')?.textContent).toBe('Гусь предлагает переписать:');
+      expect(q('.chatgoose-notes-suggestion-title')?.textContent).toBe('Гусь предлагает заменить в «Характеристика»');
       const quotes = [...document.querySelectorAll('.chatgoose-notes-suggestion .chatgoose-notes-quote')].map((node) => node.textContent);
       expect(quotes).toEqual(['15.09.2026 · I love the gfe vibe', 'не нашлось в переписке · I made it up']);
-      const sources = q<HTMLDetailsElement>('details.chatgoose-notes-sources')!;
-      expect(sources.open).toBe(false);
-      expect(sources.querySelector('summary')?.textContent).toBe('Откуда Гусь это взял (3)');
-      expect([...sources.querySelectorAll('.chatgoose-notes-quote')].map((node) => node.textContent)).toEqual([
+      // The words behind what went straight into the draft wait for «Слова фана».
+      const sourceQuotes = () => [...document.querySelectorAll('.chatgoose-note-editing > .chatgoose-notes-quotes .chatgoose-notes-quote')].map((node) => node.textContent);
+      expect(sourceQuotes()).toEqual([]);
+      buttonNamed('Слова фана').click();
+      expect(sourceQuotes()).toEqual([
         'Работа — 14.09.2026 · I\'m a nurse',
         'График — 14.09.2026 · I work nights, 4 on 4 off',
         'Происхождение — 16.09.2026 · I\'m Maori and Dutch',
       ]);
 
-      // The list stays open across a repaint.
-      sources.open = true;
-      sources.dispatchEvent(new window.Event('toggle'));
+      // They stay open across a repaint.
       buttonNamed('В Другое').click();
       expect(textarea().value).toBe([
         'Имя: Ethan',
@@ -677,13 +900,14 @@ describe('FanNotesController (E157)', () => {
         'просил кастом',
       ].join('\n'));
       expect(q('.chatgoose-notes-proposed')).toBeNull();
-      expect(q<HTMLDetailsElement>('details.chatgoose-notes-sources')?.open).toBe(true);
+      expect(sourceQuotes()).toHaveLength(3);
+      expect(buttonNamed('Скрыть слова фана')).not.toBeNull();
       // The notice restates what is in the draft now: «Другое», not the moved line.
-      expect(q('.chatgoose-notes-fill-notice')?.textContent)
-        .toBe('Заполнено полей: 1. Добавлены строки: График, Другое. Предложений: 1. Проверьте и сохраните.');
+      expect(q('.chatgoose-notes-fill-notice-text')?.textContent)
+        .toBe('✦Гусь вписал: Работа, График, Другое. Предлагает 1 правку.');
 
-      // «Заменить» keeps its rule and the moved fact stays in «Другое».
-      buttonNamed('Заменить').click();
+      // «Принять» keeps its rule and the moved fact stays in «Другое».
+      buttonNamed('Принять').click();
       expect(textarea().value).toContain('Характеристика: любит GFE, платит за кастомы');
       expect(textarea().value).toContain('Другое: Происхождение: маори и голландец');
       expect(options.saveNote).not.toHaveBeenCalled();
@@ -691,7 +915,8 @@ describe('FanNotesController (E157)', () => {
 
     it('drops a proposed field\'s row once its line is gone, and shows quotes undated without locations', async () => {
       const { controller: notes } = await openTemplate();
-      buttonNamed('✨ Заполнить из чата').click();
+      buttonNamed('Текстом').click();
+      buttonNamed('Дополнить из чата').click();
       notes.handleOperationMessage({
         type: 'operation:complete',
         operationId: 'fill-op-1',
@@ -701,7 +926,8 @@ describe('FanNotesController (E157)', () => {
         noteQuotes: [{ quote: 'call me Ethan & co', sentAt: 'yesterday' }],
       } as never);
 
-      expect(q('.chatgoose-notes-sources .chatgoose-notes-quote')?.textContent).toBe('Имя — call me Ethan & co');
+      buttonNamed('Слова фана').click();
+      expect(q('.chatgoose-note-editing > .chatgoose-notes-quotes .chatgoose-notes-quote')?.textContent).toBe('Имя — call me Ethan & co');
       const row = q<HTMLElement>('.chatgoose-notes-proposed')!;
       expect(row.hidden).toBe(false);
       const text = q<HTMLTextAreaElement>('.chatgoose-note-textarea')!;
@@ -709,30 +935,31 @@ describe('FanNotesController (E157)', () => {
       text.dispatchEvent(new window.Event('input'));
       expect(row.hidden).toBe(true);
       // The next repaint has no row for it either.
-      buttonNamed('✨ Заполнить из чата').click();
+      buttonNamed('Дополнить из чата').click();
       buttonNamed('Остановить').click();
       expect(q('.chatgoose-notes-proposed')).toBeNull();
     });
 
     it('stops on demand, and a late answer never lands in the draft', async () => {
       const { controller: notes, options } = await openTemplate();
-      buttonNamed('✨ Заполнить из чата').click();
+      buttonNamed('Дополнить из чата').click();
       buttonNamed('Остановить').click();
 
       expect(options.cancelFill).toHaveBeenCalledWith('fill-op-1');
       expect(notes.ownsOperation('fill-op-1')).toBe(false);
       notes.handleOperationMessage({ type: 'operation:complete', operationId: 'fill-op-1', result: { rawText: 'Имя: Late' } } as never);
-      expect(q<HTMLTextAreaElement>('.chatgoose-note-textarea')!.value).not.toContain('Late');
-      expect(q<HTMLTextAreaElement>('.chatgoose-note-textarea')!.disabled).toBe(false);
+      expect(field('Имя').value).toBe('');
+      expect(field('Имя').disabled).toBe(false);
     });
 
     it('names a failure in the draft and keeps the text', async () => {
       const { controller: notes } = await openTemplate();
-      buttonNamed('✨ Заполнить из чата').click();
+      type(field('Имя'), 'Рич');
+      buttonNamed('Дополнить из чата').click();
       notes.handleOperationMessage({ type: 'operation:error', operationId: 'fill-op-1', error: createUserError('chat_changed') } as never);
 
       expect(q('.chatgoose-notes-inline-error')?.textContent).toBe('Заполнение остановлено: открыт другой чат.');
-      expect(q<HTMLTextAreaElement>('.chatgoose-note-textarea')!.value.startsWith('Имя: ')).toBe(true);
+      expect(field('Имя').value).toBe('Рич');
     });
 
     it('hides the fill on a free note', async () => {
@@ -740,12 +967,10 @@ describe('FanNotesController (E157)', () => {
       made.controller.sync();
       made.controller.toggle();
       await flush();
-      buttonNamed('+ Новая заметка').click();
-      expect(buttonNamed('✨ Заполнить из чата').hidden).toBe(true);
-      const text = q<HTMLTextAreaElement>('.chatgoose-note-textarea')!;
-      text.value = 'Имя: \nВозраст: ';
-      text.dispatchEvent(new window.Event('input'));
-      expect(buttonNamed('✨ Заполнить из чата').hidden).toBe(false);
+      buttonNamed('+ Заметка').click();
+      expect(buttonNamed('Дополнить из чата').hidden).toBe(true);
+      type(q<HTMLTextAreaElement>('.chatgoose-note-textarea')!, 'Имя: \nВозраст: ');
+      expect(buttonNamed('Дополнить из чата').hidden).toBe(false);
     });
   });
 
@@ -768,29 +993,29 @@ describe('FanNotesController (E157)', () => {
 });
 
 describe('the fill notice after «В Другое» (E164)', () => {
-  const summary = { filledCount: 0, addedLabels: ['График', 'Происхождение'], appendedToOther: false, unplacedLabels: [] };
+  const summary = { filledLabels: [], addedLabels: ['График', 'Происхождение'], appendedToOther: false, unplacedLabels: [] };
 
   it('names «Другое» as a new line when the move created it', () => {
     const next = summaryAfterMoveToOther(summary, 'Происхождение', 'created');
     expect(fillNoticeText({ ...next, suggestions: [] }))
-      .toBe('Добавлены строки: График, Другое. Проверьте и сохраните.');
+      .toBe('Гусь вписал: График, Другое.');
   });
 
   it('says «Другое» grew when the move appended to a filled one', () => {
     const next = summaryAfterMoveToOther(summary, 'Происхождение', 'appended');
     expect(fillNoticeText({ ...next, suggestions: [] }))
-      .toBe('Добавлены строки: График. Дополнено поле: Другое. Проверьте и сохраните.');
+      .toBe('Гусь вписал: График. Дописал в «Другое».');
   });
 
   it('keeps «Другое» an added line when the fill had added it already', () => {
     const next = summaryAfterMoveToOther({ ...summary, addedLabels: ['Другое', 'Происхождение'] }, 'Происхождение', 'appended');
-    expect(next).toEqual({ filledCount: 0, addedLabels: ['Другое'], appendedToOther: false, unplacedLabels: [] });
+    expect(next).toEqual({ filledLabels: [], addedLabels: ['Другое'], appendedToOther: false, unplacedLabels: [] });
   });
 
   it('counts an empty «Другое» that got its first value as filled, not grown', () => {
     const next = summaryAfterMoveToOther(summary, 'Происхождение', 'filled');
     expect(fillNoticeText({ ...next, suggestions: [] }))
-      .toBe('Заполнено полей: 1. Добавлены строки: График. Проверьте и сохраните.');
+      .toBe('Гусь вписал: Другое, График.');
   });
 
   it('never names «Другое» twice when the chatter deleted the line the fill had added', () => {
@@ -799,12 +1024,22 @@ describe('the fill notice after «В Другое» (E164)', () => {
   });
 
   it('names a proposed field that found no place', () => {
-    expect(fillNoticeText({ filledCount: 0, addedLabels: [], appendedToOther: false, unplacedLabels: ['Происхождение'], suggestions: [] }))
-      .toBe('Не хватило места в анкете: Происхождение. Проверьте и сохраните.');
+    expect(fillNoticeText({ filledLabels: [], addedLabels: [], appendedToOther: false, unplacedLabels: ['Происхождение'], suggestions: [] }))
+      .toBe('Не хватило места в анкете: Происхождение.');
   });
 
   it('only drops the line when an empty proposed line left nothing to move', () => {
     expect(summaryAfterMoveToOther(summary, 'Происхождение', 'unchanged'))
-      .toEqual({ filledCount: 0, addedLabels: ['График'], appendedToOther: false, unplacedLabels: [] });
+      .toEqual({ filledLabels: [], addedLabels: ['График'], appendedToOther: false, unplacedLabels: [] });
+  });
+
+  it('counts the rewrites on offer in the right case, and says so when nothing was found', () => {
+    const offers = (count: number) => Array.from({ length: count }, () => ({ label: 'Имя', current: 'a', proposed: 'b', quotes: [] }));
+    const none = { filledLabels: [], addedLabels: [], appendedToOther: false, unplacedLabels: [] };
+    expect(fillNoticeText({ ...none, suggestions: offers(1) })).toBe('Гусь предлагает 1 правку.');
+    expect(fillNoticeText({ ...none, suggestions: offers(3) })).toBe('Гусь предлагает 3 правки.');
+    expect(fillNoticeText({ ...none, suggestions: offers(5) })).toBe('Гусь предлагает 5 правок.');
+    expect(fillNoticeText({ ...none, suggestions: offers(11) })).toBe('Гусь предлагает 11 правок.');
+    expect(fillNoticeText({ ...none, suggestions: [] })).toBe('В переписке не нашлось ничего нового для анкеты.');
   });
 });

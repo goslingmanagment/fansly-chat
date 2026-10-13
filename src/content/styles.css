@@ -3351,7 +3351,12 @@ body.chatgoose-voice-studio-lock {
   pointer-events: auto;
 }
 
+/* E166: a quiet panel. One weight of text, hairlines instead of boxes, and
+   only the fan's name and the save button in bold. Labels and hints share one
+   tone between ink-mid and the paper. */
 .chatgoose-notes {
+  --chatgoose-notes-label: color-mix(in srgb, var(--chatgoose-ink-mid) 84%, var(--chatgoose-bg1));
+  --chatgoose-notes-label-width: 108px;
   position: absolute;
   display: flex;
   flex-direction: column;
@@ -3363,7 +3368,11 @@ body.chatgoose-voice-studio-lock {
   box-shadow: var(--chatgoose-shadow-pop);
   color: var(--chatgoose-ink);
   font-size: 13px;
+  line-height: 1.45;
   animation: chatgoose-fade-in 0.15s ease;
+  /* Its width is always set (a placement or the centred window's own), so
+     the rows inside can answer to it. */
+  container-type: inline-size;
 }
 
 .chatgoose-notes:focus {
@@ -3375,10 +3384,15 @@ body.chatgoose-voice-studio-lock {
   box-shadow: var(--chatgoose-shadow);
 }
 
+.chatgoose-notes[data-placement="docked"],
+.chatgoose-notes[data-placement="over"] {
+  --chatgoose-notes-label-width: 104px;
+}
+
 .chatgoose-notes[data-placement="center"] {
   left: 50%;
   top: 9vh;
-  width: min(540px, calc(100vw - 40px));
+  width: min(500px, calc(100vw - 40px));
   max-height: 82vh;
   transform: translateX(-50%);
 }
@@ -3390,122 +3404,123 @@ body.chatgoose-voice-studio-lock {
   font-family: inherit;
 }
 
+/* ── Header: the fan; the custom name is the title and is edited in place ── */
+
 .chatgoose-notes-header {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 14px 16px 12px;
   border-bottom: 1px solid var(--chatgoose-line);
 }
 
-.chatgoose-notes-heading {
-  display: grid;
+.chatgoose-notes-header-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 8px 8px 14px;
+}
+
+.chatgoose-notes-id {
+  display: flex;
   flex: 1;
-  gap: 4px;
+  align-items: baseline;
+  gap: 6px;
   min-width: 0;
 }
 
 .chatgoose-notes-fan {
   overflow: hidden;
-  font-size: 15px;
-  font-weight: 700;
+  padding: 3px 0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* The hidden mirror holds the name's width; the field lies over it. */
+.chatgoose-notes-name-wrap {
+  position: relative;
+  display: inline-block;
+  min-width: 48px;
+  max-width: 70%;
+  margin-left: -6px;
+}
+
+.chatgoose-notes-name-mirror,
+.chatgoose-notes-name {
+  display: block;
+  box-sizing: border-box;
+  min-width: 0;
+  margin: 0;
+  padding: 2px 5px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.chatgoose-notes-name-mirror {
+  visibility: hidden;
+  overflow: hidden;
+  white-space: pre;
+}
+
+.chatgoose-notes-name {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  background: none;
+  color: var(--chatgoose-ink);
+  text-overflow: ellipsis;
+}
+
+.chatgoose-notes-name::placeholder {
+  color: var(--chatgoose-ink-mid);
+  opacity: 1;
+}
+
+.chatgoose-notes-name:hover:not(:disabled) {
+  background: var(--chatgoose-bg2);
+}
+
+.chatgoose-notes-name:focus {
+  outline: none;
+  border-color: var(--chatgoose-clay);
+  background: var(--chatgoose-field);
+}
+
+.chatgoose-notes-name:disabled {
+  opacity: 0.6;
+}
+
 .chatgoose-notes-handle {
-  margin-left: 4px;
-  color: var(--chatgoose-ink-low);
-  font-size: 13px;
-  font-weight: 400;
+  overflow: hidden;
+  color: var(--chatgoose-notes-label);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chatgoose-notes-header-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
-}
-
-.chatgoose-text-button {
-  appearance: none;
-  padding: 4px 6px;
-  border: 0;
-  border-radius: var(--chatgoose-radius-flat);
-  background: none;
-  color: var(--chatgoose-ink-mid);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.chatgoose-text-button:hover:not(:disabled) {
-  background: var(--chatgoose-clay-bg);
-  color: var(--chatgoose-clay-ink);
-}
-
-.chatgoose-text-button-danger:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--chatgoose-bad) 10%, transparent);
-  color: var(--chatgoose-bad);
-}
-
-.chatgoose-text-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.4;
-}
-
-.chatgoose-text-button:focus-visible {
-  outline: 2px solid var(--chatgoose-clay);
-  outline-offset: 1px;
-}
-
-.chatgoose-notes-body {
-  display: grid;
-  flex: 1 1 auto;
-  align-content: start;
-  gap: 14px;
-  min-height: 0;
-  padding: 14px 16px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
-}
-
-.chatgoose-notes-field {
-  display: grid;
-  gap: 5px;
-}
-
-.chatgoose-notes-input,
-.chatgoose-note-textarea,
-.chatgoose-notes-select {
-  width: 100%;
-  box-sizing: border-box;
-  padding: 8px 10px;
-  border: 1px solid var(--chatgoose-line-strong);
-  border-radius: var(--chatgoose-radius-chip);
-  background: var(--chatgoose-field);
-  color: var(--chatgoose-ink);
-  font-size: 13px;
-}
-
-.chatgoose-notes-input:focus,
-.chatgoose-note-textarea:focus,
-.chatgoose-notes-select:focus {
-  outline: none;
-  border-color: var(--chatgoose-clay);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--chatgoose-clay) 18%, transparent);
-}
-
-.chatgoose-notes-input:disabled,
-.chatgoose-note-textarea:disabled {
-  opacity: 0.6;
 }
 
 .chatgoose-notes-hint {
-  color: var(--chatgoose-ink-low);
-  font-size: 11px;
+  color: var(--chatgoose-notes-label);
+  font-size: 11.5px;
   line-height: 1.4;
+}
+
+/* The name's hint speaks while the name is edited or a save has news. */
+.chatgoose-notes-name-hint {
+  display: none;
+  margin-top: -3px;
+  padding: 0 14px 8px;
+}
+
+.chatgoose-notes-header:has(.chatgoose-notes-name:focus) .chatgoose-notes-name-hint,
+.chatgoose-notes-name-hint:not([data-status="idle"]) {
+  display: block;
 }
 
 .chatgoose-notes-hint[data-status="saved"] {
@@ -3518,276 +3533,487 @@ body.chatgoose-voice-studio-lock {
   color: var(--chatgoose-bad);
 }
 
-.chatgoose-notes-list {
-  display: grid;
-  gap: 10px;
+/* ── Buttons: small, and bold only where the note is saved ── */
+
+.chatgoose-notes-icon {
+  appearance: none;
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--chatgoose-notes-label);
+  cursor: pointer;
+}
+
+.chatgoose-notes-icon svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.chatgoose-notes-icon:hover:not(:disabled) {
+  background: var(--chatgoose-bg3);
+  color: var(--chatgoose-ink);
+}
+
+.chatgoose-notes-icon[data-tone="danger"]:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--chatgoose-bad) 10%, transparent);
+  color: var(--chatgoose-bad);
+}
+
+.chatgoose-notes-button {
+  appearance: none;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--chatgoose-ink-mid);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.chatgoose-notes-button:hover:not(:disabled) {
+  background: var(--chatgoose-bg3);
+  color: var(--chatgoose-ink);
+}
+
+.chatgoose-notes-button[data-kind="primary"] {
+  background: var(--chatgoose-clay);
+  color: #fff;
+  font-weight: 600;
+}
+
+.chatgoose-notes-button[data-kind="primary"]:hover:not(:disabled) {
+  background: var(--chatgoose-clay-deep);
+  color: #fff;
+}
+
+.chatgoose-notes-button-key {
+  opacity: 0.75;
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.chatgoose-notes-button[data-kind="ai"] {
+  gap: 0;
+  color: var(--chatgoose-clay-ink);
+  white-space: pre;
+}
+
+.chatgoose-notes-button[data-kind="ai"]:hover:not(:disabled) {
+  background: var(--chatgoose-clay-bg);
+  color: var(--chatgoose-clay-ink);
+}
+
+.chatgoose-notes-spark {
+  margin-right: 2px;
+}
+
+.chatgoose-notes-button[data-kind="plain"] {
+  border-color: var(--chatgoose-line-strong);
+  background: var(--chatgoose-bg1);
+  color: var(--chatgoose-ink);
+}
+
+.chatgoose-notes-button[data-kind="danger"] {
+  color: var(--chatgoose-bad);
+}
+
+.chatgoose-notes-button[data-kind="danger"]:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--chatgoose-bad) 10%, transparent);
+  color: var(--chatgoose-bad);
+}
+
+.chatgoose-notes-icon:disabled,
+.chatgoose-notes-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.chatgoose-notes-button[hidden] {
+  display: none;
+}
+
+.chatgoose-notes-icon:focus-visible,
+.chatgoose-notes-button:focus-visible {
+  outline: 2px solid var(--chatgoose-clay);
+  outline-offset: 1px;
+}
+
+/* ── Body: notes without boxes, a hairline between them ── */
+
+.chatgoose-notes-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 2px 14px 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
 }
 
 .chatgoose-note {
-  padding: 10px 12px 12px;
-  border: 1px solid var(--chatgoose-line);
-  border-radius: var(--chatgoose-radius-card);
-  background: var(--chatgoose-bg2);
+  padding: 9px 0 12px;
+}
+
+.chatgoose-note + .chatgoose-note {
+  border-top: 1px solid var(--chatgoose-line);
 }
 
 .chatgoose-note-head {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 6px;
+  gap: 4px;
+  min-height: 26px;
+  margin-bottom: 4px;
 }
 
 .chatgoose-note-title {
   flex: 1;
   min-width: 0;
   overflow: hidden;
-  font-weight: 700;
+  color: var(--chatgoose-ink-mid);
+  font-size: 12px;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.chatgoose-note-title-empty {
-  color: var(--chatgoose-ink-low);
-  font-style: italic;
+.chatgoose-note-title-implied {
+  color: var(--chatgoose-notes-label);
   font-weight: 500;
 }
 
 .chatgoose-note-actions {
   display: flex;
-  gap: 2px;
-  margin-right: -6px;
+  flex: none;
+  align-items: center;
+  margin-right: -5px;
+}
+
+/* An untitled note has no head row: its text flows around the actions. */
+.chatgoose-note-actions-float {
+  float: right;
+  margin: -3px -5px 0 8px;
 }
 
 .chatgoose-note-text {
-  color: var(--chatgoose-ink);
   line-height: 1.5;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
-}
-
-.chatgoose-note-confirm {
-  border-color: color-mix(in srgb, var(--chatgoose-bad) 35%, transparent);
 }
 
 .chatgoose-note-confirm-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
-  margin-top: 10px;
+  gap: 4px;
+  margin-top: 8px;
 }
 
 .chatgoose-note-confirm-text {
-  flex: 1 1 100%;
+  flex: 1;
+  min-width: 10em;
   color: var(--chatgoose-bad);
+  font-size: 12px;
+}
+
+/* ── A questionnaire to read: label, facts one per line, the month at right ── */
+
+.chatgoose-note-fields {
+  display: grid;
+  grid-template-columns: var(--chatgoose-notes-label-width) minmax(0, 1fr);
+  column-gap: 14px;
+  row-gap: 6px;
+  margin: 0;
+}
+
+.chatgoose-note-label {
+  color: var(--chatgoose-notes-label);
+  font-size: 12px;
+  line-height: 19px;
+  overflow-wrap: anywhere;
+}
+
+.chatgoose-note-value {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  margin: 0;
+}
+
+.chatgoose-note-fact {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  line-height: 19px;
+}
+
+/* Several facts: a dot in the gutter, so the text column stays one edge. */
+.chatgoose-note-value[data-many] .chatgoose-note-fact::before {
+  content: '';
+  position: absolute;
+  left: -9px;
+  top: 8px;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--chatgoose-line-strong);
+}
+
+.chatgoose-note-fact-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.chatgoose-note-fact-date {
+  flex: none;
+  color: var(--chatgoose-notes-label);
+  font-family: var(--chatgoose-font-mono);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.chatgoose-note-free-line {
+  grid-column: 1 / -1;
+  line-height: 19px;
+  overflow-wrap: anywhere;
+}
+
+.chatgoose-note-blank {
+  margin-top: 8px;
+  color: var(--chatgoose-notes-label);
+  font-size: 11.5px;
+}
+
+/* ── Editing: the same rows, the values become fields ── */
+
+.chatgoose-note-title-input {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  margin-left: -6px;
+  padding: 0 5px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--chatgoose-ink-mid);
+  font-size: 12px;
   font-weight: 600;
 }
 
-.chatgoose-note-editing {
+.chatgoose-note-title-input::placeholder {
+  color: var(--chatgoose-notes-label);
+  font-weight: 400;
+  opacity: 1;
+}
+
+.chatgoose-note-title-input:hover:not(:disabled) {
+  background: var(--chatgoose-bg2);
+}
+
+.chatgoose-note-title-input:focus {
+  outline: none;
+  border-color: var(--chatgoose-clay);
+  background: var(--chatgoose-field);
+}
+
+.chatgoose-note-form {
   display: grid;
-  gap: 8px;
-  padding: 12px;
-  border-color: var(--chatgoose-clay-line);
-  background: var(--chatgoose-bg1);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--chatgoose-clay) 10%, transparent);
+  gap: 5px;
+}
+
+.chatgoose-note-row {
+  display: grid;
+  grid-template-columns: var(--chatgoose-notes-label-width) minmax(0, 1fr);
+  column-gap: 14px;
+  align-items: start;
+}
+
+.chatgoose-note-row > .chatgoose-note-label {
+  padding-top: 5px;
+}
+
+/* What the fill wrote is marked on its row. */
+.chatgoose-note-row[data-ai] > .chatgoose-note-label::after {
+  content: '✦';
+  margin-left: 4px;
+  color: var(--chatgoose-clay);
+  font-size: 9px;
+  vertical-align: 1px;
+}
+
+.chatgoose-note-cell {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* The field takes the height of its text from a hidden twin in the same
+   grid cell (the wrap's data-value): nothing is measured in script. */
+.chatgoose-note-grow {
+  display: grid;
+  min-width: 0;
+}
+
+.chatgoose-note-grow::after {
+  content: attr(data-value) ' ';
+  visibility: hidden;
+  white-space: pre-wrap;
+}
+
+.chatgoose-note-grow::after,
+.chatgoose-note-field {
+  grid-area: 1 / 1;
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 29px;
+  margin: 0;
+  padding: 4px 7px;
+  border: 1px solid var(--chatgoose-line);
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 19px;
+  overflow-wrap: anywhere;
+}
+
+.chatgoose-note-field {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  background: var(--chatgoose-field);
+  color: var(--chatgoose-ink);
+  resize: none;
 }
 
 .chatgoose-note-textarea {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
   min-height: 150px;
+  padding: 6px 8px;
+  border: 1px solid var(--chatgoose-line);
+  border-radius: 6px;
+  background: var(--chatgoose-field);
+  color: var(--chatgoose-ink);
+  font-size: 13px;
   line-height: 1.5;
   resize: vertical;
 }
 
-.chatgoose-note-edit-actions {
+.chatgoose-note-field:hover:not(:disabled),
+.chatgoose-note-textarea:hover:not(:disabled) {
+  border-color: var(--chatgoose-line-strong);
+}
+
+.chatgoose-note-field:focus,
+.chatgoose-note-textarea:focus {
+  outline: none;
+  border-color: var(--chatgoose-clay);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--chatgoose-clay) 16%, transparent);
+}
+
+.chatgoose-note-row[data-ai] .chatgoose-note-field:not(:focus) {
+  border-color: var(--chatgoose-clay-line);
+  background: color-mix(in srgb, var(--chatgoose-clay-bg) 36%, var(--chatgoose-field));
+}
+
+.chatgoose-note-field:disabled,
+.chatgoose-note-textarea:disabled,
+.chatgoose-note-title-input:disabled {
+  opacity: 0.6;
+}
+
+/* A narrow panel over the chat: the label goes above its value, and the
+   chrome keeps only what it needs. */
+@container (max-width: 300px) {
+  .chatgoose-notes-fill-tail,
+  .chatgoose-notes-footer .chatgoose-kbd {
+    display: none;
+  }
+
+  .chatgoose-note-fields,
+  .chatgoose-note-row {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 1px;
+  }
+
+  .chatgoose-note-fields > .chatgoose-note-value {
+    margin-bottom: 5px;
+    padding-left: 9px;
+  }
+
+  .chatgoose-note-row > .chatgoose-note-label {
+    padding-top: 0;
+  }
+}
+
+/* ── «✨ Дополнить из чата» (E159, E164): what the fill did and offers ── */
+
+.chatgoose-notes-fill-notice {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
-}
-
-.chatgoose-button.chatgoose-button-save {
-  border-color: var(--chatgoose-clay);
-  background: var(--chatgoose-clay);
-  color: #fff;
-}
-
-.chatgoose-button.chatgoose-button-save:hover:not(:disabled) {
-  border-color: var(--chatgoose-clay-deep);
-  background: var(--chatgoose-clay-deep);
-  color: #fff;
-}
-
-.chatgoose-notes-kbd-hint {
-  margin-left: auto;
-  color: var(--chatgoose-ink-low);
-  font-size: 11px;
-}
-
-.chatgoose-notes-inline-error,
-.chatgoose-notes-error-title {
-  color: var(--chatgoose-bad);
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.chatgoose-notes-error {
-  display: grid;
-  justify-items: start;
-  gap: 8px;
-  padding: 12px;
-  border: 1px solid color-mix(in srgb, var(--chatgoose-bad) 35%, transparent);
-  border-radius: var(--chatgoose-radius-card);
-}
-
-.chatgoose-notes-error-title {
-  font-weight: 600;
-}
-
-.chatgoose-notes-empty {
-  padding: 18px 8px;
-  color: var(--chatgoose-ink-low);
-  line-height: 1.5;
-  text-align: center;
-}
-
-.chatgoose-notes-footer {
-  display: grid;
-  gap: 10px;
-  padding: 10px 16px 12px;
-  border-top: 1px solid var(--chatgoose-line);
-  background: var(--chatgoose-bg1);
-}
-
-.chatgoose-notes-create {
-  display: flex;
-  gap: 6px;
-}
-
-.chatgoose-notes-create .chatgoose-button {
-  flex: 1;
-}
-
-.chatgoose-notes-view {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--chatgoose-ink-mid);
-  font-size: 12px;
-}
-
-.chatgoose-notes-view .chatgoose-notes-select {
-  flex: 1;
-  width: auto;
-  padding: 5px 8px;
-  font-size: 12px;
-}
-
-/* «✨ Заполнить из чата» (E159): the one AI control of the panel. */
-.chatgoose-button.chatgoose-button-ai {
-  border-color: var(--chatgoose-clay-line);
+  gap: 2px 6px;
+  margin-bottom: 8px;
+  padding: 3px 3px 3px 9px;
+  border-radius: 6px;
   background: var(--chatgoose-clay-bg);
-  color: var(--chatgoose-clay-ink);
+  font-size: 12px;
+}
+
+.chatgoose-notes-fill-notice-text {
+  flex: 1;
+  min-width: 13em;
+  padding: 3px 0;
+}
+
+.chatgoose-notes-fill-mark {
+  margin-right: 5px;
+  color: var(--chatgoose-clay);
 }
 
 .chatgoose-notes-fill-status {
-  margin-left: auto;
+  overflow: hidden;
   color: var(--chatgoose-ink-mid);
   font-size: 12px;
-}
-
-.chatgoose-notes-fill-notice {
-  color: var(--chatgoose-green);
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.chatgoose-notes-suggestions {
-  display: grid;
-  gap: 6px;
-  padding: 10px;
-  border: 1px solid var(--chatgoose-amber-line);
-  border-radius: var(--chatgoose-radius-chip);
-  background: var(--chatgoose-amber-bg);
-}
-
-.chatgoose-notes-suggestions-title {
-  color: var(--chatgoose-amber);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.chatgoose-notes-suggestion {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-}
-
-.chatgoose-notes-suggestion-change {
-  flex: 1;
-  min-width: 0;
-  line-height: 1.45;
-  overflow-wrap: anywhere;
-}
-
-.chatgoose-notes-suggestion-label {
-  margin-right: 4px;
-  font-weight: 700;
-}
-
-.chatgoose-notes-suggestion-old {
-  color: var(--chatgoose-ink-low);
-  text-decoration: line-through;
-}
-
-.chatgoose-notes-suggestion-arrow {
-  margin: 0 4px;
-  color: var(--chatgoose-ink-mid);
-}
-
-.chatgoose-notes-suggestion-new {
-  color: var(--chatgoose-ink);
-  font-weight: 600;
-}
-
-.chatgoose-notes-suggestions-actions {
-  display: flex;
-  gap: 6px;
-}
-
-/* E164: a field the fill named itself, with «В Другое». */
-.chatgoose-notes-proposed {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 4px 4px 10px;
-  border: 1px dashed var(--chatgoose-clay-line);
-  border-radius: var(--chatgoose-radius-chip);
-  background: var(--chatgoose-clay-bg);
-  color: var(--chatgoose-clay-ink);
-  font-size: 12px;
-  line-height: 1.4;
-}
-
-.chatgoose-notes-proposed[hidden] {
-  display: none;
-}
-
-.chatgoose-notes-proposed-text {
-  flex: 1;
-  min-width: 0;
-  overflow-wrap: anywhere;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* The fan's own words behind a fact: shown while reviewing, never saved. */
 .chatgoose-notes-quotes {
   display: grid;
-  gap: 2px;
-  margin-top: 4px;
+  gap: 1px;
+  padding-left: 8px;
+  border-left: 2px solid var(--chatgoose-line);
+}
+
+.chatgoose-note-editing > .chatgoose-notes-quotes {
+  margin-top: 8px;
 }
 
 .chatgoose-notes-quote {
-  color: var(--chatgoose-ink-low);
-  font-size: 11px;
+  color: var(--chatgoose-notes-label);
+  font-size: 11.5px;
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
@@ -3799,6 +4025,7 @@ body.chatgoose-voice-studio-lock {
 
 .chatgoose-notes-quote-date {
   font-family: var(--chatgoose-font-mono);
+  font-size: 10.5px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -3811,34 +4038,183 @@ body.chatgoose-voice-studio-lock {
   font-style: italic;
 }
 
-.chatgoose-notes-sources {
-  font-size: 12px;
+/* A rewrite of a filled field, under that field: only what it changes. */
+.chatgoose-notes-suggestion {
+  display: grid;
+  gap: 3px;
+  padding: 3px 4px 7px 9px;
+  border: 1px solid var(--chatgoose-amber-line);
+  border-radius: 6px;
+  background: var(--chatgoose-amber-bg);
 }
 
-.chatgoose-notes-sources-summary {
-  color: var(--chatgoose-ink-mid);
-  cursor: pointer;
-  list-style: none;
+.chatgoose-note-editing > .chatgoose-notes-suggestion {
+  margin-top: 8px;
 }
 
-.chatgoose-notes-sources-summary::-webkit-details-marker {
+.chatgoose-notes-suggestion-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.chatgoose-notes-suggestion-title {
+  flex: 1;
+  min-width: 0;
+  color: var(--chatgoose-amber);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.chatgoose-notes-suggestion-facts {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  padding-right: 5px;
+  line-height: 19px;
+  overflow-wrap: anywhere;
+}
+
+.chatgoose-notes-fact-add::before {
+  content: '+ ';
+  color: var(--chatgoose-amber);
+  font-weight: 700;
+}
+
+.chatgoose-notes-fact-del {
+  color: var(--chatgoose-notes-label);
+  text-decoration: line-through;
+}
+
+.chatgoose-notes-suggestion .chatgoose-notes-quotes {
+  margin-top: 2px;
+  margin-right: 5px;
+  border-left-color: var(--chatgoose-amber-line);
+}
+
+/* E164: a field the fill named itself, with «В Другое». */
+.chatgoose-notes-proposed {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--chatgoose-notes-label);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.chatgoose-note-editing > .chatgoose-notes-proposed {
+  margin-top: 6px;
+}
+
+.chatgoose-notes-proposed[hidden] {
   display: none;
 }
 
-.chatgoose-notes-sources-summary::before {
-  content: '▶ ';
-  font-size: 8px;
-  vertical-align: 1px;
+.chatgoose-notes-proposed-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
-.chatgoose-notes-sources[open] .chatgoose-notes-sources-summary::before {
-  content: '▼ ';
+.chatgoose-notes-inline-error,
+.chatgoose-notes-error-title {
+  color: var(--chatgoose-bad);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
-.chatgoose-notes-sources-list {
+.chatgoose-notes-inline-error {
+  margin-top: 8px;
+}
+
+.chatgoose-notes-error {
   display: grid;
-  gap: 4px;
-  margin: 6px 0 0 12px;
+  justify-items: start;
+  gap: 8px;
+  margin: 10px 0;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--chatgoose-bad) 35%, transparent);
+  border-radius: var(--chatgoose-radius-card);
+}
+
+.chatgoose-notes-error-title {
+  font-weight: 600;
+}
+
+.chatgoose-notes-empty {
+  padding: 18px 8px;
+  color: var(--chatgoose-notes-label);
+  line-height: 1.5;
+  text-align: center;
+}
+
+/* ── Footer: one row. Reading: new note and the view. Editing: the note's
+   own actions, so «Сохранить» never scrolls away. ── */
+
+.chatgoose-notes-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--chatgoose-line);
+}
+
+.chatgoose-notes-footer-gap {
+  flex: 1;
+}
+
+.chatgoose-notes-footer-note {
+  flex: 1 1 100%;
+  padding: 2px 6px 0;
+}
+
+.chatgoose-notes-view {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+  color: var(--chatgoose-notes-label);
+}
+
+/* The select's own arrow is drawn in the label's colour, in both themes. */
+.chatgoose-notes-view::after {
+  content: '';
+  position: absolute;
+  right: 7px;
+  top: 50%;
+  width: 5px;
+  height: 5px;
+  margin-top: -5px;
+  border: solid currentColor;
+  border-width: 0 1.4px 1.4px 0;
+  pointer-events: none;
+  transform: rotate(45deg);
+}
+
+.chatgoose-notes-select {
+  appearance: none;
+  height: 26px;
+  max-width: 150px;
+  padding: 0 20px 0 7px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.chatgoose-notes-select:hover {
+  background: var(--chatgoose-bg3);
+}
+
+.chatgoose-notes-select:focus-visible {
+  outline: 2px solid var(--chatgoose-clay);
+  outline-offset: 1px;
+}
+
+.chatgoose-notes-footer .chatgoose-kbd {
+  margin: 0 4px 0 2px;
 }
 
 /* ─── Voice (лента) ──────────────────────────────────────────────

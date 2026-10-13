@@ -82,12 +82,17 @@ from prose when checking what is installed or live; verify the signed update fee
   read until the chatter clicks; the answer stays until the page reloads or
   the tab changes account. One-to-one chats only
   (`src/content/fan-registration.ts`).
-- **Заметки** (2.9.0, E157; AI fill 2.10.0, E159; merge and quotes 2.11.0, E164) — the fan's native Fansly notes (what Fansly's own «Edit
+- **Заметки** (2.9.0, E157; AI fill 2.10.0, E159; merge and quotes 2.11.0, E164; fields 2.12.0, E166) — the fan's native Fansly notes (what Fansly's own «Edit
   User Notes» modal shows, two clicks deep in the name menu) in a ChatGoose
   panel: «Заметки» after «Регистрация» in the header row, or ⌘⇧K /
   Ctrl+Alt+K. Regular notes (contentType 12000) are listed, added, edited and
-  deleted with an in-card confirmation; the custom name (12002) is edited in
-  place; «+ По шаблону» starts the agency's questionnaire. Three views, chosen
+  deleted with an in-card confirmation; the custom name (12002) is the
+  panel's title, edited in place; «+ Анкета» starts the agency's
+  questionnaire (offered while the fan has none). A questionnaire reads as a
+  table (the label, its facts one per line, the month a fact was said at the
+  right, empty fields folded into one line) and is edited as fields, one fact
+  per line; «Текстом» shows the one text Fansly stores, which is what the
+  fields read and write (E166). Three views, chosen
   in the panel and kept in settings (`fanNotesView`, v21): «Всегда справа»
   docks in the empty column Fansly leaves right of the chat and reads each
   opened chat once it stayed open 0.7 s; «Справа по кнопке» (default) and
@@ -98,17 +103,18 @@ from prose when checking what is installed or live; verify the signed update fee
   explicit save or delete. Chatter-eyes-only: the custom name and free notes
   never reach a prompt; the questionnaire's labels and values go to Core for
   the fill only (E164) (`src/content/fan-notes/`, `src/shared/fan-notes.ts`).
-  «✨ Заполнить из чата» (E159, E164) in the editor of a questionnaire (a note
-  of `Label: value` lines) runs the kernel feature `fan-notes-fill` (Sonnet by
+  «✨ Дополнить из чата» (E159, E164; «✨ Заполнить из чата» until E166) on a
+  questionnaire (a note of `Label: value` lines), being read or edited, runs
+  the kernel feature `fan-notes-fill` (Sonnet by
   default) over the whole chat, read like a full Recap, with day lines
   (`--- YYYY-MM-DD ---`) in its transcript. It sends the labels with the
   chatter's current values (`noteFields` + `noteValues`; a value over 2 000
   characters is left out) and the template labels the note lacks. Empty
   fields are filled and new lines (template fields, a field the AI names
   itself, with «В Другое») go straight into the draft; a filled field is
-  never overwritten — a rewrite is offered as «было → станет» with
-  «Заменить» — except «Другое», which takes a fact moved out of another field
-  straight away. Core answers an unchanged field `Label: =`, so the answer
+  never overwritten — a rewrite is offered under that field as the facts it
+  adds or drops, with «Принять» — except «Другое», which takes a fact moved
+  out of another field straight away. The fields the fill wrote are marked. Core answers an unchanged field `Label: =`, so the answer
   does not grow with the questionnaire. Each fact comes with the fan's own words and the date the
   extension found them in the chat it sent («не нашлось в переписке»
   otherwise); quotes are shown, never saved. Nothing is saved until the
@@ -238,6 +244,15 @@ Important references:
   architecture.
 
 ## Release
+
+Release 2.12.0 (E166, E167) reshapes the notes panel: a questionnaire reads
+as a table and is edited as fields, the fill's rewrites sit under their
+fields, the custom name is the panel's title, «✨ Заполнить из чата» is now
+«✨ Дополнить из чата». Core's `fan-notes-fill` merge prompt puts one fact in
+one field and keeps purchases in «Медиа» (hub #601), deployed as production's
+commit plus that change alone (`c2b1843c5eaa`); the contract is unchanged
+(`663d132f…`), so the SDK was not re-vendored. No new permission. Tabs opened
+before the update need a reload.
 
 Release 2.11.0 (E164, E165) makes «✨ Заполнить из чата» merge into the
 questionnaire instead of overwriting it and show the fan's own words behind

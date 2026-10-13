@@ -16,12 +16,12 @@
 // Drafts are kept per fan, so a chatter who switches chats mid-edit finds the
 // text again on returning.
 //
-// «✨ Заполнить из чата» (E159, E164) runs the kernel's `fan-notes-fill` over
+// «✨ Дополнить из чата» (E159, E164) runs the kernel's `fan-notes-fill` over
 // the whole chat, the way a full Recap reads it. It sends the questionnaire's
 // labels and the chatter's values (never the custom name or another note) and
 // the template labels the note lacks. The answer fills the empty fields and
 // appends new lines; a field the chatter filled is never overwritten — a
-// rewrite of it is offered as «было → станет». The fan's quotes behind each
+// rewrite of it is offered under that field. The fan's quotes behind each
 // fact are shown while reviewing and never written into the note. Nothing is
 // saved to Fansly until «Создать»/«Сохранить».
 
@@ -89,6 +89,8 @@ interface Draft {
   /** A create failed after it may have landed: no second one until a reread. */
   blocked: boolean;
   error: string | null;
+  /** The questionnaire is edited as one text instead of fields (E166). */
+  asText: boolean;
   /** The last fill's answers for fields the chatter had already filled. */
   suggestions: NoteFieldSuggestion[];
   /** What the last fill did, in a line. */
@@ -103,11 +105,11 @@ interface Draft {
   /** When the fan said each quote (null: not found); null when the
    * background gave no dates. */
   quoteDates: ReadonlyMap<string, number | null> | null;
-  /** «Откуда Гусь это взял» expanded. */
+  /** «Слова фана» shown under the fields the fill wrote. */
   sourcesOpen: boolean;
 }
 
-type FillSummary = Pick<NoteFillMerge, 'filledCount' | 'addedLabels' | 'appendedToOther' | 'unplacedLabels'>;
+type FillSummary = Pick<NoteFillMerge, 'filledLabels' | 'addedLabels' | 'appendedToOther' | 'unplacedLabels'>;
 
 function emptyFillState(): Pick<Draft, 'suggestions' | 'fillNotice' | 'fillSummary' | 'proposed' | 'sources' | 'quoteDates' | 'sourcesOpen'> {
   return { suggestions: [], fillNotice: null, fillSummary: null, proposed: [], sources: [], quoteDates: null, sourcesOpen: false };
@@ -127,7 +129,7 @@ export function summaryAfterMoveToOther(
   if (other === 'created') {
     return { ...summary, addedLabels: otherAdded ? addedLabels : [...addedLabels, FAN_NOTE_OTHER_LABEL] };
   }
-  if (other === 'filled') return { ...summary, addedLabels, filledCount: summary.filledCount + 1 };
+  if (other === 'filled') return { ...summary, addedLabels, filledLabels: [...summary.filledLabels, FAN_NOTE_OTHER_LABEL] };
   return {
     ...summary,
     addedLabels,
@@ -143,23 +145,33 @@ function otherValue(text: string): string | null {
   return parseNoteTemplate(text).find((field) => isOtherLabel(field.label))?.value ?? null;
 }
 
-/** «Заполнено полей: 2. Добавлены строки: График, Другое. Предложений: 1.
- * Проверьте и сохраните.» — parts with nothing to say are left out. */
+function editsWord(count: number): string {
+  const tens = count % 100;
+  const ones = count % 10;
+  if (ones === 1 && tens !== 11) return 'правку';
+  return ones >= 2 && ones <= 4 && (tens < 12 || tens > 14) ? 'правки' : 'правок';
+}
+
+/** «Гусь вписал: Хобби, Другое. Предлагает 2 правки.» — what the fill did,
+ * in a line; parts with nothing to say are left out. The fields are named,
+ * not counted: the panel marks the same ones. */
 export function fillNoticeText(
-  merged: Pick<NoteFillMerge, 'filledCount' | 'addedLabels' | 'appendedToOther' | 'suggestions'> &
+  merged: Pick<NoteFillMerge, 'filledLabels' | 'addedLabels' | 'appendedToOther' | 'suggestions'> &
     Partial<Pick<NoteFillMerge, 'unplacedLabels'>>,
 ): string {
-  const unplaced = merged.unplacedLabels ?? [];
-  const parts = [
-    merged.filledCount > 0 ? `Заполнено полей: ${merged.filledCount}` : null,
-    merged.addedLabels.length > 0 ? `Добавлены строки: ${merged.addedLabels.join(', ')}` : null,
-    merged.appendedToOther ? 'Дополнено поле: Другое' : null,
-    unplaced.length > 0 ? `Не хватило места в анкете: ${unplaced.join(', ')}` : null,
-    merged.suggestions.length > 0 ? `Предложений: ${merged.suggestions.length}` : null,
+  const wrote = [...new Set([...merged.filledLabels, ...merged.addedLabels])];
+  const offers = merged.suggestions.length;
+  const did = [
+    wrote.length > 0 ? `вписал: ${wrote.join(', ')}` : null,
+    merged.appendedToOther ? 'дописал в «Другое»' : null,
+    offers > 0 ? `предлагает ${offers} ${editsWord(offers)}` : null,
   ].filter((part): part is string => part !== null);
-  return parts.length === 0
-    ? 'В переписке не нашлось ничего нового для анкеты.'
-    : `${parts.join('. ')}. Проверьте и сохраните.`;
+  const sentences = did.map((part, index) => (index === 0
+    ? `Гусь ${part}.`
+    : `${part.charAt(0).toLocaleUpperCase('ru')}${part.slice(1)}.`));
+  const unplaced = merged.unplacedLabels ?? [];
+  if (unplaced.length > 0) sentences.push(`Не хватило места в анкете: ${unplaced.join(', ')}.`);
+  return sentences.length === 0 ? 'В переписке не нашлось ничего нового для анкеты.' : sentences.join(' ');
 }
 
 /** One questionnaire fill in flight (one per tab: the background runs one
@@ -250,13 +262,15 @@ export class FanNotesController {
       onCustomNameInput: (value) => this.nameInput(value),
       onCustomNameCommit: () => { void this.commitName(); },
       onCustomNameRevert: () => this.revertName(),
+      onFillNote: (noteId) => this.fillNote(noteId),
       onFill: () => this.startFill(),
       onStopFill: () => this.stopFill(),
       onApplySuggestion: (index) => this.applySuggestion(index),
       onApplyAllSuggestions: () => this.applyAllSuggestions(),
-      onDismissSuggestions: () => this.dismissSuggestions(),
+      onDismissSuggestion: (index) => this.dismissSuggestion(index),
       onMoveToOther: (label) => this.moveToOther(label),
       onToggleSources: (open) => this.toggleSources(open),
+      onToggleTextMode: () => this.toggleTextMode(),
     });
     this.trigger = new NotesTrigger({
       onToggle: () => { this.toggle(); },
@@ -609,10 +623,11 @@ export class FanNotesController {
       saving: false,
       blocked: false,
       error: null,
+      asText: false,
       ...emptyFillState(),
     });
     this.render();
-    this.panel.focusField('editor-text:new', fromTemplate ? FAN_NOTE_TEMPLATE_TEXT.indexOf('\n') : undefined);
+    this.panel.focusEditor(null);
   }
 
   private startEdit(noteId: string): void {
@@ -627,10 +642,21 @@ export class FanNotesController {
       saving: false,
       blocked: false,
       error: null,
+      asText: false,
       ...emptyFillState(),
     });
     this.render();
-    this.panel.focusField(`editor-text:${noteId}`);
+    this.panel.focusEditor(noteId);
+  }
+
+  /** The questionnaire as fields or as the one text Fansly stores. */
+  private toggleTextMode(): void {
+    const data = this.current();
+    const draft = data ? this.drafts.get(data.fan.accountId) : undefined;
+    if (!draft || draft.saving || this.fill?.fanId === data?.fan.accountId) return;
+    draft.asText = !draft.asText;
+    this.render();
+    this.panel.focusEditor(draft.noteId);
   }
 
   private editorInput(title: string, text: string): void {
@@ -704,9 +730,9 @@ export class FanNotesController {
       if (draft.noteId === null) {
         // The create may have landed; another one now could make a duplicate.
         draft.blocked = true;
-        draft.error = `Не сохранено: ${formatUserFacingError(error)}. Заметка могла всё же записаться — нажмите «Обновить»: если она появится в списке, черновик можно отменить.`;
+        draft.error = `Не сохранено: ${formatUserFacingError(error)}. Заметка могла всё же записаться — нажмите ↻ «Обновить» вверху: если она появится в списке, черновик можно отменить.`;
       } else {
-        draft.error = `Не сохранено: ${formatUserFacingError(error)}. Если не уверены, сохранилось ли, нажмите «Обновить» — черновик останется.`;
+        draft.error = `Не сохранено: ${formatUserFacingError(error)}. Если не уверены, сохранилось ли, нажмите ↻ «Обновить» вверху — черновик останется.`;
       }
     }
     this.render();
@@ -756,7 +782,14 @@ export class FanNotesController {
     this.render();
   }
 
-  // ─── «✨ Заполнить из чата» ─────────────────────────────────────────────
+  // ─── «✨ Дополнить из чата» ─────────────────────────────────────────────
+
+  /** From a questionnaire being read: open it and fill in one press. */
+  private fillNote(noteId: string): void {
+    this.startEdit(noteId);
+    const data = this.current();
+    if (data && this.drafts.get(data.fan.accountId)?.noteId === noteId) this.startFill();
+  }
 
   private startFill(): void {
     const data = this.current();
@@ -843,7 +876,7 @@ export class FanNotesController {
     draft.sourcesOpen = false;
     draft.fillNotice = fillNoticeText(merged);
     draft.fillSummary = {
-      filledCount: merged.filledCount,
+      filledLabels: merged.filledLabels,
       addedLabels: merged.addedLabels,
       appendedToOther: merged.appendedToOther,
       unplacedLabels: merged.unplacedLabels,
@@ -867,8 +900,9 @@ export class FanNotesController {
     const draft = data ? this.drafts.get(data.fan.accountId) : undefined;
     const suggestion = draft?.suggestions[index];
     if (!draft || !suggestion || draft.saving) return;
-    draft.text = applyFieldSuggestion(draft.text, suggestion);
+    this.acceptSuggestion(draft, suggestion);
     draft.suggestions = draft.suggestions.filter((_, position) => position !== index);
+    this.restateFill(draft);
     this.render();
   }
 
@@ -876,17 +910,34 @@ export class FanNotesController {
     const data = this.current();
     const draft = data ? this.drafts.get(data.fan.accountId) : undefined;
     if (!draft || draft.saving) return;
-    for (const suggestion of draft.suggestions) draft.text = applyFieldSuggestion(draft.text, suggestion);
+    for (const suggestion of draft.suggestions) this.acceptSuggestion(draft, suggestion);
     draft.suggestions = [];
+    this.restateFill(draft);
     this.render();
   }
 
-  private dismissSuggestions(): void {
+  /** The field takes the rewrite and, like every field the fill wrote, keeps
+   * its mark and the fan's words under it. A field the chatter has edited
+   * since is left alone (and unmarked). */
+  private acceptSuggestion(draft: Draft, suggestion: NoteFieldSuggestion): void {
+    const text = applyFieldSuggestion(draft.text, suggestion);
+    if (text === draft.text) return;
+    draft.text = text;
+    draft.sources = [...draft.sources, { label: suggestion.label, quotes: suggestion.quotes }];
+  }
+
+  private dismissSuggestion(index: number): void {
     const data = this.current();
     const draft = data ? this.drafts.get(data.fan.accountId) : undefined;
-    if (!draft) return;
-    draft.suggestions = [];
+    if (!draft || !draft.suggestions[index]) return;
+    draft.suggestions = draft.suggestions.filter((_, position) => position !== index);
+    this.restateFill(draft);
     this.render();
+  }
+
+  /** The notice counts the rewrites still on offer. */
+  private restateFill(draft: Draft): void {
+    if (draft.fillSummary) draft.fillNotice = fillNoticeText({ ...draft.fillSummary, suggestions: draft.suggestions });
   }
 
   /** «В Другое» (E164): a field the fill named itself joins «Другое». */
@@ -906,7 +957,7 @@ export class FanNotesController {
         ? 'created'
         : otherBefore === otherAfter ? 'unchanged' : otherBefore === '' ? 'filled' : 'appended';
       draft.fillSummary = summaryAfterMoveToOther(draft.fillSummary, label, other);
-      draft.fillNotice = fillNoticeText({ ...draft.fillSummary, suggestions: draft.suggestions });
+      this.restateFill(draft);
     }
     this.render();
   }
@@ -914,7 +965,9 @@ export class FanNotesController {
   private toggleSources(open: boolean): void {
     const data = this.current();
     const draft = data ? this.drafts.get(data.fan.accountId) : undefined;
-    if (draft) draft.sourcesOpen = open;
+    if (!draft) return;
+    draft.sourcesOpen = open;
+    this.render();
   }
 
   // ─── Custom name ────────────────────────────────────────────────────────
@@ -1023,6 +1076,7 @@ export class FanNotesController {
             saving: draft.saving,
             blocked: draft.blocked,
             error: draft.error,
+            asText: draft.asText,
             filling: this.fill?.fanId === fanId ? this.fill.status : null,
             // Another chat's fill holds the tab's one operation.
             fillBusy: this.fill !== null && this.fill.fanId !== fanId,

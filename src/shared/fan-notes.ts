@@ -28,7 +28,7 @@ export const FAN_NOTE_TITLE_MAX_CHARS = 1_000;
 export const FAN_NOTE_TEXT_MAX_CHARS = 50_000;
 export const FAN_CUSTOM_NAME_MAX_CHARS = 1_000;
 
-/** «+ По шаблону»: the questionnaire the agency's chatters already keep. */
+/** «+ Анкета»: the questionnaire the agency's chatters already keep. */
 export const FAN_NOTE_TEMPLATE_TITLE = 'Анкета';
 /** Where a fact that fits no other field goes (E164). */
 export const FAN_NOTE_OTHER_LABEL = 'Другое';
@@ -129,7 +129,7 @@ export function charCount(text: string): number {
   return Array.from(text).length;
 }
 
-// ─── «✨ Заполнить из чата» (E159, E164) ───────────────────────────────────
+// ─── «✨ Дополнить из чата» (E159, E164) ───────────────────────────────────
 //
 // A questionnaire is any note whose lines read `Label: value`. The kernel
 // (`fan-notes-fill`) gets its labels and the chatter's current values
@@ -137,7 +137,7 @@ export function charCount(text: string): number {
 // lacks, and answers one `Label: value` line per label, each followed by up
 // to three `> «…»` lines quoting the fan, then at most a few `+ Label: value`
 // fields it names itself. The panel fills the empty fields, appends the new
-// lines and offers rewrites of filled ones as «было → станет»; the quotes are
+// lines and offers rewrites of filled ones under their fields; the quotes are
 // shown while reviewing and never written into the note.
 
 /** The kernel's bounds for `noteFields` / `noteValues` (Core contract). */
@@ -170,12 +170,12 @@ export interface NoteTemplateField {
 
 /** Labels compare trimmed, case-insensitively and composed (NFC): a model
  * may echo «й» decomposed. */
-function labelKey(label: string): string {
+export function noteLabelKey(label: string): string {
   // «- Имя» in a questionnaire written as a list is the template's «Имя».
   return label.trim().replace(/^[-*•]+\s*/, '').normalize('NFC').toLocaleLowerCase('ru');
 }
 
-const OTHER_KEY = labelKey(FAN_NOTE_OTHER_LABEL);
+const OTHER_KEY = noteLabelKey(FAN_NOTE_OTHER_LABEL);
 
 function isLabel(label: string): boolean {
   const trimmed = label.trim();
@@ -198,7 +198,7 @@ function fieldLines(text: string): NoteTemplateField[] {
     const match = FIELD_LINE.exec(raw);
     if (!match || !isLabel(match[1]!)) return;
     const label = match[1]!.trim();
-    const key = labelKey(label);
+    const key = noteLabelKey(label);
     if (seen.has(key)) return;
     seen.add(key);
     fields.push({ label, value: match[2]!.trim(), line });
@@ -221,7 +221,7 @@ export function isValidNoteFields(value: unknown): value is string[] {
     if (typeof label !== 'string' || label !== label.trim() || label.includes(':') || label.includes('\n') || !isLabel(label)) {
       return false;
     }
-    const key = labelKey(label);
+    const key = noteLabelKey(label);
     if (seen.has(key)) return false;
     seen.add(key);
   }
@@ -263,9 +263,9 @@ export function buildFillRequest(text: string): NoteFillRequest | null {
     noteFields.push(field.label);
     noteValues.push(value);
   }
-  const present = new Set(fields.map((field) => labelKey(field.label)));
+  const present = new Set(fields.map((field) => noteLabelKey(field.label)));
   const room = Math.max(0, FAN_NOTE_FIELDS_MAX - fields.length);
-  for (const label of FAN_NOTE_TEMPLATE_LABELS.filter((entry) => !present.has(labelKey(entry))).slice(0, room)) {
+  for (const label of FAN_NOTE_TEMPLATE_LABELS.filter((entry) => !present.has(noteLabelKey(entry))).slice(0, room)) {
     noteFields.push(label);
     noteValues.push('');
   }
@@ -322,7 +322,7 @@ function quoteText(raw: string): string {
 export const FAN_NOTE_UNCHANGED_MARK = '=';
 
 export function parseFilledFields(rawText: string, labels: readonly string[]): FillAnswer {
-  const wanted = new Map(labels.map((label) => [labelKey(label), label] as const));
+  const wanted = new Map(labels.map((label) => [noteLabelKey(label), label] as const));
   const fields = new Map<string, FilledField>();
   const proposed: ProposedNoteField[] = [];
   let anchor: { quotes: string[] } | null = null;
@@ -338,7 +338,7 @@ export function parseFilledFields(rawText: string, labels: readonly string[]): F
     // An asked label is a field even when it starts with «+» («+7 телефон»);
     // only a `+` line for a label nobody asked is a proposed field.
     const match = FIELD_LINE.exec(raw);
-    const label = match ? wanted.get(labelKey(match[1]!)) : undefined;
+    const label = match ? wanted.get(noteLabelKey(match[1]!)) : undefined;
     const plus = label ? null : PROPOSED_LINE.exec(raw);
     if (plus) {
       const value = decodeEntities(plus[2]!.trim());
@@ -409,13 +409,15 @@ function appendOther(current: string, extra: string): string {
 
 function movedText(label: string, value: string): string {
   // «+ Другое: x» is already about «Другое»: its value alone.
-  return labelKey(label) === OTHER_KEY ? value : `${label}: ${value}`;
+  return noteLabelKey(label) === OTHER_KEY ? value : `${label}: ${value}`;
 }
 
 export interface NoteFillMerge {
   text: string;
   /** Empty fields of the note that now hold a value. */
   filledCount: number;
+  /** Their labels as the note writes them, in fill order. */
+  filledLabels: string[];
   /** New lines, in draft order: template fields (a created «Другое»
    * included), then the fields the model proposed. */
   addedLabels: string[];
@@ -436,8 +438,9 @@ export interface NoteFillMerge {
  * - an empty field takes the answer, a filled one keeps the chatter's value
  *   and a different answer comes back as a suggestion;
  * - a template label the note lacked and a usable proposed field become new
- *   lines right after the last field line (free text below stays below),
- *   template fields first, in template order;
+ *   lines right after the last field and the lines written under it (free
+ *   text below a blank line stays below), template fields first, in template
+ *   order;
  * - a proposed field that cannot have a line (invalid or taken label, no room
  *   under 30 fields) is appended to «Другое», never dropped, unless the
  *   questionnaire has no «Другое» and no room for one.
@@ -447,26 +450,26 @@ export function mergeFilledFields(text: string, answer: FillAnswer): NoteFillMer
   const lines = text.split('\n');
   const fields = parseNoteTemplate(text);
   if (fields.length === 0) {
-    return { text, filledCount: 0, addedLabels: [], proposedLabels: [], appendedToOther: false, unplacedLabels: [], suggestions: [], sources: [] };
+    return { text, filledCount: 0, filledLabels: [], addedLabels: [], proposedLabels: [], appendedToOther: false, unplacedLabels: [], suggestions: [], sources: [] };
   }
-  const byKey = new Map(fields.map((field) => [labelKey(field.label), field] as const));
-  const asked = new Set(answer.labels.map(labelKey));
+  const byKey = new Map(fields.map((field) => [noteLabelKey(field.label), field] as const));
+  const asked = new Set(answer.labels.map(noteLabelKey));
   const suggestions: NoteFieldSuggestion[] = [];
   const sources: NoteFillSource[] = [];
   const additions: Array<{ label: string; value: string }> = [];
   const filledHere = new Set<string>();
-  let filledCount = 0;
+  const filledLabels: string[] = [];
 
   for (const label of answer.labels) {
     const got = answer.fields.get(label);
     const value = got?.value.trim() ?? '';
     if (!got || !value) continue;
-    const field = byKey.get(labelKey(label));
+    const field = byKey.get(noteLabelKey(label));
     if (field) {
       if (!field.value) {
         lines[field.line] = withValue(lines[field.line]!, value);
-        filledCount += 1;
-        filledHere.add(labelKey(label));
+        filledLabels.push(field.label);
+        filledHere.add(noteLabelKey(label));
         sources.push({ label: field.label, quotes: got.quotes });
       } else if (!sameValue(field.value, value)) {
         suggestions.push({ label: field.label, current: field.value, proposed: value, quotes: got.quotes });
@@ -483,7 +486,7 @@ export function mergeFilledFields(text: string, answer: FillAnswer): NoteFillMer
   const accepted: number[] = [];
   const overflow: number[] = [];
   answer.proposed.forEach((field, index) => {
-    const key = labelKey(field.label);
+    const key = noteLabelKey(field.label);
     if (isLabel(field.label) && !taken.has(key) &&
         fields.length + additions.length + accepted.length < FAN_NOTE_FIELDS_MAX) {
       taken.add(key);
@@ -498,7 +501,7 @@ export function mergeFilledFields(text: string, answer: FillAnswer): NoteFillMer
   const movedSources: NoteFillSource[] = [];
   if (overflow.length > 0) {
     const otherField = byKey.get(OTHER_KEY);
-    const otherAddition = additions.find((entry) => labelKey(entry.label) === OTHER_KEY);
+    const otherAddition = additions.find((entry) => noteLabelKey(entry.label) === OTHER_KEY);
     // Creating «Другое» takes a field of its own: the last proposed line gives
     // up its place when nothing else is left.
     if (!otherField && !otherAddition &&
@@ -517,12 +520,12 @@ export function mergeFilledFields(text: string, answer: FillAnswer): NoteFillMer
         const current = FIELD_LINE.exec(lines[otherField.line]!)?.[2]?.trim() ?? '';
         lines[otherField.line] = withValue(lines[otherField.line]!, appendOther(current, extra));
         if (!current) {
-          filledCount += 1;
+          filledLabels.push(otherField.label);
         } else if (!filledHere.has(OTHER_KEY)) {
           appendedToOther = true;
         }
         for (const suggestion of suggestions) {
-          if (labelKey(suggestion.label) === OTHER_KEY) {
+          if (noteLabelKey(suggestion.label) === OTHER_KEY) {
             suggestion.current = appendOther(suggestion.current, extra);
             suggestion.proposed = appendOther(suggestion.proposed, extra);
           }
@@ -549,10 +552,16 @@ export function mergeFilledFields(text: string, answer: FillAnswer): NoteFillMer
   for (const field of proposedLines) sources.push({ label: field.label, quotes: field.quotes });
   sources.push(...movedSources);
   const newLines = [...additions, ...proposedLines].map((entry) => `${entry.label}: ${entry.value}`);
-  lines.splice(fields[fields.length - 1]!.line + 1, 0, ...newLines);
+  // Under the last field and the lines the chatter wrote under it: a new
+  // line in between would take those lines for its own.
+  const lastField = fields[fields.length - 1]!;
+  const lastPart = parseNoteForm(text)?.find((part) => part.kind === 'field' && part.line === lastField.line);
+  const insertAt = (lastPart?.kind === 'field' ? lastPart.lastLine : lastField.line) + 1;
+  lines.splice(insertAt, 0, ...newLines);
   return {
     text: lines.join('\n'),
-    filledCount,
+    filledCount: filledLabels.length,
+    filledLabels,
     addedLabels: [...additions, ...proposedLines].map((entry) => entry.label),
     proposedLabels: proposedLines.map((field) => field.label),
     appendedToOther,
@@ -567,7 +576,7 @@ export function mergeFilledFields(text: string, answer: FillAnswer): NoteFillMer
 export function applyFieldSuggestion(text: string, suggestion: NoteFieldSuggestion): string {
   // fieldLines, not parseNoteTemplate: a draft the chatter grew past 30
   // `Label: value` lines still takes the replacement it was offered.
-  const field = fieldLines(text).find((entry) => labelKey(entry.label) === labelKey(suggestion.label));
+  const field = fieldLines(text).find((entry) => noteLabelKey(entry.label) === noteLabelKey(suggestion.label));
   if (!field || !sameValue(field.value, suggestion.current)) return text;
   const lines = text.split('\n');
   lines[field.line] = withValue(lines[field.line]!, suggestion.proposed);
@@ -576,8 +585,8 @@ export function applyFieldSuggestion(text: string, suggestion: NoteFieldSuggesti
 
 /** True while the draft still has a line for `label`. */
 export function hasFieldLine(text: string, label: string): boolean {
-  const key = labelKey(label);
-  return fieldLines(text).some((field) => labelKey(field.label) === key);
+  const key = noteLabelKey(label);
+  return fieldLines(text).some((field) => noteLabelKey(field.label) === key);
 }
 
 /** «В Другое» on a proposed field: its line leaves the draft and
@@ -591,28 +600,122 @@ export function moveFieldToOther(
   suggestions: readonly NoteFieldSuggestion[],
   pendingLabels: readonly string[] = [],
 ): { text: string; suggestions: NoteFieldSuggestion[] } {
-  const key = labelKey(label);
-  const field = fieldLines(text).find((entry) => labelKey(entry.label) === key);
+  const key = noteLabelKey(label);
+  const field = fieldLines(text).find((entry) => noteLabelKey(entry.label) === key);
   if (!field || key === OTHER_KEY) return { text, suggestions: [...suggestions] };
   const lines = text.split('\n');
   lines.splice(field.line, 1);
   if (!field.value) return { text: lines.join('\n'), suggestions: [...suggestions] };
   const extra = movedText(field.label, field.value);
   const rest = fieldLines(lines.join('\n'));
-  const other = rest.find((entry) => labelKey(entry.label) === OTHER_KEY);
+  const other = rest.find((entry) => noteLabelKey(entry.label) === OTHER_KEY);
   if (other) {
     lines[other.line] = withValue(lines[other.line]!, appendOther(other.value, extra));
     return {
       text: lines.join('\n'),
-      suggestions: suggestions.map((suggestion) => labelKey(suggestion.label) === OTHER_KEY
+      suggestions: suggestions.map((suggestion) => noteLabelKey(suggestion.label) === OTHER_KEY
         ? { ...suggestion, current: appendOther(suggestion.current, extra), proposed: appendOther(suggestion.proposed, extra) }
         : suggestion),
     };
   }
-  const pending = new Set(pendingLabels.map(labelKey));
-  const at = Math.min(field.line, ...rest.filter((entry) => pending.has(labelKey(entry.label))).map((entry) => entry.line));
+  const pending = new Set(pendingLabels.map(noteLabelKey));
+  const at = Math.min(field.line, ...rest.filter((entry) => pending.has(noteLabelKey(entry.label))).map((entry) => entry.line));
   lines.splice(at, 0, `${FAN_NOTE_OTHER_LABEL}: ${extra}`);
   return { text: lines.join('\n'), suggestions: [...suggestions] };
+}
+
+// ─── The questionnaire as fields (E166) ──────────────────────────────────
+//
+// The panel shows and edits a questionnaire as fields, each a list of facts.
+// The note itself stays what Fansly stores and Core reads: `Label: value`
+// lines, a value's facts joined with «; ». A line without a label right under
+// a field is that field's continuation (chatters write them by hand); it
+// joins the field's own line only when the chatter edits that field.
+
+export interface NoteFormField {
+  kind: 'field';
+  label: string;
+  /** The value's «; » parts, then the continuation lines. */
+  facts: string[];
+  /** First and last line of the field in the note's text. */
+  line: number;
+  lastLine: number;
+}
+
+/** A line that belongs to no field: before the first one, or after a blank
+ * line. */
+export interface NoteFormText {
+  kind: 'text';
+  text: string;
+  line: number;
+}
+
+export type NoteFormPart = NoteFormField | NoteFormText;
+
+/** A value's facts: its parts between «; ». */
+export function splitNoteFacts(value: string): string[] {
+  return value.split(/;\s+/).map((fact) => fact.trim()).filter(Boolean);
+}
+
+/** The questionnaire's fields and the free lines around them, in note order;
+ * null when the note is not a questionnaire. Blank lines are layout only. */
+export function parseNoteForm(text: string): NoteFormPart[] | null {
+  const fields = parseNoteTemplate(text);
+  if (fields.length === 0) return null;
+  const starts = new Map(fields.map((field) => [field.line, field] as const));
+  const parts: NoteFormPart[] = [];
+  let open: NoteFormField | null = null;
+  const lines = text.split('\n');
+  for (let line = 0; line < lines.length; line += 1) {
+    const raw = lines[line]!;
+    const field = starts.get(line);
+    if (field) {
+      open = { kind: 'field', label: field.label, facts: splitNoteFacts(field.value), line, lastLine: line };
+      parts.push(open);
+    } else if (!raw.trim()) {
+      open = null;
+    } else if (open) {
+      open.facts.push(raw.trim());
+      open.lastLine = line;
+    } else {
+      parts.push({ kind: 'text', text: raw, line });
+    }
+  }
+  return parts;
+}
+
+/** Write a field's facts back as its one `Label: a; b` line, the label kept
+ * as typed; its continuation lines join that line. Every other line keeps
+ * its bytes. A text without that field is returned as is. */
+export function setNoteFieldFacts(text: string, label: string, facts: readonly string[]): string {
+  const key = noteLabelKey(label);
+  const field = parseNoteForm(text)?.find(
+    (part): part is NoteFormField => part.kind === 'field' && noteLabelKey(part.label) === key,
+  );
+  if (!field) return text;
+  const lines = text.split('\n');
+  const value = facts.map((fact) => fact.trim()).filter(Boolean).join('; ');
+  lines.splice(field.line, field.lastLine - field.line + 1, withValue(lines[field.line]!, value));
+  return lines.join('\n');
+}
+
+/** «Флорида (08.2026)»: the fact and the month Core stamped on it (E164). */
+export function splitFactDate(fact: string): { text: string; date: string | null } {
+  const match = /^(.*\S)\s*\((\d{2}\.\d{4})\)$/.exec(fact);
+  return match ? { text: match[1]!, date: match[2]! } : { text: fact, date: null };
+}
+
+/** What a rewrite changes, fact by fact: a rewrite that keeps the field and
+ * adds to it shows the addition alone. */
+export function diffNoteFacts(current: string, proposed: string): { added: string[]; removed: string[] } {
+  const before = splitNoteFacts(current);
+  const after = splitNoteFacts(proposed);
+  const had = new Set(before.map(comparable));
+  const has = new Set(after.map(comparable));
+  return {
+    added: after.filter((fact) => !had.has(comparable(fact))),
+    removed: before.filter((fact) => !has.has(comparable(fact))),
+  };
 }
 
 // ─── Where a quote was said (E164) ───────────────────────────────────────
