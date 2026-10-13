@@ -156,6 +156,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E164 | 2026-10-13 | «✨ Заполнить из чата» merges instead of overwriting (release A, extension half): the questionnaire's values travel to Core (`noteValues`, merge mode on every fill; a narrowing of E157/E159 — the custom name and other notes still never travel), the template gains «График», «Планы и даты», «Другое», new lines and up to five AI-named fields (with «В Другое») go straight into the draft, rewrites stay «было → станет», a fact that cannot get a line goes into «Другое»; the fill's transcript carries day lines; each fact shows the fan's quote, dated by the background from the transcript it sent («не нашлось в переписке» otherwise), never saved. SDK vendored from Core `2ac5d541` for development |
 | E165 | 2026-10-13 | Release 2.11.0 = E164 (the notes fill merges and shows its sources). The owner ordered the chain («мержи и выкатывай все») and chose to deploy the whole Core `main`: #593 merged as `bc0f6dbc` and deployed dist-only to agency-de together with 23 commits of other work merged since `a3449f77` (Project Browser, R20 HF; six migrations, 0270–0275, all dormant by their own PRs). Contract `663d132f…`; Core now registers the 2.10.1 SDK (`a6f77fbb…`) and keeps serving it. SDK re-vendored from the deployed commit. Version by the 2.9.0 rule (a feature) |
 | E166 | 2026-10-13 | The notes panel reshaped after the owner's look at 2.11.0 on a live fan («элементы жирные», «сплошной текст нечитаем»): a questionnaire reads as a table (the label, its facts one per line, the month apart, empty fields folded) and is edited as fields, the one text kept under «Текстом»; the fill's rewrite sits under its field as the facts it adds or drops; the custom name is the panel's title, edited in place; a one-row footer; «✨ Заполнить из чата» becomes «✨ Дополнить из чата» and also starts from the note being read. The note's text, the Core contract and what travels to Core are unchanged. Core's half (hub #601) is which field a fact goes to; the owner kept the length of what the AI writes |
+| E167 | 2026-10-14 | Release 2.12.0 = E166 (the notes panel as fields) with Core's half, hub #601 (one fact in one field, «Характеристика» is who the fan is, purchases in «Медиа» only). The owner ordered the chain («давай делай») and, asked about the scope, chose to deploy that change alone: production's commit `bc0f6dbc` plus #601 as the side commit `c2b1843c5eaa`, because Core `main` had ten commits of other work, a migration and a new contract hash that nobody on this release had checked. Contract `663d132f…` unchanged, no SDK re-vendor. Version by the 2.9.0 rule (a feature) |
 
 ## Entries
 
@@ -5989,3 +5990,34 @@ again without a new reason.
 - Checked in Chromium by rendering this panel with the product stylesheet in
   the mockup's frame and clicking it through, and by the jsdom tests. Not
   checked in Firefox on a live Fansly page.
+
+**E167 (2026-10-14).** Release 2.12.0 ships E166 together with Core's half.
+The owner ordered the whole chain («давай делай»).
+
+- Core. Production ran `bc0f6dbc` (the E165 deploy) and `main` had moved ten
+  commits on: Project Browser (PRs 6 and 13, migration 0276), the R20 HF
+  series for chat-extension, voice notes in the narrow token, and a new
+  contract hash (`e6d7e8e8…`) under which the SDK of the released 2.11.0
+  (`663d132f…`) is not listed. Asked, the owner chose to deploy this release's
+  change alone. So #601 was cherry-picked onto `bc0f6dbc` (clean, no
+  conflict), the prompt, manifest, digest and contract tests were run on that
+  exact commit (272 passed, contract hash still `663d132f…`), the commit was
+  pushed as `deploy/notes-fill-fields-on-bc0f6dbc` (`c2b1843c5eaa`) and
+  deployed dist-only to agency-de from a clean detached worktree: verified in
+  167 s, health `ok`, `contractHash` `663d132f…`, the same
+  `compatibleClientSdks`, the four app containers healthy on `c2b1843c5eaa`,
+  the new rule present in the image. #601 itself goes to `main` through its
+  PR; the next deploy of `main` carries it with everything else.
+- No re-vendor: the contract did not change, so the vendored SDK
+  (`663d132f…`, from `bc0f6dbc`) already equals production and the release
+  gate holds as it is.
+- The owner turned down the shorter output the mockup had proposed (E166), so
+  #601 changes three lines of the merge prompt: the definitions of
+  «Характеристика» and «Медиа» and the rule «one fact, one field».
+- Version 2.12.0: a feature, by the rule 2.9.0 followed.
+- Not verified before the release: the prompt on the production model with a
+  production key (1Password asked for the owner's approval, which did not
+  come), and the panel in Firefox on a live Fansly page. The prompt was run
+  on a real chat from the hub's archive through stand-in agents instead: the
+  old prompt reproduced the owner's screenshot, the new one kept the same
+  detail with purchases out of «Характеристика» and no fact twice.
