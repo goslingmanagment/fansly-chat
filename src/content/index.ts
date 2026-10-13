@@ -745,7 +745,7 @@ export class ChatGooseContentApp {
       document.activeElement?.closest('#chatgoose-followers') != null,
     headerName: () => getActiveConversationDisplayName(),
     hotkeyLabel: hotkeyComboLabel('fan-notes', detectLabelPlatform()),
-    // E159: «✨ Заполнить из чата» is an ordinary operation of the tab; its
+    // E159: «✨ Дополнить из чата» is an ordinary operation of the tab; its
     // port messages are routed to the panel (handlePortMessage), never to the
     // overlay or inline surfaces.
     startFill: ({ operationId, groupId, noteFields, noteValues }) => {

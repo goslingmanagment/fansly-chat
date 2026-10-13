@@ -155,6 +155,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E163 | 2026-10-13 | AGENTS.md — единственный файл правил; CLAUDE.md перенесён без потери инструкций, актуальные ссылки обновлены |
 | E164 | 2026-10-13 | «✨ Заполнить из чата» merges instead of overwriting (release A, extension half): the questionnaire's values travel to Core (`noteValues`, merge mode on every fill; a narrowing of E157/E159 — the custom name and other notes still never travel), the template gains «График», «Планы и даты», «Другое», new lines and up to five AI-named fields (with «В Другое») go straight into the draft, rewrites stay «было → станет», a fact that cannot get a line goes into «Другое»; the fill's transcript carries day lines; each fact shows the fan's quote, dated by the background from the transcript it sent («не нашлось в переписке» otherwise), never saved. SDK vendored from Core `2ac5d541` for development |
 | E165 | 2026-10-13 | Release 2.11.0 = E164 (the notes fill merges and shows its sources). The owner ordered the chain («мержи и выкатывай все») and chose to deploy the whole Core `main`: #593 merged as `bc0f6dbc` and deployed dist-only to agency-de together with 23 commits of other work merged since `a3449f77` (Project Browser, R20 HF; six migrations, 0270–0275, all dormant by their own PRs). Contract `663d132f…`; Core now registers the 2.10.1 SDK (`a6f77fbb…`) and keeps serving it. SDK re-vendored from the deployed commit. Version by the 2.9.0 rule (a feature) |
+| E166 | 2026-10-13 | The notes panel reshaped after the owner's look at 2.11.0 on a live fan («элементы жирные», «сплошной текст нечитаем»): a questionnaire reads as a table (the label, its facts one per line, the month apart, empty fields folded) and is edited as fields, the one text kept under «Текстом»; the fill's rewrite sits under its field as the facts it adds or drops; the custom name is the panel's title, edited in place; a one-row footer; «✨ Заполнить из чата» becomes «✨ Дополнить из чата» and also starts from the note being read. The note's text, the Core contract and what travels to Core are unchanged; how the AI writes is Core's half (hub #601) |
 
 ## Entries
 
@@ -5924,3 +5925,60 @@ AI» (it has had the AI fill since 2.10). Not verified before the release:
 the merge-mode prompt on a real model and the feature on a live Fansly chat
 (a production smoke run would write generation and spend rows nobody asked
 for); the first filled questionnaire in the released extension is the check.
+
+**E166 (2026-10-13).** The owner looked at 2.11.0 on a live fan and sent
+screenshots with three complaints: the panel's elements are heavy and untidy,
+some of the AI's notes are not useful, and the result is a wall of text. He
+allowed any size of rework. A «Было/Стало» mockup (the real 2.11.0 panel and
+a prototype in one frame, on a synthetic fan) was approved with five rulings:
+edit by fields, the custom name as in the mockup, «Характеристика» is the
+kind of fan and not his purchases, day episodes are dropped, one release for
+both halves. This entry is the extension half: how the note is shown and
+typed. How the AI writes (short facts, an importance bar, one fact in one
+field, the fields' definitions) is Core's prompt, hub #601.
+
+- A questionnaire is read as fields. `parseNoteForm` gives each field its
+  facts: the parts of its value between «; », then the lines without a label
+  written right under it (chatters write those by hand; a blank line ends
+  them). A fact ending in Core's month stamp «(MM.YYYY)» shows the month at
+  the right. Empty fields fold into one line «Не заполнено: …». A
+  questionnaire the chatter left untitled is headed «Анкета»; the word is
+  shown, never written.
+- It is edited as the same rows with a field per label, one fact per line.
+  The fields are a view over the note's one text, which stays what Fansly
+  stores and Core reads: `setNoteFieldFacts` rewrites only the field typed
+  in, as its one `Label: a; b` line (the lines under it join that line), and
+  every other line keeps its bytes. «Текстом» / «Полями» switch the two views
+  of one draft (`Draft.asText`); a note that is not a questionnaire is its
+  text, as before. A field takes its height from a hidden twin in CSS, so
+  nothing is measured and the panel's scroll does not jump; a repaint now
+  keeps that scroll.
+- The fill's result is read where it landed. The notice names the fields it
+  wrote («Гусь вписал: Хобби, Другое. Предлагает 2 правки.»,
+  `NoteFillMerge.filledLabels`); those rows are marked. «Слова фана» shows
+  the fan's quotes under each such field (the collapsed list is gone); a
+  quote the chat does not hold shows without being asked for. A rewrite of a
+  filled field sits under that field as the facts it adds and the ones it
+  drops (`diffNoteFacts`), each rewrite with its own «Принять» and «Не
+  нужно», «Принять все» from two up; a taken rewrite marks its field like
+  any other the fill wrote. The batch «Скрыть» is gone.
+- A fill's new lines now go below the lines written under the last field: in
+  between they would have taken those lines for their own.
+- Chrome: the custom name is the panel's title, an input over Fansly's name,
+  its hint shown while it is edited or a save has news; «Изменить» and
+  «Удалить» are icons as in Fansly's own modal; notes are divided by a
+  hairline, not boxed; the footer is one row (new note and the view while
+  reading, the note's «Сохранить» and «Отмена» while editing, so they do not
+  scroll away); «+ Анкета» is offered while the fan has no questionnaire.
+  «✨ Заполнить из чата» is «✨ Дополнить из чата» (it adds to a note since
+  E164) and is also on the questionnaire being read: one press opens it and
+  fills.
+- Unchanged: the request (the values after the labels; a line written under
+  a field does not travel until the chatter edits that field and so makes it
+  part of the value), the Core contract, storage, permissions, and when
+  Fansly is read or written. Whether lines under a field should travel as
+  they are is the owner's to decide: without them the AI can repeat a fact
+  the chatter wrote there.
+- Checked in Chromium by rendering this panel with the product stylesheet in
+  the mockup's frame and clicking it through, and by the jsdom tests. Not
+  checked in Firefox on a live Fansly page.
