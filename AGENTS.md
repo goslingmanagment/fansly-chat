@@ -41,8 +41,9 @@ Plain TS + esbuild (`esbuild.config.mjs`), no framework in content scripts.
 `src/{background,content,options,popup,shared,debug-followers,debug-prompt}`,
 tests in `tests/` (vitest), vendored hub SDK in `vendor/kernel-sdk`.
 
-- `pnpm check` = typecheck + lint + gates + test + build; CI runs it on PRs
-  and pushes to main, on the PC runners as the same parts through
+- `pnpm check` = typecheck + lint + gates + test + build; CI runs it on ready
+  PRs and pushes to main. Drafts skip it; Ready starts it, and converting back
+  to Draft cancels the earlier PR run. On the PC runners it runs the same parts through
   `scripts/ci-parallel-check.mjs` (typecheck, lint and gates side by side,
   then test, then build; a new part runs alone until the script lists it
   as read-only, and the script pins each read-only part's exact body: any

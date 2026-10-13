@@ -2,6 +2,7 @@ name: CI
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   push:
     branches:
       - main
@@ -17,6 +18,9 @@ concurrency:
 
 jobs:
   check:
+    # Drafts spend no runner time. Ready starts the required check; converting
+    # back to Draft cancels the old PR run through the same concurrency group.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     # Repo variable CI_POOL=pc routes the first attempt to the self-hosted
     # runners on the owner's PC; anything else (or a re-run, in case the PC
     # died mid-run) goes to GitHub-hosted. Keep the job id: it is the
