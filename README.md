@@ -249,6 +249,14 @@ Important references:
 
 ## Release
 
+Release 2.12.1 (E168, E169) sends every generation's transcript in UTC with a
+`--- YYYY-MM-DD ---` line before each day's first message, and every request
+says so (`clientContext.transcriptClock: 'utc'`), so Core's `Now:` line calls
+the times UTC instead of the chatter's device clock. Core's half (hub #622,
+#628) is in production with hub #643 (`305f4e18`, contract `d4e21741…`); the
+SDK was re-vendored from that commit. No new permission. Tabs opened before
+the update need a reload.
+
 Release 2.12.0 (E166, E167) reshapes the notes panel: a questionnaire reads
 as a table and is edited as fields, the fill's rewrites sit under their
 fields, the custom name is the panel's title, «✨ Заполнить из чата» is now
