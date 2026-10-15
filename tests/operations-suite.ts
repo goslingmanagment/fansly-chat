@@ -5512,8 +5512,11 @@ describe(`OperationCoordinator (${part})`, () => {
     expect(paced.getWelcomeDefinitions).not.toHaveBeenCalled();
     expect(paced.followerSession).not.toHaveBeenCalled();
     const context = kernelRequestFromStreamCall(kernelGateway).clientContext;
-    // «message 1» is the model's welcome text: labelled and not counted.
-    expect(String(context.transcript).split('\n')[0]).toMatch(/Model: \[Automatic \/ mass message\] message 1$/);
+    // «message 1» is the model's welcome text: labelled and not counted. It
+    // comes right after its day line (E168).
+    const lines = String(context.transcript).split('\n');
+    expect(lines[0]).toMatch(/^--- \d{4}-\d{2}-\d{2} ---$/);
+    expect(lines[1]).toMatch(/Model: \[Automatic \/ mass message\] message 1$/);
     expect(context).toMatchObject({ messageCount: 3, personalMessageCount: 2 });
   });
 
@@ -7648,9 +7651,9 @@ describe(`OperationCoordinator (${part})`, () => {
     });
 
     describe('merge mode (E164)', () => {
-      // Two days in the browser's clock: the fan's lines are «message 2», «message 4», …
-      const dayOne = new Date(2026, 8, 13, 22, 0).getTime() / 1000;
-      const dayTwo = new Date(2026, 8, 14, 9, 0).getTime() / 1000;
+      // Two UTC days (E168): the fan's lines are «message 2», «message 4», …
+      const dayOne = Date.UTC(2026, 8, 13, 22, 0) / 1000;
+      const dayTwo = Date.UTC(2026, 8, 14, 9, 0) / 1000;
       const messages = buildTranscriptMessages(6).map((message, index) => ({
         ...message,
         createdAt: (index < 3 ? dayOne : dayTwo) + index * 60,
@@ -7692,7 +7695,7 @@ describe(`OperationCoordinator (${part})`, () => {
         ]);
       });
 
-      it('leaves every other feature\'s transcript byte for byte as before', async () => {
+      it('dates every other feature\'s transcript the same way (E168)', async () => {
         const { coordinator, kernelGateway, fanslyClient } = await createCoordinatorHarness({
           anthropicRawText: 'hey you',
         });
@@ -7711,7 +7714,10 @@ describe(`OperationCoordinator (${part})`, () => {
 
         const request = kernelRequestFromStreamCall(kernelGateway);
         expect(request.clientContext.transcript).toBe(formatTranscriptForKernel(messages).transcript);
-        expect(request.clientContext.transcript).not.toContain('--- ');
+        const lines = (request.clientContext.transcript as string).split('\n');
+        expect(lines[0]).toBe('--- 2026-09-13 ---');
+        expect(lines[4]).toBe('--- 2026-09-14 ---');
+        expect(lines[5]).toBe('[09:03] Fan: message 4');
       });
     });
   });

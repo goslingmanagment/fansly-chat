@@ -59,6 +59,7 @@ describe('formatTranscriptWithMediaForKernel', () => {
     const result = formatTranscriptWithMediaForKernel(messages, GROUP_ID);
     const lines = result.transcript.split('\n').map((line) => line.replace(/^\[\d\d:\d\d\] /, ''));
     expect(lines).toEqual([
+      '--- 2026-09-21 ---',
       'Fan: [Photo #1] look [Photo ＃1] haha',
       'Model: [Media Bundle: 1 Photo, 1 Video] [Photo #2] [Video #3] for you',
       'Model: [Photo - PPV $10.00, unknown] (preview #4) unlock',
@@ -120,9 +121,10 @@ describe('formatTranscriptWithMediaForKernel', () => {
   it('keeps exactly the legacy window at the cap and numbers the newest files that still fit', () => {
     const messages = normalizeTranscript([page()], MODEL_ID, FAN_ID);
     const legacyFull = formatTranscriptForKernel(messages);
-    // A cap that drops the oldest line and leaves room for only some tokens.
+    // A cap that drops the oldest message and leaves room for only some
+    // tokens; line 0 is the day line, which stays above the next message.
     const lines = legacyFull.transcript.split('\n');
-    const cap = legacyFull.transcript.length - lines[0]!.length - 1 + 12;
+    const cap = legacyFull.transcript.length - lines[1]!.length - 1 + 12;
     const legacy = formatTranscriptForKernel(messages, cap);
     const tight = formatTranscriptWithMediaForKernel(messages, GROUP_ID, cap);
     expect(tight.messageCount).toBe(legacy.messageCount);

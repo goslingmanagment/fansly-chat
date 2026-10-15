@@ -17,6 +17,9 @@ ChatGoose is a client of the Agency Hub kernel in `../hub`:
 - AI generations go only through the kernel feature lane
   (`POST /api/v1/ai/features/:feature`). The extension contains no provider API
   keys, vendor AI SDKs, or prompt library.
+- The transcript a generation sends (`clientContext.transcript`) is in UTC:
+  `[HH:MM]` and a `--- YYYY-MM-DD ---` line before each day's first message,
+  never the chatter's own clock (E168, the hub's format since hub #622).
 - Models, prompt assembly, quotas, and AI cost accounting are owned by core.
 - Hub authentication is one login and one password, traded for a per-device
   credential through the kernel's public password route — no cookie, no
@@ -106,8 +109,8 @@ from prose when checking what is installed or live; verify the signed update fee
   «✨ Дополнить из чата» (E159, E164; «✨ Заполнить из чата» until E166) on a
   questionnaire (a note of `Label: value` lines), being read or edited, runs
   the kernel feature `fan-notes-fill` (Sonnet by
-  default) over the whole chat, read like a full Recap, with day lines
-  (`--- YYYY-MM-DD ---`) in its transcript. It sends the labels with the
+  default) over the whole chat, read like a full Recap; it dates its facts
+  from the transcript's day lines. It sends the labels with the
   chatter's current values (`noteFields` + `noteValues`; a value over 2 000
   characters is left out) and the template labels the note lacks. Empty
   fields are filled and new lines (template fields, a field the AI names
