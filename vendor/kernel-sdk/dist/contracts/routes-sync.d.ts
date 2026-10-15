@@ -713,6 +713,92 @@ export declare const syncPagesResponseSchema: z.ZodObject<{
             attemptsLastHour: z.ZodNumber;
             demandVsEstimate: z.ZodNullable<z.ZodNumber>;
         }, z.core.$strict>>;
+        browser: z.ZodOptional<z.ZodObject<{
+            profileId: z.ZodString;
+            container: z.ZodString;
+            transport: z.ZodEnum<{
+                node: "node";
+                browser: "browser";
+            }>;
+            leavePendingSince: z.ZodNullable<z.ZodString>;
+            link: z.ZodObject<{
+                lastStateAt: z.ZodNullable<z.ZodString>;
+                stateAgeMs: z.ZodNullable<z.ZodNumber>;
+                error: z.ZodNullable<z.ZodString>;
+            }, z.core.$strict>;
+            state: z.ZodObject<{
+                step: z.ZodNullable<z.ZodString>;
+                stopReason: z.ZodNullable<z.ZodString>;
+                retryAt: z.ZodNullable<z.ZodString>;
+                exitOpen: z.ZodBoolean;
+                mode: z.ZodEnum<{
+                    automation: "automation";
+                    manual_login: "manual_login";
+                }>;
+                downSince: z.ZodNullable<z.ZodString>;
+                stopSince: z.ZodNullable<z.ZodString>;
+            }, z.core.$strict>;
+            ownerStop: z.ZodNullable<z.ZodObject<{
+                at: z.ZodString;
+                by: z.ZodString;
+                paused: z.ZodBoolean;
+            }, z.core.$strict>>;
+            halt: z.ZodNullable<z.ZodObject<{
+                reason: z.ZodString;
+                at: z.ZodString;
+            }, z.core.$strict>>;
+            login: z.ZodObject<{
+                needed: z.ZodBoolean;
+                why: z.ZodNullable<z.ZodString>;
+            }, z.core.$strict>;
+            session: z.ZodObject<{
+                present: z.ZodBoolean;
+                accountId: z.ZodNullable<z.ZodString>;
+            }, z.core.$strict>;
+            proxy: z.ZodObject<{
+                pinnedExitIp: z.ZodNullable<z.ZodString>;
+                pinnedAt: z.ZodNullable<z.ZodString>;
+                exitIp: z.ZodNullable<z.ZodString>;
+                matches: z.ZodNullable<z.ZodBoolean>;
+                problem: z.ZodNullable<z.ZodString>;
+            }, z.core.$strict>;
+            buffer: z.ZodObject<{
+                bytes: z.ZodNullable<z.ZodNumber>;
+                oldestAgeMs: z.ZodNullable<z.ZodNumber>;
+                percent: z.ZodNullable<z.ZodNumber>;
+                capBytes: z.ZodNumber;
+                capAgeMs: z.ZodNumber;
+                haltedReason: z.ZodNullable<z.ZodString>;
+                haltedAt: z.ZodNullable<z.ZodString>;
+                undrainedSince: z.ZodNullable<z.ZodString>;
+            }, z.core.$strict>;
+            delivery: z.ZodObject<{
+                lastEventAt: z.ZodNullable<z.ZodString>;
+                lastCommitAt: z.ZodNullable<z.ZodString>;
+                p50Ms: z.ZodNullable<z.ZodNumber>;
+                p95Ms: z.ZodNullable<z.ZodNumber>;
+                at: z.ZodNullable<z.ZodString>;
+            }, z.core.$strict>;
+            versions: z.ZodObject<{
+                chrome: z.ZodNullable<z.ZodString>;
+                operator: z.ZodNullable<z.ZodString>;
+            }, z.core.$strict>;
+            selfTest: z.ZodObject<{
+                ok: z.ZodNullable<z.ZodBoolean>;
+                at: z.ZodNullable<z.ZodString>;
+                failed: z.ZodNullable<z.ZodString>;
+            }, z.core.$strict>;
+            alarm: z.ZodNullable<z.ZodObject<{
+                kind: z.ZodString;
+                at: z.ZodString;
+                detail: z.ZodRecord<z.ZodString, z.ZodUnion<readonly [z.ZodString, z.ZodNumber, z.ZodBoolean]>>;
+            }, z.core.$strict>>;
+            alerts: z.ZodArray<z.ZodObject<{
+                kind: z.ZodString;
+                detail: z.ZodString;
+                since: z.ZodNullable<z.ZodString>;
+            }, z.core.$strict>>;
+        }, z.core.$strict>>;
     }, z.core.$strict>>;
 }, z.core.$strict>;
 export declare const syncPageWorkQuerySchema: z.ZodObject<{
@@ -1082,6 +1168,92 @@ export declare const syncRouteSchemas: {
                     shadow: z.ZodNullable<z.ZodObject<{
                         attemptsLastHour: z.ZodNumber;
                         demandVsEstimate: z.ZodNullable<z.ZodNumber>;
+                    }, z.core.$strict>>;
+                    browser: z.ZodOptional<z.ZodObject<{
+                        profileId: z.ZodString;
+                        container: z.ZodString;
+                        transport: z.ZodEnum<{
+                            node: "node";
+                            browser: "browser";
+                        }>;
+                        leavePendingSince: z.ZodNullable<z.ZodString>;
+                        link: z.ZodObject<{
+                            lastStateAt: z.ZodNullable<z.ZodString>;
+                            stateAgeMs: z.ZodNullable<z.ZodNumber>;
+                            error: z.ZodNullable<z.ZodString>;
+                        }, z.core.$strict>;
+                        state: z.ZodObject<{
+                            step: z.ZodNullable<z.ZodString>;
+                            stopReason: z.ZodNullable<z.ZodString>;
+                            retryAt: z.ZodNullable<z.ZodString>;
+                            exitOpen: z.ZodBoolean;
+                            mode: z.ZodEnum<{
+                                automation: "automation";
+                                manual_login: "manual_login";
+                            }>;
+                            downSince: z.ZodNullable<z.ZodString>;
+                            stopSince: z.ZodNullable<z.ZodString>;
+                        }, z.core.$strict>;
+                        ownerStop: z.ZodNullable<z.ZodObject<{
+                            at: z.ZodString;
+                            by: z.ZodString;
+                            paused: z.ZodBoolean;
+                        }, z.core.$strict>>;
+                        halt: z.ZodNullable<z.ZodObject<{
+                            reason: z.ZodString;
+                            at: z.ZodString;
+                        }, z.core.$strict>>;
+                        login: z.ZodObject<{
+                            needed: z.ZodBoolean;
+                            why: z.ZodNullable<z.ZodString>;
+                        }, z.core.$strict>;
+                        session: z.ZodObject<{
+                            present: z.ZodBoolean;
+                            accountId: z.ZodNullable<z.ZodString>;
+                        }, z.core.$strict>;
+                        proxy: z.ZodObject<{
+                            pinnedExitIp: z.ZodNullable<z.ZodString>;
+                            pinnedAt: z.ZodNullable<z.ZodString>;
+                            exitIp: z.ZodNullable<z.ZodString>;
+                            matches: z.ZodNullable<z.ZodBoolean>;
+                            problem: z.ZodNullable<z.ZodString>;
+                        }, z.core.$strict>;
+                        buffer: z.ZodObject<{
+                            bytes: z.ZodNullable<z.ZodNumber>;
+                            oldestAgeMs: z.ZodNullable<z.ZodNumber>;
+                            percent: z.ZodNullable<z.ZodNumber>;
+                            capBytes: z.ZodNumber;
+                            capAgeMs: z.ZodNumber;
+                            haltedReason: z.ZodNullable<z.ZodString>;
+                            haltedAt: z.ZodNullable<z.ZodString>;
+                            undrainedSince: z.ZodNullable<z.ZodString>;
+                        }, z.core.$strict>;
+                        delivery: z.ZodObject<{
+                            lastEventAt: z.ZodNullable<z.ZodString>;
+                            lastCommitAt: z.ZodNullable<z.ZodString>;
+                            p50Ms: z.ZodNullable<z.ZodNumber>;
+                            p95Ms: z.ZodNullable<z.ZodNumber>;
+                            at: z.ZodNullable<z.ZodString>;
+                        }, z.core.$strict>;
+                        versions: z.ZodObject<{
+                            chrome: z.ZodNullable<z.ZodString>;
+                            operator: z.ZodNullable<z.ZodString>;
+                        }, z.core.$strict>;
+                        selfTest: z.ZodObject<{
+                            ok: z.ZodNullable<z.ZodBoolean>;
+                            at: z.ZodNullable<z.ZodString>;
+                            failed: z.ZodNullable<z.ZodString>;
+                        }, z.core.$strict>;
+                        alarm: z.ZodNullable<z.ZodObject<{
+                            kind: z.ZodString;
+                            at: z.ZodString;
+                            detail: z.ZodRecord<z.ZodString, z.ZodUnion<readonly [z.ZodString, z.ZodNumber, z.ZodBoolean]>>;
+                        }, z.core.$strict>>;
+                        alerts: z.ZodArray<z.ZodObject<{
+                            kind: z.ZodString;
+                            detail: z.ZodString;
+                            since: z.ZodNullable<z.ZodString>;
+                        }, z.core.$strict>>;
                     }, z.core.$strict>>;
                 }, z.core.$strict>>;
             }, z.core.$strict>;

@@ -1,3 +1,3 @@
 /** sha256 over the normalized OpenAPI document — the cross-repo drift key. */
-export declare const KERNEL_CONTRACT_HASH = "207cf3d51a5c0908691120b0a929fb278a2a90acd2a11b665d080628883b9655";
+export declare const KERNEL_CONTRACT_HASH = "d4e21741100931db35527791b79b124e0f8cad2a5526bf18804933ad56136146";
 export declare const KERNEL_SDK_VERSION = "0.4.0";

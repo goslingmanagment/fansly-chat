@@ -967,6 +967,18 @@ export declare const kernelOperations: {
         readonly method: "GET";
         readonly path: "/api/v1/overview/revenue/daily";
     };
+    readonly pageBrowserDraftDelete: {
+        readonly method: "DELETE";
+        readonly path: "/api/v1/page-browser/drafts/:name";
+    };
+    readonly pageBrowserDraftSave: {
+        readonly method: "PUT";
+        readonly path: "/api/v1/page-browser/drafts/:name";
+    };
+    readonly pageBrowserDrafts: {
+        readonly method: "GET";
+        readonly path: "/api/v1/page-browser/drafts";
+    };
     readonly pageBrowserLoginCode: {
         readonly method: "POST";
         readonly path: "/api/v1/page-browser/pages/:pageLabel/login/code";
@@ -1034,6 +1046,10 @@ export declare const kernelOperations: {
     readonly pageBrowserProfiles: {
         readonly method: "GET";
         readonly path: "/api/v1/page-browser/profiles";
+    };
+    readonly pageBrowserProxyCheck: {
+        readonly method: "POST";
+        readonly path: "/api/v1/page-browser/proxy-check";
     };
     readonly pageBrowserScreen: {
         readonly method: "GET";
