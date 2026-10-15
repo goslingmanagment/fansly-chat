@@ -119,10 +119,13 @@ describe('kernel feature gateway', () => {
       isRegeneration: false,
       clientContext: {
         transcript: '[10:00] Fan: hey you',
+        // E168: the transcript is UTC with day lines, and Core is told so.
+        transcriptClock: 'utc',
         messageCount: 12,
         fanDisplayName: 'Charles',
       },
     });
+    expect(routeSchemas.aiFeatureStream.body!.safeParse(body).success).toBe(true);
     // Device token preferred over the legacy key (dual-acceptance).
     expect((calls[0]!.init?.headers as Record<string, string>).authorization)
       .toBe('Bearer agency_hub_device_x');

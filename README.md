@@ -20,6 +20,7 @@ ChatGoose is a client of the Agency Hub kernel in `../hub`:
 - The transcript a generation sends (`clientContext.transcript`) is in UTC:
   `[HH:MM]` and a `--- YYYY-MM-DD ---` line before each day's first message,
   never the chatter's own clock (E168, the hub's format since hub #622).
+  Every request says so (`clientContext.transcriptClock: 'utc'`).
 - Models, prompt assembly, quotas, and AI cost accounting are owned by core.
 - Hub authentication is one login and one password, traded for a per-device
   credential through the kernel's public password route — no cookie, no

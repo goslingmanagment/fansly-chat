@@ -157,7 +157,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E165 | 2026-10-13 | Release 2.11.0 = E164 (the notes fill merges and shows its sources). The owner ordered the chain («мержи и выкатывай все») and chose to deploy the whole Core `main`: #593 merged as `bc0f6dbc` and deployed dist-only to agency-de together with 23 commits of other work merged since `a3449f77` (Project Browser, R20 HF; six migrations, 0270–0275, all dormant by their own PRs). Contract `663d132f…`; Core now registers the 2.10.1 SDK (`a6f77fbb…`) and keeps serving it. SDK re-vendored from the deployed commit. Version by the 2.9.0 rule (a feature) |
 | E166 | 2026-10-13 | The notes panel reshaped after the owner's look at 2.11.0 on a live fan («элементы жирные», «сплошной текст нечитаем»): a questionnaire reads as a table (the label, its facts one per line, the month apart, empty fields folded) and is edited as fields, the one text kept under «Текстом»; the fill's rewrite sits under its field as the facts it adds or drops; the custom name is the panel's title, edited in place; a one-row footer; «✨ Заполнить из чата» becomes «✨ Дополнить из чата» and also starts from the note being read. The note's text, the Core contract and what travels to Core are unchanged. Core's half (hub #601) is which field a fact goes to; the owner kept the length of what the AI writes |
 | E167 | 2026-10-14 | Release 2.12.0 = E166 (the notes panel as fields) with Core's half, hub #601 (one fact in one field, «Характеристика» is who the fan is, purchases in «Медиа» only). The owner ordered the chain («давай делай») and, asked about the scope, chose to deploy that change alone: production's commit `bc0f6dbc` plus #601 as the side commit `c2b1843c5eaa`, because Core `main` had ten commits of other work, a migration and a new contract hash that nobody on this release had checked. Contract `663d132f…` unchanged, no SDK re-vendor. Version by the 2.9.0 rule (a feature) |
-| E168 | 2026-10-15 | The transcript every generation sends is in UTC (`[HH:MM]` and `--- YYYY-MM-DD ---` day lines), never the chatter's clock; day lines for every kernel-bound feature, not the notes fill alone (E164). Matches the hub's own transcript (hub #622). How Core learns that this client's text is UTC (its `Now:` line still says «device clock» on the client lane) is the owner's open decision. Not released |
+| E168 | 2026-10-15 | The transcript every generation sends is in UTC (`[HH:MM]` and `--- YYYY-MM-DD ---` day lines), never the chatter's clock; day lines for every kernel-bound feature, not the notes fill alone (E164). Matches the hub's own transcript (hub #622). Every request says so (`clientContext.transcriptClock: 'utc'`, the owner's choice), so Core's `Now:` line calls it UTC; SDK vendored from Core `b89d663b` for development. Not released |
 
 ## Entries
 
@@ -6040,17 +6040,24 @@ UTC, with a day line before each UTC day's first message.
   browser's clock) is gone. The budget is E164's: a day line is paid with
   its first kept message and never left without one; `messageCount` counts
   messages, never lines.
-- Unchanged: the request's fields, the Core contract, storage, what is read
-  from Fansly. Dates shown to the chatter (the notes panel's quotes, the fan's
-  registration) stay in the chatter's own clock.
-- Open, the owner's decision: Core's `Now:` line (hub #622) says on the
-  client lane «Transcript times come from the chatter's device clock», which
-  this change makes wrong. Either an optional flag on `clientContext` tells
-  Core the text is UTC (a contract change: Core first, `pnpm
-  contracts:generate`, SDK re-vendor here; older clients keep the device-clock
-  sentence), or Fansly moves to the hub lane as chat-extension R20 does (Core
-  builds the transcript itself; the live read rides as `liveTextContext`).
-  Until then this change waits as a Draft and is not released.
+- Unchanged: storage, what is read from Fansly. Dates shown to the chatter
+  (the notes panel's quotes, the fan's registration) stay in the chatter's
+  own clock.
+- Core is told. Core's `Now:` line (hub #622) said on the client lane
+  «Transcript times come from the chatter's device clock», which this change
+  makes wrong. Asked to choose between a flag on `clientContext` and moving
+  Fansly to the hub lane as chat-extension R20 does, the owner chose the flag
+  (2026-10-15). Every request now carries `clientContext.transcriptClock:
+  'utc'` (`src/background/kernel-feature-gateway.ts`), and Core's `Now:` line
+  then says «Transcript times and day lines are UTC». Released clients send
+  no flag and keep the device-clock sentence, which stays true for them.
+- Core's half: hub #628, stacked on hub #622 (the optional contract field,
+  new contract hash `207cf3d5…`). The schema is strict, so the Core that
+  knows the field must be deployed before a client that sends it is
+  released. The SDK here is vendored from Core `b89d663b` for development;
+  the release re-vendors from the deployed Core.
+- Request: one optional field more; otherwise unchanged.
 - Checked: the formatter's tests in UTC, UTC+3, UTC+5, UTC−7 and UTC+14
   hosts (midnight, month and year turns, a window of six weeks, the budget at
-  every cap). Not checked on a live Fansly page.
+  every cap); the gateway's request carries the flag and passes the vendored
+  schema. Not checked on a live Fansly page.

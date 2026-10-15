@@ -34,6 +34,13 @@ export declare const clientOpenToken: z.ZodString;
  */
 export declare const CLIENT_NUMERIC_ID_PATTERN: RegExp;
 export declare const clientNumericIdSchema: z.ZodString;
+/**
+ * The order of two such ids where the platform's ids are snowflakes (Fansly:
+ * a message id grows with the moment it was sent): negative when `a` is the
+ * older. The shorter id is the older, then the string order. Never by number:
+ * a double merges neighbours past 2^53.
+ */
+export declare function compareClientNumericIds(a: string, b: string): number;
 /** The platform's fan id: on OnlyFans the fan id (== chat_id), on Fansly the fan's account id. */
 export declare const clientFanRefSchema: z.ZodString;
 /**
@@ -69,21 +76,34 @@ export type ClientCursorRefusalReason = (typeof CLIENT_CURSOR_REFUSAL_REASONS)[n
 /**
  * Known names: documentation and the client's narrowing. On the wire they are open strings.
  *
- * `drafts`, `voice` and `notesFill` exist on Fansly only (R20 HF-12): the
- * narrow token's Reply, Fix, Hi and Ping, its voice script and its notes fill
- * on a Fansly page. On OnlyFans those generations need no flag of their own.
- * `freshText` exists on both (Fansly since R20 HF-8б); every other flag on
- * OnlyFans only.
+ * Where each flag exists is the hub's (chat-extension R20 HF-2): a page of a
+ * platform without the flag reads `platform_unsupported`. `drafts`, `voice`,
+ * `notesFill`, `notes`, `vault` and `registration` exist on Fansly only: the
+ * narrow token's Reply, Fix, Hi and Ping, its voice script (`voice` also opens
+ * the voice-note routes, `voice-notes-v1`) and its notes fill on a Fansly page
+ * (R20 HF-12, HF-4б), and the extension's own notes, vault and «Регистрация».
+ * On OnlyFans those generations need no flag of their own. `previewSend`,
+ * `previewSendMarkAiGenerated`, `navigation`, `wsTap` and `stats` exist on
+ * OnlyFans only; every other flag on both. A Fansly page is switched on by its
+ * own row of the owner's switches alone, never by the `"*"` row, so the
+ * top-level `flags` (the `"*"` row) say nothing about a Fansly page.
  */
-export declare const CLIENT_FEATURE_FLAG_NAMES: readonly ["insertion", "freshText", "newcomers", "spenders", "stats", "preview", "previewSend", "previewSendMarkAiGenerated", "fanPanel", "navigation", "wsTap", "sound", "coach", "recap", "review", "splitAll", "drafts", "voice", "notesFill"];
-export declare const CLIENT_HUB_CAPABILITY_NAMES: readonly ["context-v1", "live-text-v1", "split-all-v1", "shared-recaps-v1", "recap-profile-v1", "archive-feed-v1", "spenders-stats-v1", "awaiting-reply-v1", "audience-new-v1", "preview-send-custody-v1", "client-health-perf-v1", "ai-usage-v1", "manual-greeting-v1", "coverage-check-v1", "conversation-recaps-v1"];
+export declare const CLIENT_FEATURE_FLAG_NAMES: readonly ["insertion", "freshText", "newcomers", "spenders", "stats", "preview", "previewSend", "previewSendMarkAiGenerated", "fanPanel", "navigation", "wsTap", "sound", "coach", "recap", "review", "splitAll", "drafts", "voice", "notesFill", "notes", "vault", "registration"];
+export declare const CLIENT_HUB_CAPABILITY_NAMES: readonly ["context-v1", "live-text-v1", "split-all-v1", "shared-recaps-v1", "recap-profile-v1", "archive-feed-v1", "spenders-stats-v1", "awaiting-reply-v1", "audience-new-v1", "preview-send-custody-v1", "client-health-perf-v1", "ai-usage-v1", "manual-greeting-v1", "coverage-check-v1", "conversation-recaps-v1", "hi-start-proof-v1", "voice-notes-v1"];
 /**
  * Append-only. `client_outdated` (the caller's `x-client-version` is below the
  * owner's minimum, or unreadable) is answered by the server-side check of
  * client routes and AI calls (H-2b/H-3), never by the bootstrap; it is listed
  * from the first vendored SDK on so a client never meets it as unknown.
+ *
+ * `lane_off` (R20 HF-4б) is the other way round: the bootstrap's alone. The
+ * feature runs on a lane of the hub with switches of its own, and that lane
+ * does not serve the page right now (for `voice`, the voice-notes lane: its
+ * live switch, its synthesis provider, its page allowlist and the page's voice
+ * profile). A call is answered by the lane's own admission and its own codes
+ * (`voice_disabled`, `voice_not_allowlisted`, ...), never by this reason.
  */
-export declare const CLIENT_FEATURE_UNAVAILABLE_REASONS: readonly ["disabled", "flag_off", "platform_unsupported", "binding_missing", "hub_not_ready", "not_granted", "client_outdated"];
+export declare const CLIENT_FEATURE_UNAVAILABLE_REASONS: readonly ["disabled", "flag_off", "platform_unsupported", "binding_missing", "hub_not_ready", "not_granted", "client_outdated", "lane_off"];
 /** The platforms and roles this hub knows today (`pages[].platform`, `identity.role`). */
 export declare const CLIENT_KNOWN_PLATFORMS: readonly ["fansly", "onlyfans"];
 export declare const CLIENT_KNOWN_ROLES: readonly ["owner", "team_lead", "chatter"];

@@ -770,8 +770,8 @@ export declare const syncPageWorkQuerySchema: z.ZodObject<{
     state: z.ZodOptional<z.ZodEnum<{
         cancelled: "cancelled";
         running: "running";
-        quarantined: "quarantined";
         open: "open";
+        quarantined: "quarantined";
         done: "done";
         superseded: "superseded";
     }>>;
@@ -798,8 +798,8 @@ export declare const syncPageWorkResponseSchema: z.ZodObject<{
         state: z.ZodEnum<{
             cancelled: "cancelled";
             running: "running";
-            quarantined: "quarantined";
             open: "open";
+            quarantined: "quarantined";
             done: "done";
             superseded: "superseded";
         }>;
@@ -869,8 +869,8 @@ export declare const syncPageWorkGetResponseSchema: z.ZodObject<{
         state: z.ZodEnum<{
             cancelled: "cancelled";
             running: "running";
-            quarantined: "quarantined";
             open: "open";
+            quarantined: "quarantined";
             done: "done";
             superseded: "superseded";
         }>;
@@ -1165,8 +1165,8 @@ export declare const syncRouteSchemas: {
             state: z.ZodOptional<z.ZodEnum<{
                 cancelled: "cancelled";
                 running: "running";
-                quarantined: "quarantined";
                 open: "open";
+                quarantined: "quarantined";
                 done: "done";
                 superseded: "superseded";
             }>>;
@@ -1194,8 +1194,8 @@ export declare const syncRouteSchemas: {
                     state: z.ZodEnum<{
                         cancelled: "cancelled";
                         running: "running";
-                        quarantined: "quarantined";
                         open: "open";
+                        quarantined: "quarantined";
                         done: "done";
                         superseded: "superseded";
                     }>;
@@ -1302,8 +1302,8 @@ export declare const syncRouteSchemas: {
                     state: z.ZodEnum<{
                         cancelled: "cancelled";
                         running: "running";
-                        quarantined: "quarantined";
                         open: "open";
+                        quarantined: "quarantined";
                         done: "done";
                         superseded: "superseded";
                     }>;

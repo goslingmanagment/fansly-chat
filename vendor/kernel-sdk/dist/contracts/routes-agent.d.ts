@@ -860,6 +860,7 @@ export declare const agentFieldStateSchema: z.ZodObject<{
 }, z.core.$strict>;
 export declare const agentIngestPathEnum: z.ZodEnum<{
     unknown: "unknown";
+    operator: "operator";
     fansly_pull: "fansly_pull";
     ofapi_webhook: "ofapi_webhook";
     ofapi_rest_pull: "ofapi_rest_pull";
@@ -867,7 +868,6 @@ export declare const agentIngestPathEnum: z.ZodEnum<{
     desktop_harvest: "desktop_harvest";
     readthrough: "readthrough";
     command_result: "command_result";
-    operator: "operator";
     export_import: "export_import";
     legacy_seed: "legacy_seed";
     hot_projection: "hot_projection";
@@ -875,6 +875,7 @@ export declare const agentIngestPathEnum: z.ZodEnum<{
 export declare const agentProvenanceSchema: z.ZodObject<{
     ingestPaths: z.ZodArray<z.ZodEnum<{
         unknown: "unknown";
+        operator: "operator";
         fansly_pull: "fansly_pull";
         ofapi_webhook: "ofapi_webhook";
         ofapi_rest_pull: "ofapi_rest_pull";
@@ -882,7 +883,6 @@ export declare const agentProvenanceSchema: z.ZodObject<{
         desktop_harvest: "desktop_harvest";
         readthrough: "readthrough";
         command_result: "command_result";
-        operator: "operator";
         export_import: "export_import";
         legacy_seed: "legacy_seed";
         hot_projection: "hot_projection";
@@ -1908,9 +1908,9 @@ export declare const agentSyncStreamEnum: z.ZodEnum<{
 }>;
 /** = CHECK `observations_source_check`, exactly seven. */
 export declare const agentObservationSourceEnum: z.ZodEnum<{
+    operator: "operator";
     readthrough: "readthrough";
     command_result: "command_result";
-    operator: "operator";
     webhook: "webhook";
     pull: "pull";
     client_capture: "client_capture";
@@ -3347,6 +3347,7 @@ export declare const agentResolveCandidateSchema: z.ZodObject<{
     provenance: z.ZodObject<{
         ingestPaths: z.ZodArray<z.ZodEnum<{
             unknown: "unknown";
+            operator: "operator";
             fansly_pull: "fansly_pull";
             ofapi_webhook: "ofapi_webhook";
             ofapi_rest_pull: "ofapi_rest_pull";
@@ -3354,7 +3355,6 @@ export declare const agentResolveCandidateSchema: z.ZodObject<{
             desktop_harvest: "desktop_harvest";
             readthrough: "readthrough";
             command_result: "command_result";
-            operator: "operator";
             export_import: "export_import";
             legacy_seed: "legacy_seed";
             hot_projection: "hot_projection";
@@ -3585,6 +3585,7 @@ export declare const agentResolveResponseSchema: z.ZodObject<{
             provenance: z.ZodObject<{
                 ingestPaths: z.ZodArray<z.ZodEnum<{
                     unknown: "unknown";
+                    operator: "operator";
                     fansly_pull: "fansly_pull";
                     ofapi_webhook: "ofapi_webhook";
                     ofapi_rest_pull: "ofapi_rest_pull";
@@ -3592,7 +3593,6 @@ export declare const agentResolveResponseSchema: z.ZodObject<{
                     desktop_harvest: "desktop_harvest";
                     readthrough: "readthrough";
                     command_result: "command_result";
-                    operator: "operator";
                     export_import: "export_import";
                     legacy_seed: "legacy_seed";
                     hot_projection: "hot_projection";
@@ -4553,6 +4553,7 @@ export declare const agentPersonResponseSchema: z.ZodObject<{
         provenance: z.ZodObject<{
             ingestPaths: z.ZodArray<z.ZodEnum<{
                 unknown: "unknown";
+                operator: "operator";
                 fansly_pull: "fansly_pull";
                 ofapi_webhook: "ofapi_webhook";
                 ofapi_rest_pull: "ofapi_rest_pull";
@@ -4560,7 +4561,6 @@ export declare const agentPersonResponseSchema: z.ZodObject<{
                 desktop_harvest: "desktop_harvest";
                 readthrough: "readthrough";
                 command_result: "command_result";
-                operator: "operator";
                 export_import: "export_import";
                 legacy_seed: "legacy_seed";
                 hot_projection: "hot_projection";
@@ -5044,6 +5044,7 @@ export declare const agentPersonResponseSchema: z.ZodObject<{
     provenance: z.ZodObject<{
         ingestPaths: z.ZodArray<z.ZodEnum<{
             unknown: "unknown";
+            operator: "operator";
             fansly_pull: "fansly_pull";
             ofapi_webhook: "ofapi_webhook";
             ofapi_rest_pull: "ofapi_rest_pull";
@@ -5051,7 +5052,6 @@ export declare const agentPersonResponseSchema: z.ZodObject<{
             desktop_harvest: "desktop_harvest";
             readthrough: "readthrough";
             command_result: "command_result";
-            operator: "operator";
             export_import: "export_import";
             legacy_seed: "legacy_seed";
             hot_projection: "hot_projection";
@@ -6008,6 +6008,7 @@ export declare const agentTimelineItemSchema: z.ZodObject<{
     provenance: z.ZodObject<{
         ingestPaths: z.ZodArray<z.ZodEnum<{
             unknown: "unknown";
+            operator: "operator";
             fansly_pull: "fansly_pull";
             ofapi_webhook: "ofapi_webhook";
             ofapi_rest_pull: "ofapi_rest_pull";
@@ -6015,7 +6016,6 @@ export declare const agentTimelineItemSchema: z.ZodObject<{
             desktop_harvest: "desktop_harvest";
             readthrough: "readthrough";
             command_result: "command_result";
-            operator: "operator";
             export_import: "export_import";
             legacy_seed: "legacy_seed";
             hot_projection: "hot_projection";
@@ -6298,6 +6298,7 @@ export declare const agentPersonTimelineResponseSchema: z.ZodObject<{
         provenance: z.ZodObject<{
             ingestPaths: z.ZodArray<z.ZodEnum<{
                 unknown: "unknown";
+                operator: "operator";
                 fansly_pull: "fansly_pull";
                 ofapi_webhook: "ofapi_webhook";
                 ofapi_rest_pull: "ofapi_rest_pull";
@@ -6305,7 +6306,6 @@ export declare const agentPersonTimelineResponseSchema: z.ZodObject<{
                 desktop_harvest: "desktop_harvest";
                 readthrough: "readthrough";
                 command_result: "command_result";
-                operator: "operator";
                 export_import: "export_import";
                 legacy_seed: "legacy_seed";
                 hot_projection: "hot_projection";
@@ -7265,6 +7265,7 @@ declare function agentThreadSummarySchema(): z.ZodObject<{
     provenance: z.ZodObject<{
         ingestPaths: z.ZodArray<z.ZodEnum<{
             unknown: "unknown";
+            operator: "operator";
             fansly_pull: "fansly_pull";
             ofapi_webhook: "ofapi_webhook";
             ofapi_rest_pull: "ofapi_rest_pull";
@@ -7272,7 +7273,6 @@ declare function agentThreadSummarySchema(): z.ZodObject<{
             desktop_harvest: "desktop_harvest";
             readthrough: "readthrough";
             command_result: "command_result";
-            operator: "operator";
             export_import: "export_import";
             legacy_seed: "legacy_seed";
             hot_projection: "hot_projection";
@@ -7570,6 +7570,7 @@ export declare const agentThreadsResponseSchema: z.ZodObject<{
         provenance: z.ZodObject<{
             ingestPaths: z.ZodArray<z.ZodEnum<{
                 unknown: "unknown";
+                operator: "operator";
                 fansly_pull: "fansly_pull";
                 ofapi_webhook: "ofapi_webhook";
                 ofapi_rest_pull: "ofapi_rest_pull";
@@ -7577,7 +7578,6 @@ export declare const agentThreadsResponseSchema: z.ZodObject<{
                 desktop_harvest: "desktop_harvest";
                 readthrough: "readthrough";
                 command_result: "command_result";
-                operator: "operator";
                 export_import: "export_import";
                 legacy_seed: "legacy_seed";
                 hot_projection: "hot_projection";
@@ -8624,6 +8624,7 @@ export declare const agentMessageSchema: z.ZodObject<{
     provenance: z.ZodObject<{
         ingestPaths: z.ZodArray<z.ZodEnum<{
             unknown: "unknown";
+            operator: "operator";
             fansly_pull: "fansly_pull";
             ofapi_webhook: "ofapi_webhook";
             ofapi_rest_pull: "ofapi_rest_pull";
@@ -8631,7 +8632,6 @@ export declare const agentMessageSchema: z.ZodObject<{
             desktop_harvest: "desktop_harvest";
             readthrough: "readthrough";
             command_result: "command_result";
-            operator: "operator";
             export_import: "export_import";
             legacy_seed: "legacy_seed";
             hot_projection: "hot_projection";
@@ -8958,6 +8958,7 @@ export declare const agentThreadMessagesResponseSchema: z.ZodObject<{
         provenance: z.ZodObject<{
             ingestPaths: z.ZodArray<z.ZodEnum<{
                 unknown: "unknown";
+                operator: "operator";
                 fansly_pull: "fansly_pull";
                 ofapi_webhook: "ofapi_webhook";
                 ofapi_rest_pull: "ofapi_rest_pull";
@@ -8965,7 +8966,6 @@ export declare const agentThreadMessagesResponseSchema: z.ZodObject<{
                 desktop_harvest: "desktop_harvest";
                 readthrough: "readthrough";
                 command_result: "command_result";
-                operator: "operator";
                 export_import: "export_import";
                 legacy_seed: "legacy_seed";
                 hot_projection: "hot_projection";
@@ -10509,6 +10509,7 @@ export declare const agentSearchLocatorSchema: z.ZodObject<{
     provenance: z.ZodObject<{
         ingestPaths: z.ZodArray<z.ZodEnum<{
             unknown: "unknown";
+            operator: "operator";
             fansly_pull: "fansly_pull";
             ofapi_webhook: "ofapi_webhook";
             ofapi_rest_pull: "ofapi_rest_pull";
@@ -10516,7 +10517,6 @@ export declare const agentSearchLocatorSchema: z.ZodObject<{
             desktop_harvest: "desktop_harvest";
             readthrough: "readthrough";
             command_result: "command_result";
-            operator: "operator";
             export_import: "export_import";
             legacy_seed: "legacy_seed";
             hot_projection: "hot_projection";
@@ -10740,6 +10740,7 @@ export declare const agentSearchMessagesResponseSchema: z.ZodObject<{
         provenance: z.ZodObject<{
             ingestPaths: z.ZodArray<z.ZodEnum<{
                 unknown: "unknown";
+                operator: "operator";
                 fansly_pull: "fansly_pull";
                 ofapi_webhook: "ofapi_webhook";
                 ofapi_rest_pull: "ofapi_rest_pull";
@@ -10747,7 +10748,6 @@ export declare const agentSearchMessagesResponseSchema: z.ZodObject<{
                 desktop_harvest: "desktop_harvest";
                 readthrough: "readthrough";
                 command_result: "command_result";
-                operator: "operator";
                 export_import: "export_import";
                 legacy_seed: "legacy_seed";
                 hot_projection: "hot_projection";
@@ -12940,9 +12940,9 @@ export declare const agentObservationsQuerySchema: z.ZodObject<{
     }>>;
     pageLabel: z.ZodOptional<z.ZodString>;
     source: z.ZodOptional<z.ZodEnum<{
+        operator: "operator";
         readthrough: "readthrough";
         command_result: "command_result";
-        operator: "operator";
         webhook: "webhook";
         pull: "pull";
         client_capture: "client_capture";
@@ -12966,9 +12966,9 @@ export declare const agentObservationEnvelopeSchema: z.ZodObject<{
     receivedAt: z.ZodString;
     observedAt: z.ZodNullable<z.ZodString>;
     source: z.ZodEnum<{
+        operator: "operator";
         readthrough: "readthrough";
         command_result: "command_result";
-        operator: "operator";
         webhook: "webhook";
         pull: "pull";
         client_capture: "client_capture";
@@ -12999,9 +12999,9 @@ export declare const agentObservationsResponseSchema: z.ZodObject<{
         receivedAt: z.ZodString;
         observedAt: z.ZodNullable<z.ZodString>;
         source: z.ZodEnum<{
+            operator: "operator";
             readthrough: "readthrough";
             command_result: "command_result";
-            operator: "operator";
             webhook: "webhook";
             pull: "pull";
             client_capture: "client_capture";
@@ -13589,9 +13589,9 @@ export declare const agentObservationPayloadResponseSchema: z.ZodObject<{
     observationRef: z.ZodNumber;
     kind: z.ZodString;
     source: z.ZodEnum<{
+        operator: "operator";
         readthrough: "readthrough";
         command_result: "command_result";
-        operator: "operator";
         webhook: "webhook";
         pull: "pull";
         client_capture: "client_capture";
@@ -14574,6 +14574,7 @@ export declare const agentDatasetRowSchema: z.ZodObject<{
     provenance: z.ZodObject<{
         ingestPaths: z.ZodArray<z.ZodEnum<{
             unknown: "unknown";
+            operator: "operator";
             fansly_pull: "fansly_pull";
             ofapi_webhook: "ofapi_webhook";
             ofapi_rest_pull: "ofapi_rest_pull";
@@ -14581,7 +14582,6 @@ export declare const agentDatasetRowSchema: z.ZodObject<{
             desktop_harvest: "desktop_harvest";
             readthrough: "readthrough";
             command_result: "command_result";
-            operator: "operator";
             export_import: "export_import";
             legacy_seed: "legacy_seed";
             hot_projection: "hot_projection";
@@ -14881,6 +14881,7 @@ export declare const agentDatasetQueryResponseSchema: z.ZodObject<{
         provenance: z.ZodObject<{
             ingestPaths: z.ZodArray<z.ZodEnum<{
                 unknown: "unknown";
+                operator: "operator";
                 fansly_pull: "fansly_pull";
                 ofapi_webhook: "ofapi_webhook";
                 ofapi_rest_pull: "ofapi_rest_pull";
@@ -14888,7 +14889,6 @@ export declare const agentDatasetQueryResponseSchema: z.ZodObject<{
                 desktop_harvest: "desktop_harvest";
                 readthrough: "readthrough";
                 command_result: "command_result";
-                operator: "operator";
                 export_import: "export_import";
                 legacy_seed: "legacy_seed";
                 hot_projection: "hot_projection";
@@ -21489,8 +21489,8 @@ export declare const agentSyncWorkKindEnum: z.ZodEnum<{
 export declare const agentSyncWorkStateEnum: z.ZodEnum<{
     cancelled: "cancelled";
     running: "running";
-    quarantined: "quarantined";
     open: "open";
+    quarantined: "quarantined";
     done: "done";
     superseded: "superseded";
 }>;
@@ -21712,8 +21712,8 @@ export declare const agentSyncWorkSchema: z.ZodObject<{
     state: z.ZodEnum<{
         cancelled: "cancelled";
         running: "running";
-        quarantined: "quarantined";
         open: "open";
+        quarantined: "quarantined";
         done: "done";
         superseded: "superseded";
     }>;
@@ -22520,8 +22520,8 @@ export declare const agentSyncWhyResponseSchema: z.ZodObject<{
         state: z.ZodEnum<{
             cancelled: "cancelled";
             running: "running";
-            quarantined: "quarantined";
             open: "open";
+            quarantined: "quarantined";
             done: "done";
             superseded: "superseded";
         }>;
@@ -24451,6 +24451,7 @@ export declare const agentRouteSchemas: {
                         provenance: z.ZodObject<{
                             ingestPaths: z.ZodArray<z.ZodEnum<{
                                 unknown: "unknown";
+                                operator: "operator";
                                 fansly_pull: "fansly_pull";
                                 ofapi_webhook: "ofapi_webhook";
                                 ofapi_rest_pull: "ofapi_rest_pull";
@@ -24458,7 +24459,6 @@ export declare const agentRouteSchemas: {
                                 desktop_harvest: "desktop_harvest";
                                 readthrough: "readthrough";
                                 command_result: "command_result";
-                                operator: "operator";
                                 export_import: "export_import";
                                 legacy_seed: "legacy_seed";
                                 hot_projection: "hot_projection";
@@ -25470,6 +25470,7 @@ export declare const agentRouteSchemas: {
                     provenance: z.ZodObject<{
                         ingestPaths: z.ZodArray<z.ZodEnum<{
                             unknown: "unknown";
+                            operator: "operator";
                             fansly_pull: "fansly_pull";
                             ofapi_webhook: "ofapi_webhook";
                             ofapi_rest_pull: "ofapi_rest_pull";
@@ -25477,7 +25478,6 @@ export declare const agentRouteSchemas: {
                             desktop_harvest: "desktop_harvest";
                             readthrough: "readthrough";
                             command_result: "command_result";
-                            operator: "operator";
                             export_import: "export_import";
                             legacy_seed: "legacy_seed";
                             hot_projection: "hot_projection";
@@ -25961,6 +25961,7 @@ export declare const agentRouteSchemas: {
                 provenance: z.ZodObject<{
                     ingestPaths: z.ZodArray<z.ZodEnum<{
                         unknown: "unknown";
+                        operator: "operator";
                         fansly_pull: "fansly_pull";
                         ofapi_webhook: "ofapi_webhook";
                         ofapi_rest_pull: "ofapi_rest_pull";
@@ -25968,7 +25969,6 @@ export declare const agentRouteSchemas: {
                         desktop_harvest: "desktop_harvest";
                         readthrough: "readthrough";
                         command_result: "command_result";
-                        operator: "operator";
                         export_import: "export_import";
                         legacy_seed: "legacy_seed";
                         hot_projection: "hot_projection";
@@ -26971,6 +26971,7 @@ export declare const agentRouteSchemas: {
                     provenance: z.ZodObject<{
                         ingestPaths: z.ZodArray<z.ZodEnum<{
                             unknown: "unknown";
+                            operator: "operator";
                             fansly_pull: "fansly_pull";
                             ofapi_webhook: "ofapi_webhook";
                             ofapi_rest_pull: "ofapi_rest_pull";
@@ -26978,7 +26979,6 @@ export declare const agentRouteSchemas: {
                             desktop_harvest: "desktop_harvest";
                             readthrough: "readthrough";
                             command_result: "command_result";
-                            operator: "operator";
                             export_import: "export_import";
                             legacy_seed: "legacy_seed";
                             hot_projection: "hot_projection";
@@ -27970,6 +27970,7 @@ export declare const agentRouteSchemas: {
                     provenance: z.ZodObject<{
                         ingestPaths: z.ZodArray<z.ZodEnum<{
                             unknown: "unknown";
+                            operator: "operator";
                             fansly_pull: "fansly_pull";
                             ofapi_webhook: "ofapi_webhook";
                             ofapi_rest_pull: "ofapi_rest_pull";
@@ -27977,7 +27978,6 @@ export declare const agentRouteSchemas: {
                             desktop_harvest: "desktop_harvest";
                             readthrough: "readthrough";
                             command_result: "command_result";
-                            operator: "operator";
                             export_import: "export_import";
                             legacy_seed: "legacy_seed";
                             hot_projection: "hot_projection";
@@ -29087,6 +29087,7 @@ export declare const agentRouteSchemas: {
                     provenance: z.ZodObject<{
                         ingestPaths: z.ZodArray<z.ZodEnum<{
                             unknown: "unknown";
+                            operator: "operator";
                             fansly_pull: "fansly_pull";
                             ofapi_webhook: "ofapi_webhook";
                             ofapi_rest_pull: "ofapi_rest_pull";
@@ -29094,7 +29095,6 @@ export declare const agentRouteSchemas: {
                             desktop_harvest: "desktop_harvest";
                             readthrough: "readthrough";
                             command_result: "command_result";
-                            operator: "operator";
                             export_import: "export_import";
                             legacy_seed: "legacy_seed";
                             hot_projection: "hot_projection";
@@ -30702,6 +30702,7 @@ export declare const agentRouteSchemas: {
                     provenance: z.ZodObject<{
                         ingestPaths: z.ZodArray<z.ZodEnum<{
                             unknown: "unknown";
+                            operator: "operator";
                             fansly_pull: "fansly_pull";
                             ofapi_webhook: "ofapi_webhook";
                             ofapi_rest_pull: "ofapi_rest_pull";
@@ -30709,7 +30710,6 @@ export declare const agentRouteSchemas: {
                             desktop_harvest: "desktop_harvest";
                             readthrough: "readthrough";
                             command_result: "command_result";
-                            operator: "operator";
                             export_import: "export_import";
                             legacy_seed: "legacy_seed";
                             hot_projection: "hot_projection";
@@ -32523,9 +32523,9 @@ export declare const agentRouteSchemas: {
             }>>;
             pageLabel: z.ZodOptional<z.ZodString>;
             source: z.ZodOptional<z.ZodEnum<{
+                operator: "operator";
                 readthrough: "readthrough";
                 command_result: "command_result";
-                operator: "operator";
                 webhook: "webhook";
                 pull: "pull";
                 client_capture: "client_capture";
@@ -32553,9 +32553,9 @@ export declare const agentRouteSchemas: {
                     receivedAt: z.ZodString;
                     observedAt: z.ZodNullable<z.ZodString>;
                     source: z.ZodEnum<{
+                        operator: "operator";
                         readthrough: "readthrough";
                         command_result: "command_result";
-                        operator: "operator";
                         webhook: "webhook";
                         pull: "pull";
                         client_capture: "client_capture";
@@ -33181,9 +33181,9 @@ export declare const agentRouteSchemas: {
                 observationRef: z.ZodNumber;
                 kind: z.ZodString;
                 source: z.ZodEnum<{
+                    operator: "operator";
                     readthrough: "readthrough";
                     command_result: "command_result";
-                    operator: "operator";
                     webhook: "webhook";
                     pull: "pull";
                     client_capture: "client_capture";
@@ -34252,6 +34252,7 @@ export declare const agentRouteSchemas: {
                     provenance: z.ZodObject<{
                         ingestPaths: z.ZodArray<z.ZodEnum<{
                             unknown: "unknown";
+                            operator: "operator";
                             fansly_pull: "fansly_pull";
                             ofapi_webhook: "ofapi_webhook";
                             ofapi_rest_pull: "ofapi_rest_pull";
@@ -34259,7 +34260,6 @@ export declare const agentRouteSchemas: {
                             desktop_harvest: "desktop_harvest";
                             readthrough: "readthrough";
                             command_result: "command_result";
-                            operator: "operator";
                             export_import: "export_import";
                             legacy_seed: "legacy_seed";
                             hot_projection: "hot_projection";
@@ -41713,8 +41713,8 @@ export declare const agentRouteSchemas: {
                     state: z.ZodEnum<{
                         cancelled: "cancelled";
                         running: "running";
-                        quarantined: "quarantined";
                         open: "open";
+                        quarantined: "quarantined";
                         done: "done";
                         superseded: "superseded";
                     }>;
