@@ -293,6 +293,23 @@ describe('FanNotesController (E157)', () => {
     expect(q('.chatgoose-notes-inline-error')?.textContent).toContain('«Обновить»');
   });
 
+  it('names a failed save in one sentence with the shape of Fansly\'s answer (E170)', async () => {
+    const error = { ...createUserError('fansly_server_error'), serverDetail: 'HTTP 502 · text/html' };
+    const saveNote = vi.fn(async () => ({ ok: false as const, error }));
+    const { controller: notes } = create({ saveNote } as never);
+    notes.sync();
+    notes.toggle();
+    await flush();
+
+    buttonNamed('Изменить').click();
+    buttonNamed('Сохранить').click();
+    await flush();
+
+    const said = q('.chatgoose-notes-inline-error')?.textContent ?? '';
+    expect(said).toContain('Не сохранено: CG-FAN-03: Fansly вернул ошибку (ответ Fansly: HTTP 502 · text/html). Если не уверены');
+    expect(said).not.toContain('..');
+  });
+
   it('keeps a half-written note per fan across a chat switch', async () => {
     const { controller: notes } = create();
     notes.sync();

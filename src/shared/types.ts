@@ -729,6 +729,9 @@ export interface ChatGooseErrorDetails {
   refused?: boolean;
   /** Fansly's own error code, when the refused body carried one. */
   code?: string;
+  /** What a note write's answer was, never what it said: the HTTP status,
+   * `success` and the keys of `response` with their types (E170). */
+  shape?: string;
 }
 
 export type UserErrorKey =

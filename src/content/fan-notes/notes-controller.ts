@@ -727,12 +727,15 @@ export class FanNotesController {
     } else {
       const error = errorOf(response?.ok === false ? response : null, thrown);
       draft.saving = false;
+      // The registry's text ends with its own period. The answer's shape
+      // (E170) is what to compare when a write that landed reads as failed.
+      const said = `${formatUserFacingError(error).replace(/\.$/, '')}${error.serverDetail ? ` (ответ Fansly: ${error.serverDetail})` : ''}`;
       if (draft.noteId === null) {
         // The create may have landed; another one now could make a duplicate.
         draft.blocked = true;
-        draft.error = `Не сохранено: ${formatUserFacingError(error)}. Заметка могла всё же записаться — нажмите ↻ «Обновить» вверху: если она появится в списке, черновик можно отменить.`;
+        draft.error = `Не сохранено: ${said}. Заметка могла всё же записаться — нажмите ↻ «Обновить» вверху: если она появится в списке, черновик можно отменить.`;
       } else {
-        draft.error = `Не сохранено: ${formatUserFacingError(error)}. Если не уверены, сохранилось ли, нажмите ↻ «Обновить» вверху — черновик останется.`;
+        draft.error = `Не сохранено: ${said}. Если не уверены, сохранилось ли, нажмите ↻ «Обновить» вверху — черновик останется.`;
       }
     }
     this.render();

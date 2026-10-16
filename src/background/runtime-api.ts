@@ -333,7 +333,13 @@ function fanslyActionError(error: unknown): UserFacingError {
       ? createUserError('network_error')
       : createUserError('fansly_server_error');
   }
-  return toUserError(error);
+  // The panel shows a note action's detail, so it is the answer's shape or
+  // nothing: never a body's text (E170).
+  const user = { ...toUserError(error) };
+  const shape = error instanceof ChatGooseError ? error.details?.shape : undefined;
+  if (shape) user.serverDetail = shape;
+  else delete user.serverDetail;
+  return user;
 }
 
 const FANSLY_TAB_URL_PATTERN = '*://fansly.com/*';
