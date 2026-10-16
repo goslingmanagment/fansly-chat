@@ -159,6 +159,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E167 | 2026-10-14 | Release 2.12.0 = E166 (the notes panel as fields) with Core's half, hub #601 (one fact in one field, «Характеристика» is who the fan is, purchases in «Медиа» only). The owner ordered the chain («давай делай») and, asked about the scope, chose to deploy that change alone: production's commit `bc0f6dbc` plus #601 as the side commit `c2b1843c5eaa`, because Core `main` had ten commits of other work, a migration and a new contract hash that nobody on this release had checked. Contract `663d132f…` unchanged, no SDK re-vendor. Version by the 2.9.0 rule (a feature) |
 | E168 | 2026-10-15 | The transcript every generation sends is in UTC (`[HH:MM]` and `--- YYYY-MM-DD ---` day lines), never the chatter's clock; day lines for every kernel-bound feature, not the notes fill alone (E164). Matches the hub's own transcript (hub #622). Every request says so (`clientContext.transcriptClock: 'utc'`, the owner's choice), so Core's `Now:` line calls it UTC; SDK vendored from Core `5b7eb095` for development. Not released |
 | E169 | 2026-10-16 | Release 2.12.1 = E168 (the transcript in UTC with day lines, `transcriptClock: 'utc'`). Core's half (hub #622, #628) reached production with hub #643 (`305f4e18`, deployed 2026-10-15 23:17 UTC, contract `d4e21741…`); SDK re-vendored from that commit, replacing the development vendor of `5b7eb095`. A patch: the AI reads the chat's time right, nothing new for the chatter (E120) |
+| E170 | 2026-10-17 | A note edit is confirmed the way Fansly's own modal confirms it: `success: true`, with whatever the answer carries (an id, a type or a fan it names must be this note's; its title and text win, else the ones sent). E157 asked for the whole note back, so an edit that landed in Fansly read «Не сохранено: CG-FAN-03» (ari-1, 2026-10-16, proved by the hub's next read of the fan). A note write's failure now shows its answer's shape (status, `success`, the keys of `response` with their types, never a text) after the error; the double period in that line is gone. A create stays strict. Not released |
 
 ## Entries
 
@@ -6097,3 +6098,47 @@ UTC, with a day line before each UTC day's first message.
   transcript and gateway tests in UTC, +3, +5, −7, +14 and −11. In
   Pacific/Kiritimati (UTC+14) three `tests/fan-registration.test.ts` tests
   fail, on `main` (`d4c174f`) too. Not checked on a live Fansly page.
+
+**E170 (2026-10-17).** A note edit is confirmed the way Fansly's own notes
+modal confirms it.
+
+- What happened: a chatter on ari-1 saved the questionnaire of a fan
+  (2026-10-16) and read «Не сохранено: CG-FAN-03: Fansly вернул ошибку..».
+  The hub read the fan's old 150-character note at 20:37 UTC; its next read
+  (`/account?ids=`, 20:59 UTC) holds exactly the draft from the screenshot:
+  the edit landed. Five more notes the hub saw before 2026-10-13 now carry
+  the fill's month marks, so earlier edits of existing notes landed too.
+- Why: E157 took an edit's answer to be the whole note and required its id
+  and type (`readWrittenNote`), and `postOnce` refused `success: true`
+  without a `response` for every path but `/notes/delete`. Neither was
+  checked on a live session (E157, E158 say so). Fansly's modal
+  (`app-notes-edit-modal`, `main.1c19146fbffb67a3.js`) takes `success` as
+  the confirmation and reads only `title` and `note` from the answer. The
+  exact answer Fansly sends was not captured: ChatGoose traces no note write.
+- Change (`src/background/fansly-client.ts`): `editAccountNote` accepts
+  `success: true` with any `response`, or none. An id, a contentType or a
+  contentId the answer does carry must be this note's (a string id equal to
+  ours; anything else present is a mismatch, as before); its title and text
+  are taken when they are strings, otherwise the ones sent; the note keeps
+  its own id, type and fan. The custom name rides the same edit. A create
+  stays strict: only its answer gives the new note's id.
+- Diagnosis next time: a failed note write (`/notes`, `/notes/edit`,
+  `/notes/delete`) carries `details.shape`, what the answer was and never
+  what it said: `HTTP <status>` and the content type for a refused status;
+  `success` and `response` as JSON types, an object as its keys with their
+  types, one level deep, for a refusal inside 2xx or an answer that is not
+  this note. `fanslyActionError` puts it in `serverDetail` and drops any
+  other detail, so a body's text never reaches the panel; the panel adds it
+  after the error: «Не сохранено: CG-FAN-03: Fansly вернул ошибку (ответ
+  Fansly: success:true · response:{title:string,note:string}). …». Note
+  writes carry no trace (only follower runs keep one), so the panel line is
+  where the owner sees it, on a screenshot.
+- The double period: the registry's message ends with its own period, and
+  the panel added another.
+- Checked: `tests/fansly-client-notes.test.ts` (an edit answered with the
+  whole note, with title and text only, with `success` alone, `response:
+  null` and `response: true`; another id, fan or type refused; the shape
+  never holds a text; a create without a note refused),
+  `tests/runtime-api.test.ts`, `tests/fan-notes-controller.test.ts`, `tsc`.
+  Not checked on a live Fansly page. Not released: it ships with the next
+  release.

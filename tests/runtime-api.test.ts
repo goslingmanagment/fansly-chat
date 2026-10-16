@@ -3350,6 +3350,14 @@ describe('runtime-api fan notes (E157)', () => {
     const response = await send({ type: 'saveFanNote', creatorId, fanAccountId, noteId: null, title: '', note: 'x' });
 
     expect(response).toMatchObject({ ok: false, error: { key: 'fansly_server_error' } });
+
+    // E170: the panel's detail is the answer's shape, never a body's text.
+    fanslyClient.editAccountNote.mockRejectedValueOnce(new ChatGooseError('fansly_server_error', undefined, { status: 200, shape: 'success:true · response:{title:string}' }));
+    expect(await send({ type: 'saveFanNote', creatorId, fanAccountId, noteId: '900000000000000001', title: '', note: 'x' }))
+      .toMatchObject({ ok: false, error: { key: 'fansly_server_error', serverDetail: 'success:true · response:{title:string}' } });
+    fanslyClient.editAccountNote.mockRejectedValueOnce(new ChatGooseError('fansly_server_error', undefined, { status: 500, responseSnippet: 'a body' }));
+    const snippet = await send({ type: 'saveFanNote', creatorId, fanAccountId, noteId: '900000000000000001', title: '', note: 'x' }) as { error: object };
+    expect(snippet.error).not.toHaveProperty('serverDetail');
   });
 
   it('remembers the chosen view in settings', async () => {

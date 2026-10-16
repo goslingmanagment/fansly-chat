@@ -135,6 +135,23 @@ function bodyShape(response: Response, snippet: string): Record<string, string |
   };
 }
 
+/** A value's JSON type, an object as its keys with their types, one level
+ * deep. A boolean is its value; a string or a number never is, so a note's
+ * text never reaches a diagnostic (E170). */
+function answerShape(value: unknown): string {
+  if (value === null) return 'null';
+  if (typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) return `array(${value.length})`;
+  if (typeof value !== 'object') return typeof value;
+  const entries = Object.entries(value as Record<string, unknown>);
+  const keys = entries.slice(0, 12).map(([key, field]) => {
+    const name = key.replace(/[^\w-]/g, '').slice(0, 30) || '?';
+    const type = field === null ? 'null' : Array.isArray(field) ? 'array' : typeof field;
+    return `${name}:${type}`;
+  });
+  return `{${keys.join(',')}${entries.length > keys.length ? ',…' : ''}}`;
+}
+
 async function readResponseSnippet(response: Response): Promise<string> {
   try {
     return (await response.text()).slice(0, 400);
@@ -663,6 +680,8 @@ export class FanslyClient {
     const check = (path === 'group' || path === 'message' ? session.routeChecks[path] : undefined) ?? session.latestCheck;
     if (check) headers.set('fansly-client-check', check);
     const requestUrl = withNgswBypass(new URL(`https://apiv3.fansly.com/api/v1/${path}`));
+    // A note write's failure carries its answer's shape to the panel (E170).
+    const notePath = path === 'notes' || path === 'notes/edit' || path === 'notes/delete';
     // Chat resolution is paced like a read, but remains a single POST attempt.
     // Message dispatch never waits here after the Hub has granted custody.
     const creatorId = session.resolvedAccountId ?? session.accountId;
@@ -703,15 +722,26 @@ export class FanslyClient {
         // ambiguous one so send custody keeps treating it as unconfirmed.
         const shape = bodyShape(response, await readResponseSnippet(response));
         attemptTrace?.event('http.error-body', shape);
-        throw new ChatGooseError('fansly_server_error', undefined, { status: response.status, ...(typeof shape.code === 'string' ? { code: shape.code } : {}) });
+        throw new ChatGooseError('fansly_server_error', undefined, {
+          status: response.status,
+          ...(typeof shape.code === 'string' ? { code: shape.code } : {}),
+          ...(notePath ? { shape: `HTTP ${response.status}${shape.contentType ? ` · ${shape.contentType}` : ''}${shape.code ? ` · code ${shape.code}` : ''}` } : {}),
+        });
       }
       const envelope = await response.json() as { success?: boolean; response?: T; error?: unknown };
-      // A delete has nothing to hand back; `success` is its whole answer.
-      if (envelope.success !== true || (!envelope.response && path !== 'notes/delete')) {
+      // A delete has nothing to hand back; `success` is its whole answer. So
+      // is an edit's, as Fansly's own modal reads it (E170): the caller checks
+      // whatever the answer does carry.
+      if (envelope.success !== true || (!envelope.response && path !== 'notes/delete' && path !== 'notes/edit')) {
         const code = (envelope.error as { code?: unknown } | null | undefined)?.code;
         const known = typeof code === 'number' || typeof code === 'string' ? String(code).slice(0, 40) : undefined;
         attemptTrace?.event('http.refused', { status: response.status, code: known ?? null });
-        throw new ChatGooseError('fansly_server_error', undefined, { status: response.status, refused: true, ...(known ? { code: known } : {}) });
+        throw new ChatGooseError('fansly_server_error', undefined, {
+          status: response.status,
+          refused: true,
+          ...(known ? { code: known } : {}),
+          ...(notePath ? { shape: `HTTP ${response.status} · success:${answerShape(envelope.success)} · response:${answerShape(envelope.response)}${known ? ` · code ${known}` : ''}` } : {}),
+        });
       }
       attemptTrace?.end({ status: response.status, outcome: 'success' });
       return envelope.response as T;
@@ -748,9 +778,25 @@ export class FanslyClient {
     return this.readWrittenNote(created, fanAccountId, contentType);
   }
 
+  /** An edit is confirmed the way Fansly's own modal confirms it: `success`
+   * with whatever the answer carries (E170). The modal takes only `title` and
+   * `note` from it, and a live edit that landed was refused here for asking
+   * for more. An id, a type or a fan the answer does name must be this note's. */
   async editAccountNote(note: FanNote, title: string, text: string, session: SessionTemplate, signal: AbortSignal): Promise<FanNote> {
     const edited = await this.postOnce<unknown>('notes/edit', { id: note.id, contentType: note.contentType, contentId: note.contentId, title, note: text }, session, signal);
-    return this.readWrittenNote(edited, note.contentId, note.contentType, note.id);
+    const answer = edited && typeof edited === 'object' && !Array.isArray(edited) ? edited as Record<string, unknown> : {};
+    const names = (key: 'id' | 'contentType' | 'contentId', ours: string | number) =>
+      answer[key] === undefined || answer[key] === null || answer[key] === ours;
+    if (!names('id', note.id) || !names('contentType', note.contentType) || !names('contentId', note.contentId)) {
+      throw new ChatGooseError('fansly_server_error', undefined, { shape: `success:true · response:${answerShape(edited)}` });
+    }
+    return {
+      id: note.id,
+      contentType: note.contentType,
+      contentId: note.contentId,
+      title: typeof answer.title === 'string' ? answer.title : title,
+      note: typeof answer.note === 'string' ? answer.note : text,
+    };
   }
 
   async deleteAccountNote(note: FanNote, session: SessionTemplate, signal: AbortSignal): Promise<void> {
@@ -759,10 +805,10 @@ export class FanslyClient {
 
   /** The note as Fansly stored it. An answer about another note or another
    * fan is not a confirmation of this write. */
-  private readWrittenNote(raw: unknown, fanAccountId: string, contentType: number, expectedId?: string): FanNote {
+  private readWrittenNote(raw: unknown, fanAccountId: string, contentType: number): FanNote {
     const note = readFanNote(raw, fanAccountId);
-    if (!note || note.contentId !== fanAccountId || note.contentType !== contentType || (expectedId !== undefined && note.id !== expectedId)) {
-      throw new ChatGooseError('fansly_server_error');
+    if (!note || note.contentId !== fanAccountId || note.contentType !== contentType) {
+      throw new ChatGooseError('fansly_server_error', undefined, { shape: `success:true · response:${answerShape(raw)}` });
     }
     return note;
   }
