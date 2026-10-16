@@ -75,6 +75,9 @@ export interface FanNote {
   contentId: string;
   title: string;
   note: string;
+  /** When the note was created, ms (E171). Fansly keeps no edit time: an
+   * edited note keeps its creation time. Null when the answer gives none. */
+  createdAtMs: number | null;
 }
 
 export interface FanNotesSnapshot {
@@ -102,7 +105,32 @@ export function readFanNote(raw: unknown, fanAccountId: string): FanNote | null 
     contentId: isFanslyId(entry.contentId) ? entry.contentId : fanAccountId,
     title: typeof entry.title === 'string' ? entry.title : '',
     note: typeof entry.note === 'string' ? entry.note : '',
+    createdAtMs: readNoteTimeMs(entry.createdAt),
   };
+}
+
+/** Fansly serves a note's `createdAt` in seconds (`1790790855`); a value that
+ * already reads as milliseconds is taken as is. */
+export function readNoteTimeMs(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return null;
+  return value < 1e11 ? value * 1000 : value;
+}
+
+/** «16.10», or «16.10.2025» outside the current year, in the chatter's time. */
+export function formatNoteDate(ms: number, now = Date.now()): string {
+  const date = new Date(ms);
+  const day = `${pad2(date.getDate())}.${pad2(date.getMonth() + 1)}`;
+  return date.getFullYear() === new Date(now).getFullYear() ? day : `${day}.${date.getFullYear()}`;
+}
+
+/** The full creation time for the hover: «Создана 16.10.2026 в 19:56». */
+export function formatNoteCreatedTitle(ms: number): string {
+  const date = new Date(ms);
+  return `Создана ${pad2(date.getDate())}.${pad2(date.getMonth() + 1)}.${date.getFullYear()} в ${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+}
+
+function pad2(value: number): string {
+  return String(value).padStart(2, '0');
 }
 
 /** The regular notes in Fansly's own order (the modal lists `account.notes`

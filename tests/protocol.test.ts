@@ -171,6 +171,10 @@ describe('protocol boundary guards', () => {
     expect(getRuntimeRequestType({ type: 'saveFanNote', creatorId, fanAccountId, noteId: null, title: '', note: '💰'.repeat(50_000) })).toBe('saveFanNote');
     expect(getRuntimeRequestType({ type: 'deleteFanNote', creatorId, fanAccountId, note: stored })).toBe('deleteFanNote');
     expect(getRuntimeRequestType({ type: 'deleteFanNote', creatorId, fanAccountId, note: { ...stored, id: undefined } })).toBeNull();
+    // The panel's creation time (E171) rides along: a number or null, nothing else.
+    expect(getRuntimeRequestType({ type: 'deleteFanNote', creatorId, fanAccountId, note: { ...stored, createdAtMs: 1790790855000 } })).toBe('deleteFanNote');
+    expect(getRuntimeRequestType({ type: 'deleteFanNote', creatorId, fanAccountId, note: { ...stored, createdAtMs: null } })).toBe('deleteFanNote');
+    expect(getRuntimeRequestType({ type: 'deleteFanNote', creatorId, fanAccountId, note: { ...stored, createdAtMs: '1790790855' } })).toBeNull();
     expect(getRuntimeRequestType({ type: 'saveFanCustomName', creatorId, fanAccountId, current: null, name: 'Richard' })).toBe('saveFanCustomName');
     expect(getRuntimeRequestType({ type: 'saveFanCustomName', creatorId, fanAccountId, current: { ...stored, contentType: 12002 }, name: '' })).toBe('saveFanCustomName');
     expect(getRuntimeRequestType({ type: 'saveFanCustomName', creatorId, fanAccountId, current: null, name: 'n'.repeat(1_001) })).toBeNull();

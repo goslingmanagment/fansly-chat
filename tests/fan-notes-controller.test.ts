@@ -54,7 +54,7 @@ function navigate(pathname: string): void {
 }
 
 const note = (id: string, title: string, text: string, fan = FAN_A): FanNote => ({
-  id, contentType: 12000, contentId: fan, title, note: text,
+  id, contentType: 12000, contentId: fan, title, note: text, createdAtMs: null,
 });
 
 function snapshot(fan = FAN_A, notes: FanNote[] = [note('900000000000000001', 'Анкета', 'Имя: Richard', fan)]): FanNotesSnapshot {
@@ -308,6 +308,51 @@ describe('FanNotesController (E157)', () => {
     const said = q('.chatgoose-notes-inline-error')?.textContent ?? '';
     expect(said).toContain('Не сохранено: CG-FAN-03: Fansly вернул ошибку (ответ Fansly: HTTP 502 · text/html). Если не уверены');
     expect(said).not.toContain('..');
+  });
+
+  it('dates every note but the questionnaire by when Fansly created it; an edit keeps the date (E171)', async () => {
+    vi.setSystemTime(new Date(2026, 9, 17, 12, 0));
+    const form = { ...note('900000000000000001', 'Анкета', 'Имя: Richard\nЛокация: US\nВозраст: 24'), createdAtMs: new Date(2026, 8, 30, 18, 0).getTime() };
+    const custom = { ...note('900000000000000005', 'кастом', 'хочет ещё один кастом'), createdAtMs: new Date(2026, 9, 16, 19, 56).getTime() };
+    const old = { ...note('900000000000000006', '', 'денег нет до пятницы'), createdAtMs: new Date(2025, 0, 5, 9, 3).getTime() };
+    const undated = note('900000000000000007', '', 'без даты');
+    const load = vi.fn(async () => ok(snapshot(FAN_A, [form, custom, old, undated])));
+    const { controller: notes } = create({ load } as never);
+    notes.sync();
+    notes.toggle();
+    await flush();
+
+    const cards = () => [...document.querySelectorAll<HTMLElement>('.chatgoose-note')];
+    const dateOf = (card: HTMLElement | undefined) => card?.querySelector<HTMLTimeElement>('.chatgoose-note-date') ?? null;
+    // The questionnaire grows long after it was made; its facts carry months.
+    expect(dateOf(cards()[0])).toBeNull();
+    // After the title, the full time on hover.
+    const head = (card: HTMLElement | undefined) => [...(card?.querySelector('.chatgoose-note-head')?.children ?? [])].map((node) => node.className);
+    expect(head(cards()[1])).toEqual(['chatgoose-note-title', 'chatgoose-note-date', 'chatgoose-note-actions']);
+    expect(dateOf(cards()[1])?.textContent).toBe('16.10');
+    expect(dateOf(cards()[1])?.title).toBe('Создана 16.10.2026 в 19:56');
+    // An untitled note gets the head too: the date where the title would be.
+    expect(dateOf(cards()[2])?.textContent).toBe('05.01.2025');
+    expect(head(cards()[2])).toEqual(['chatgoose-note-date', 'chatgoose-note-actions']);
+    expect(cards()[2]!.querySelector('.chatgoose-note-actions-float')).toBeNull();
+    // A note Fansly gave no time keeps the old look.
+    expect(dateOf(cards()[3])).toBeNull();
+    expect(cards()[3]!.querySelector('.chatgoose-note-actions-float')).not.toBeNull();
+
+    // Fansly keeps no edit time: an edit answered without one stays dated as created.
+    cards()[1]!.querySelector<HTMLButtonElement>('button[aria-label="Изменить"]')!.click();
+    type(q<HTMLTextAreaElement>('.chatgoose-note-textarea')!, 'хочет ещё один кастом, в спортивной одежде');
+    buttonNamed('Сохранить').click();
+    await flush();
+    expect(cards()[1]!.querySelector('.chatgoose-note-text')?.textContent).toBe('хочет ещё один кастом, в спортивной одежде');
+    expect(dateOf(cards()[1])?.textContent).toBe('16.10');
+
+    // A new note Fansly answered without a time is dated now until a reread.
+    buttonNamed('+ Заметка').click();
+    type(q<HTMLTextAreaElement>('.chatgoose-note-textarea')!, 'просил видео на пятницу');
+    buttonNamed('Создать').click();
+    await flush();
+    expect(dateOf(cards()[4])?.textContent).toBe('17.10');
   });
 
   it('keeps a half-written note per fan across a chat switch', async () => {

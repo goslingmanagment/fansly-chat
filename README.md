@@ -105,7 +105,9 @@ from prose when checking what is installed or live; verify the signed update fee
   none during a rate-limit cooldown, kept for the tab's lifetime; writes are
   Fansly's own `POST /notes`, `/notes/edit`, `/notes/delete`, one attempt on an
   explicit save or delete; an edit is confirmed by `success`, as Fansly's own
-  modal confirms it (E170). Chatter-eyes-only: the custom name and free notes
+  modal confirms it (E170). Every free note shows its creation date from
+  Fansly's `createdAt` in its head; Fansly keeps no edit time (E171).
+  Chatter-eyes-only: the custom name and free notes
   never reach a prompt; the questionnaire's labels and values go to Core for
   the fill only (E164) (`src/content/fan-notes/`, `src/shared/fan-notes.ts`).
   «✨ Дополнить из чата» (E159, E164; «✨ Заполнить из чата» until E166) on a
@@ -249,6 +251,14 @@ Important references:
   architecture.
 
 ## Release
+
+Release 2.13.0 (E170, E171, E172) dates every free note in the notes panel
+with Fansly's own creation time, confirms a note edit the way Fansly's modal
+does (an edit that landed no longer reads «Не сохранено: CG-FAN-03»), and
+ships the reasoning sanitizer of #161 (hub #621's rules for drafts). SDK
+re-vendored from the deployed Core (`e936a64e3`, contract `5f7573ea…`);
+additive only, this client calls none of the new routes. No new permission.
+Tabs opened before the update need a reload.
 
 Release 2.12.1 (E168, E169) sends every generation's transcript in UTC with a
 `--- YYYY-MM-DD ---` line before each day's first message, and every request

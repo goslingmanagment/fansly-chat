@@ -12322,6 +12322,13 @@ export declare const statsMediaResponseSchema: z.ZodObject<{
             revisionCount: z.ZodNumber;
             lastObservedAt: z.ZodString;
         }, z.core.$strip>>;
+        windowViews: z.ZodNullable<z.ZodNumber>;
+        windowPreviewViews: z.ZodNullable<z.ZodNumber>;
+        daily: z.ZodArray<z.ZodObject<{
+            bucketStart: z.ZodString;
+            views: z.ZodNullable<z.ZodNumber>;
+            previewViews: z.ZodNullable<z.ZodNumber>;
+        }, z.core.$strip>>;
     }, z.core.$strip>>;
     top: z.ZodArray<z.ZodObject<{
         plane: z.ZodString;
@@ -12356,6 +12363,7 @@ export declare const statsMediaResponseSchema: z.ZodObject<{
         updatedAt: z.ZodString;
     }, z.core.$strip>>;
     bucketsTruncated: z.ZodBoolean;
+    dailyTruncated: z.ZodBoolean;
     nextCursor: z.ZodNullable<z.ZodString>;
 }, z.core.$strip>;
 export declare const statsTagsQuerySchema: z.ZodObject<{
@@ -28497,6 +28505,13 @@ declare const baseRouteSchemas: {
                         revisionCount: z.ZodNumber;
                         lastObservedAt: z.ZodString;
                     }, z.core.$strip>>;
+                    windowViews: z.ZodNullable<z.ZodNumber>;
+                    windowPreviewViews: z.ZodNullable<z.ZodNumber>;
+                    daily: z.ZodArray<z.ZodObject<{
+                        bucketStart: z.ZodString;
+                        views: z.ZodNullable<z.ZodNumber>;
+                        previewViews: z.ZodNullable<z.ZodNumber>;
+                    }, z.core.$strip>>;
                 }, z.core.$strip>>;
                 top: z.ZodArray<z.ZodObject<{
                     plane: z.ZodString;
@@ -28531,6 +28546,7 @@ declare const baseRouteSchemas: {
                     updatedAt: z.ZodString;
                 }, z.core.$strip>>;
                 bucketsTruncated: z.ZodBoolean;
+                dailyTruncated: z.ZodBoolean;
                 nextCursor: z.ZodNullable<z.ZodString>;
             }, z.core.$strip>;
             readonly 400: z.ZodObject<{
@@ -29522,6 +29538,7 @@ declare const baseRouteSchemas: {
                         success: "success";
                         error: "error";
                         code: "code";
+                        landing: "landing";
                         login: "login";
                     }>;
                     screenVersion: z.ZodString;
@@ -29653,6 +29670,80 @@ declare const baseRouteSchemas: {
             }, z.core.$strict>;
         };
     };
+    readonly pageBrowserLoginOpen: {
+        readonly auth: {
+            readonly kind: "owner-session";
+        };
+        readonly tags: readonly ["admin"];
+        readonly summary: "Open the recognized landing page's login modal in manual login, without entering credentials";
+        readonly params: z.ZodObject<{
+            pageLabel: z.ZodString;
+        }, z.core.$strict>;
+        readonly response: {
+            readonly 400: z.ZodObject<{
+                error: z.ZodString;
+                message: z.ZodString;
+                statusCode: z.ZodNumber;
+                reason: z.ZodOptional<z.ZodString>;
+                statusUrl: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+            readonly 401: z.ZodObject<{
+                error: z.ZodString;
+                message: z.ZodString;
+                statusCode: z.ZodNumber;
+                reason: z.ZodOptional<z.ZodString>;
+                statusUrl: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+            readonly 403: z.ZodObject<{
+                error: z.ZodString;
+                message: z.ZodString;
+                statusCode: z.ZodNumber;
+                reason: z.ZodOptional<z.ZodString>;
+                statusUrl: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+            readonly 404: z.ZodObject<{
+                error: z.ZodString;
+                message: z.ZodString;
+                statusCode: z.ZodNumber;
+                reason: z.ZodOptional<z.ZodString>;
+                statusUrl: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+            readonly 409: z.ZodObject<{
+                error: z.ZodString;
+                message: z.ZodString;
+                statusCode: z.ZodNumber;
+                reason: z.ZodOptional<z.ZodString>;
+                statusUrl: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+            readonly 200: z.ZodObject<{
+                screen: z.ZodNullable<z.ZodObject<{
+                    screen: z.ZodEnum<{
+                        unknown: "unknown";
+                        success: "success";
+                        error: "error";
+                        code: "code";
+                        landing: "landing";
+                        login: "login";
+                    }>;
+                    screenVersion: z.ZodString;
+                    fields: z.ZodArray<z.ZodEnum<{
+                        code: "code";
+                        login: "login";
+                        password: "password";
+                    }>>;
+                    siteError: z.ZodNullable<z.ZodString>;
+                    codeFrom: z.ZodOptional<z.ZodLiteral<"email">>;
+                }, z.core.$strict>>;
+                refused: z.ZodNullable<z.ZodEnum<{
+                    not_manual_login: "not_manual_login";
+                    screen_changed: "screen_changed";
+                    busy: "busy";
+                    token: "token";
+                }>>;
+                unreachable: z.ZodBoolean;
+            }, z.core.$strict>;
+        };
+    };
     readonly pageBrowserLoginSubmit: {
         readonly auth: {
             readonly kind: "owner-session";
@@ -29709,6 +29800,7 @@ declare const baseRouteSchemas: {
                         success: "success";
                         error: "error";
                         code: "code";
+                        landing: "landing";
                         login: "login";
                     }>;
                     screenVersion: z.ZodString;
@@ -29785,6 +29877,7 @@ declare const baseRouteSchemas: {
                         success: "success";
                         error: "error";
                         code: "code";
+                        landing: "landing";
                         login: "login";
                     }>;
                     screenVersion: z.ZodString;
@@ -30060,6 +30153,7 @@ declare const baseRouteSchemas: {
                         success: "success";
                         error: "error";
                         code: "code";
+                        landing: "landing";
                         login: "login";
                     }>;
                     screenVersion: z.ZodString;
@@ -30706,6 +30800,80 @@ declare const baseRouteSchemas: {
             }, z.core.$strict>;
         };
     };
+    readonly pageBrowserProfileLoginOpen: {
+        readonly auth: {
+            readonly kind: "owner-session";
+        };
+        readonly tags: readonly ["admin"];
+        readonly summary: "Open the recognized landing page's login modal in manual login, without entering credentials";
+        readonly params: z.ZodObject<{
+            profileId: z.ZodString;
+        }, z.core.$strict>;
+        readonly response: {
+            readonly 400: z.ZodObject<{
+                error: z.ZodString;
+                message: z.ZodString;
+                statusCode: z.ZodNumber;
+                reason: z.ZodOptional<z.ZodString>;
+                statusUrl: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+            readonly 401: z.ZodObject<{
+                error: z.ZodString;
+                message: z.ZodString;
+                statusCode: z.ZodNumber;
+                reason: z.ZodOptional<z.ZodString>;
+                statusUrl: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+            readonly 403: z.ZodObject<{
+                error: z.ZodString;
+                message: z.ZodString;
+                statusCode: z.ZodNumber;
+                reason: z.ZodOptional<z.ZodString>;
+                statusUrl: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+            readonly 404: z.ZodObject<{
+                error: z.ZodString;
+                message: z.ZodString;
+                statusCode: z.ZodNumber;
+                reason: z.ZodOptional<z.ZodString>;
+                statusUrl: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+            readonly 409: z.ZodObject<{
+                error: z.ZodString;
+                message: z.ZodString;
+                statusCode: z.ZodNumber;
+                reason: z.ZodOptional<z.ZodString>;
+                statusUrl: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+            readonly 200: z.ZodObject<{
+                screen: z.ZodNullable<z.ZodObject<{
+                    screen: z.ZodEnum<{
+                        unknown: "unknown";
+                        success: "success";
+                        error: "error";
+                        code: "code";
+                        landing: "landing";
+                        login: "login";
+                    }>;
+                    screenVersion: z.ZodString;
+                    fields: z.ZodArray<z.ZodEnum<{
+                        code: "code";
+                        login: "login";
+                        password: "password";
+                    }>>;
+                    siteError: z.ZodNullable<z.ZodString>;
+                    codeFrom: z.ZodOptional<z.ZodLiteral<"email">>;
+                }, z.core.$strict>>;
+                refused: z.ZodNullable<z.ZodEnum<{
+                    not_manual_login: "not_manual_login";
+                    screen_changed: "screen_changed";
+                    busy: "busy";
+                    token: "token";
+                }>>;
+                unreachable: z.ZodBoolean;
+            }, z.core.$strict>;
+        };
+    };
     readonly pageBrowserProfileLoginSubmit: {
         readonly auth: {
             readonly kind: "owner-session";
@@ -30762,6 +30930,7 @@ declare const baseRouteSchemas: {
                         success: "success";
                         error: "error";
                         code: "code";
+                        landing: "landing";
                         login: "login";
                     }>;
                     screenVersion: z.ZodString;
@@ -30838,6 +31007,7 @@ declare const baseRouteSchemas: {
                         success: "success";
                         error: "error";
                         code: "code";
+                        landing: "landing";
                         login: "login";
                     }>;
                     screenVersion: z.ZodString;

@@ -991,6 +991,10 @@ export declare const kernelOperations: {
         readonly method: "GET";
         readonly path: "/api/v1/page-browser/pages/:pageLabel/login";
     };
+    readonly pageBrowserLoginOpen: {
+        readonly method: "POST";
+        readonly path: "/api/v1/page-browser/pages/:pageLabel/login/open";
+    };
     readonly pageBrowserLoginScreenshot: {
         readonly method: "GET";
         readonly path: "/api/v1/page-browser/pages/:pageLabel/login/screenshot";
@@ -1018,6 +1022,10 @@ export declare const kernelOperations: {
     readonly pageBrowserProfileLoginFinish: {
         readonly method: "POST";
         readonly path: "/api/v1/page-browser/profiles/:profileId/login/finish";
+    };
+    readonly pageBrowserProfileLoginOpen: {
+        readonly method: "POST";
+        readonly path: "/api/v1/page-browser/profiles/:profileId/login/open";
     };
     readonly pageBrowserProfileLoginScreenshot: {
         readonly method: "GET";
