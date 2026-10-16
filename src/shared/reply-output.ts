@@ -23,10 +23,53 @@ const META_LEAK_PATTERNS = [
   /\bgenerated\s+(?:reply|message|response)\b/i,
 ];
 
+// Same rules as the hub's prompts/output/reply-output.ts (hub#621). A reasoning
+// block closes with its own tag name; `<think\b` alone missed the <thinking>,
+// <reasoning>, <thinking_mode> and <mental_model> blocks Opus 5.5 leaked into
+// drafts on 2026-10-09..14.
+const REASONING_BLOCK = /<((?:think|thinking|reasoning|mental_model)(?:_\w+)?)\b[^>]*>[\s\S]*?<\/\1\s*>/gi;
+// A block that never closes counts only from a bare tag that opens the text or
+// its own line, so "omg <thinking of you> all day" stays whole.
+const OPEN_REASONING_BLOCK = /(?:^|\n)\s*<(?:think|thinking|reasoning|mental_model)(?:_\w+)?>[\s\S]*$/i;
+
 function stripThinkBlocks(text: string): string {
   return text
-    .replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, '')
-    .replace(/```(?:think|thinking|reasoning|chain-of-thought)[^\n]*\n[\s\S]*?```/gi, '');
+    .replace(REASONING_BLOCK, '')
+    .replace(/```(?:think|thinking|reasoning|chain-of-thought)[^\n]*\n[\s\S]*?```/gi, '')
+    .replace(OPEN_REASONING_BLOCK, '');
+}
+
+// Reasoning written as plain text: a line that checks the house style rules
+// ("No long dashes.", "no em dash, no full stop at end"), says "Cold opener"
+// or opens with "Fan writes…". None of 39,214 production generations said
+// these outside such reasoning (hub, 2026-10-16).
+const PLAN_NOTE_PATTERNS = [
+  /\b(?:em|en|long)\s+dash(?:es)?\b/i,
+  /\bno\s+dash(?:es\b|\s*[.,;)]|\s*$)/i,
+  /\bno\s+(?:final\s+)?full\s+stop\b/i,
+  /\bfull\s+stop\s+at\s+(?:the\s+)?end\b/i,
+  /\bcold\s+opener\b/i,
+  /^\s*(?:the\s+)?fan\s+(?:just\s+)?(?:writes|wrote|asks|asked|says|said|joked|replied|mentioned)\b/i,
+];
+
+function isPlanNoteLine(line: string): boolean {
+  return PLAN_NOTE_PATTERNS.some((pattern) => pattern.test(line));
+}
+
+// Within one part, the text after the last plan-note line is the reply; before
+// it is the plan or a draft the model went on to correct. With nothing after
+// it, the plan-note lines alone are dropped.
+function stripPlanNotes(text: string): string {
+  const lines = text.split('\n');
+  let last = -1;
+  lines.forEach((line, index) => {
+    if (isPlanNoteLine(line)) last = index;
+  });
+  if (last < 0) {
+    return text;
+  }
+  const after = lines.slice(last + 1).join('\n');
+  return after.trim() ? after : lines.filter((line) => !isPlanNoteLine(line)).join('\n');
 }
 
 function stripWrappingQuotes(text: string): string {
@@ -68,7 +111,7 @@ function removeMetaLeakLines(text: string): string {
 }
 
 export function sanitizeReplyPart(part: string): string {
-  const withoutThinking = stripThinkBlocks(part);
+  const withoutThinking = stripPlanNotes(stripThinkBlocks(part));
   const withoutMeta = removeMetaLeakLines(withoutThinking);
   const withoutPrefix = stripReplyPrefix(withoutMeta);
   return stripWrappingQuotes(withoutPrefix);
