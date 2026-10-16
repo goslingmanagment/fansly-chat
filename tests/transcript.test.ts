@@ -894,13 +894,13 @@ describe('formatTranscript', () => {
 // ─── formatTranscriptForKernel (W9.4/A26: 300k cap, oldest-first) ────────
 
 describe('formatTranscriptForKernel', () => {
-  it('is identical to formatTranscript while under the cap, with a true count', () => {
+  it('is formatTranscript under a UTC day line while under the cap, with a true count', () => {
     const messages = [
       makeNormalized({ id: '1', createdAt: 100, text: 'first' }),
       makeNormalized({ id: '2', createdAt: 200, text: 'second' }),
     ];
     const { transcript, messageCount } = formatTranscriptForKernel(messages);
-    expect(transcript).toBe(formatTranscript(messages));
+    expect(transcript).toBe(`--- 1970-01-01 ---\n${formatTranscript(messages)}`);
     expect(messageCount).toBe(2);
   });
 
@@ -917,9 +917,10 @@ describe('formatTranscriptForKernel', () => {
       makeNormalized({ id: '2', createdAt: 200, text: 'middle '.repeat(10) }),
       makeNormalized({ id: '3', createdAt: 300, text: 'newest '.repeat(10) }),
     ];
-    // Budget for roughly two lines only.
+    // Budget for the day line and two lines only.
     const lineLength = formatTranscript([messages[2]!]).length;
-    const { transcript, messageCount } = formatTranscriptForKernel(messages, lineLength * 2 + 1);
+    const dayLineLength = '--- 1970-01-01 ---\n'.length;
+    const { transcript, messageCount } = formatTranscriptForKernel(messages, dayLineLength + lineLength * 2 + 1);
     expect(messageCount).toBe(2);
     expect(transcript).toContain('middle');
     expect(transcript).toContain('newest');

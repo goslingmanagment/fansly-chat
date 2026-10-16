@@ -14,7 +14,7 @@ export type KernelOperationKey = keyof Schemas & string;
  * audio/mpeg (dedicated `fetchVoiceNoteAudio` helper). All remain reachable via
  * `client.raw(...)`.
  */
-export declare const SDK_EXCLUDED_OPERATIONS: readonly ["ofapiWebhookReceive", "eventsStream", "eventsV2Stream", "aiGatewayStream", "ofapiReadGateway", "adminOfapiCreditsLedgerCsv", "voiceNoteAudio"];
+export declare const SDK_EXCLUDED_OPERATIONS: readonly ["ofapiWebhookReceive", "eventsStream", "eventsV2Stream", "aiGatewayStream", "ofapiReadGateway", "adminOfapiCreditsLedgerCsv", "voiceNoteAudio", "pageBrowserLoginScreenshot", "pageBrowserScreen", "pageBrowserProfileLoginScreenshot", "pageBrowserProfileScreen"];
 export type KernelSdkExcludedKey = (typeof SDK_EXCLUDED_OPERATIONS)[number];
 export type KernelSdkMethodKey = Exclude<KernelOperationKey, KernelSdkExcludedKey>;
 type InputOf<S> = S extends z.ZodType ? z.input<S> : never;
@@ -124,7 +124,7 @@ export declare function subscribeSyncEvents(options: KernelClientOptions, input:
  * token yet behaves exactly as without it), and the SDK writes the header in
  * this order.
  */
-export declare const AI_STREAM_CAPABILITIES: readonly ["debug-input-v1", "context-v1", "split-all-v1", "coverage-check-v1"];
+export declare const AI_STREAM_CAPABILITIES: readonly ["debug-input-v1", "context-v1", "split-all-v1", "coverage-check-v1", "hi-start-proof-v1"];
 export type AiStreamCapability = (typeof AI_STREAM_CAPABILITIES)[number];
 /**
  * Stream one AI generation through the gateway

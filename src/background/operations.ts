@@ -2853,21 +2853,14 @@ export class OperationCoordinator {
       // Hub AI media describer: the kept window's describable files are
       // numbered in the transcript and listed by id (never a URL); the kernel
       // restores the plain labels while its describer is off.
-      // E164: the notes fill in merge mode dates its facts from day lines
-      // (`--- YYYY-MM-DD ---`, the browser's clock, counted in the budget);
-      // every other feature's transcript keeps its legacy bytes.
-      const fillMergeMode =
-        payload.feature === 'fan-notes-fill' && payload.noteValues !== undefined;
+      // E168: every feature's transcript is in UTC with day lines
+      // (`--- YYYY-MM-DD ---`, counted in the budget); the notes fill dates
+      // its facts from them (E164).
       const {
         transcript: formattedTranscript,
         messageCount: keptMessageCount,
         media: transcriptMedia,
-      } = formatTranscriptWithMediaForKernel(
-        transcriptMessages,
-        validated.urlGroupId,
-        undefined,
-        { dayLines: fillMergeMode },
-      );
+      } = formatTranscriptWithMediaForKernel(transcriptMessages, validated.urlGroupId);
       // Stage 32: prompt ASSEMBLY is kernel-side (templates, personas,
       // platform wording, budgets, capture). The client ships context VALUES
       // because Fansly has no webhook lane — the kernel archive is
@@ -2944,7 +2937,9 @@ export class OperationCoordinator {
         ...(payload.feature === 'fan-notes-fill' && payload.noteFields !== undefined
           ? { noteFields: payload.noteFields }
           : {}),
-        ...(fillMergeMode ? { noteValues: payload.noteValues } : {}),
+        ...(payload.feature === 'fan-notes-fill' && payload.noteValues !== undefined
+          ? { noteValues: payload.noteValues }
+          : {}),
         // The REQUESTED window (kernel records requestedCount from this): the
         // short const for a short recap, else the feature's window (deep for a
         // full recap). Distinct from clientContext.messageCount (the kept count).

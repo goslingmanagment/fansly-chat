@@ -497,6 +497,9 @@ export function createKernelFeatureGateway(
             isRegeneration: request.isRegeneration ?? false,
             clientContext: {
               transcript: request.clientContext.transcript,
+              // E168: every transcript is written by src/shared/transcript.ts
+              // in UTC with day lines; Core's `Now:` line says so.
+              transcriptClock: 'utc',
               messageCount: request.clientContext.messageCount,
               fanDisplayName: request.clientContext.fanDisplayName,
               ...(greetingFields && request.clientContext.fanUsername !== undefined ? { fanUsername: request.clientContext.fanUsername } : {}),

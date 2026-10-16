@@ -604,34 +604,29 @@ function pad(value: number): string {
   return String(value).padStart(2, '0');
 }
 
-function formatLocalTime(createdAtSeconds: number): string {
+/** `[HH:MM]` in UTC, never the browser's clock (E168): the hub reads every
+ * transcript in UTC, its own and this one alike (hub #622). */
+function formatUtcTime(createdAtSeconds: number): string {
   const date = new Date(createdAtSeconds * 1000);
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  return `${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}`;
 }
 
-/** The day line before a day's first message (E164, the notes fill only):
- * `--- YYYY-MM-DD ---` in the browser's own clock, the one the `[HH:MM]`
- * prefixes use. */
+/** The day line before a UTC day's first message: `--- YYYY-MM-DD ---`, the
+ * same clock as the `[HH:MM]` prefixes and the hub's own transcript. Without
+ * it a window that spans days or weeks reads as one day (E164, E168). */
 export function formatTranscriptDayLine(createdAtSeconds: number): string {
   const date = new Date(createdAtSeconds * 1000);
-  return `--- ${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ---`;
-}
-
-/** Kernel-bound formatting options. `dayLines`: the notes fill's day lines
- * (E164); every other feature leaves it off and gets the legacy bytes. */
-export interface KernelTranscriptOptions {
-  dayLines?: boolean;
+  return `--- ${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())} ---`;
 }
 
 /** How many of the newest messages fit under the cap, oldest dropped first,
- * and what they cost (lines plus `\n` joiners). With day lines, a day's line
- * is paid together with its first kept message, so the budget counts it and
- * no day line is ever left without a message after it. */
+ * and what they cost (lines plus `\n` joiners). A day's line is paid together
+ * with its first kept message, so the budget counts it and no day line is
+ * ever left without a message after it. */
 function keepNewestWithinBudget(
   messages: readonly NormalizedTranscriptMessage[],
   lineLength: (message: NormalizedTranscriptMessage) => number,
   maxChars: number,
-  dayLines: boolean,
 ): { kept: number; totalChars: number } {
   let kept = 0;
   let totalChars = 0;
@@ -639,8 +634,8 @@ function keepNewestWithinBudget(
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]!;
     let cost = lineLength(message) + (kept > 0 ? 1 : 0); // +1 = '\n' joiner
-    const day = dayLines ? formatTranscriptDayLine(message.createdAt) : null;
-    if (day !== null && day !== oldestDay) {
+    const day = formatTranscriptDayLine(message.createdAt);
+    if (day !== oldestDay) {
       cost += day.length + 1;
     }
     if (totalChars + cost > maxChars) {
@@ -653,21 +648,18 @@ function keepNewestWithinBudget(
   return { kept, totalChars };
 }
 
-/** Lines in order, a day line before each day's first message when asked. */
+/** Lines in order, a day line before each UTC day's first message. */
 function joinTranscriptLines(
   messages: readonly NormalizedTranscriptMessage[],
   line: (message: NormalizedTranscriptMessage) => string,
-  dayLines: boolean,
 ): string {
   const out: string[] = [];
   let previousDay: string | null = null;
   for (const message of messages) {
-    if (dayLines) {
-      const day = formatTranscriptDayLine(message.createdAt);
-      if (day !== previousDay) {
-        out.push(day);
-        previousDay = day;
-      }
+    const day = formatTranscriptDayLine(message.createdAt);
+    if (day !== previousDay) {
+      out.push(day);
+      previousDay = day;
     }
     out.push(line(message));
   }
@@ -677,7 +669,7 @@ function joinTranscriptLines(
 function formatTranscriptLine(message: NormalizedTranscriptMessage): string {
   const labels = message.labels.join(' ').trim();
   const payload = [labels, message.text].filter(Boolean).join(' ').trim();
-  return `[${formatLocalTime(message.createdAt)}] ${message.senderLabel}: ${payload}`;
+  return `[${formatUtcTime(message.createdAt)}] ${message.senderLabel}: ${payload}`;
 }
 
 export function formatTranscript(messages: NormalizedTranscriptMessage[]): string {
@@ -693,22 +685,20 @@ export function formatTranscript(messages: NormalizedTranscriptMessage[]): strin
  * routes.ts), so a giant chat must be truncated CLIENT-side: oldest lines
  * drop first (the newest context is what a reply needs), and messageCount
  * reports the KEPT count — the kernel must never be told it received more
- * messages than the transcript carries. */
+ * messages than the transcript carries. Every feature's transcript is in
+ * UTC with day lines (E168), counted in the budget. */
 export function formatTranscriptForKernel(
   messages: NormalizedTranscriptMessage[],
   maxChars = KERNEL_TRANSCRIPT_MAX_CHARS,
-  options: KernelTranscriptOptions = {},
 ): { transcript: string; messageCount: number } {
   if (messages.length === 0) {
     return { transcript: 'No conversation history.', messageCount: 0 };
   }
-  const dayLines = options.dayLines === true;
 
   const { kept } = keepNewestWithinBudget(
     messages,
     (message) => formatTranscriptLine(message).length,
     maxChars,
-    dayLines,
   );
 
   if (kept === 0) {
@@ -716,15 +706,15 @@ export function formatTranscriptForKernel(
     // recent content) so the generation still sees something real.
     const newestMessage = messages[messages.length - 1]!;
     const newest = formatTranscriptLine(newestMessage);
-    const day = dayLines ? formatTranscriptDayLine(newestMessage.createdAt) : null;
-    if (day !== null && maxChars > day.length + 1) {
+    const day = formatTranscriptDayLine(newestMessage.createdAt);
+    if (maxChars > day.length + 1) {
       return { transcript: `${day}\n${newest.slice(-(maxChars - day.length - 1))}`, messageCount: 1 };
     }
     return { transcript: newest.slice(-maxChars), messageCount: 1 };
   }
 
   return {
-    transcript: joinTranscriptLines(messages.slice(messages.length - kept), formatTranscriptLine, dayLines),
+    transcript: joinTranscriptLines(messages.slice(messages.length - kept), formatTranscriptLine),
     messageCount: kept,
   };
 }
@@ -780,13 +770,11 @@ export function formatTranscriptWithMediaForKernel(
   messages: NormalizedTranscriptMessage[],
   groupRef: string | null,
   maxChars = KERNEL_TRANSCRIPT_MAX_CHARS,
-  options: KernelTranscriptOptions = {},
 ): { transcript: string; messageCount: number; media?: KernelClientMedia } {
   const hasSlots = messages.some((message) => (message.mediaSlots?.length ?? 0) > 0);
   if (!groupRef || !/^[0-9]{1,32}$/.test(groupRef) || !hasSlots || messages.length === 0) {
-    return formatTranscriptForKernel(messages, maxChars, options);
+    return formatTranscriptForKernel(messages, maxChars);
   }
-  const dayLines = options.dayLines === true;
   const neutralized = messages.map((message) => ({ ...message, text: neutralizeMediaLabelText(message.text) }));
 
   // Keep exactly the lines the legacy formatter keeps (same cost, same cap),
@@ -795,11 +783,10 @@ export function formatTranscriptWithMediaForKernel(
     neutralized,
     (message) => formatTranscriptLine(message).length,
     maxChars,
-    dayLines,
   );
   let totalChars = budget.totalChars;
   if (budget.kept === 0) {
-    return formatTranscriptForKernel(messages, maxChars, options);
+    return formatTranscriptForKernel(messages, maxChars);
   }
   const kept = neutralized.slice(neutralized.length - budget.kept);
 
@@ -850,7 +837,6 @@ export function formatTranscriptWithMediaForKernel(
   const transcript = joinTranscriptLines(
     kept,
     (message) => formatTranscriptLine({ ...message, labels: numberedLabels(message, numbers) }),
-    dayLines,
   );
   return {
     transcript,

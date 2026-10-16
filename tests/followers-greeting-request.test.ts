@@ -20,10 +20,6 @@ const msg = (overrides: Partial<FanslyMessage> = {}): FanslyMessage => ({ id: '4
 /** The fan's chat as the inbox prefix lists it: participants unlisted, so the
  * check reads `GET /group` and the row's verdict rests on a read history. */
 const chat = (fanId: string, groupId: string, extra: Partial<InboxChat> = {}): InboxChat => ({ fanId, groupId, verified: false, lastMessageId: null, lastMessage: null, ...extra });
-const hhmm = (seconds: number) => {
-  const date = new Date(seconds * 1000);
-  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
-};
 
 function harness(account: FanslyAccountResponse, messages: FanslyMessage[], debugMode = false) {
   const values: Record<string, unknown> = {};
@@ -90,10 +86,12 @@ describe('followers greeting request (wire pin)', () => {
       feature: 'hi-greeting', variantCount: 1, clientRequestId: REQUEST_ID,
       pageLabel: 'creator-fs', conversationRef: '2', fanRef: '2', personaKey: 'persona', expectedPersonaDefinitionId: 'v1:persona-definition',
       clientContext: {
+        // UTC with a day line, whatever the host's zone (E168).
         transcript: [
-          `[${hhmm(1000)}] Model: [Automatic / mass message] auto welcome`,
-          `[${hhmm(1060)}] Model: [Automatic / mass message] [Media: purchase state unknown] mass promo`,
-          `[${hhmm(1120)}] Fan: hey there`,
+          '--- 1970-01-01 ---',
+          '[00:16] Model: [Automatic / mass message] auto welcome',
+          '[00:17] Model: [Automatic / mass message] [Media: purchase state unknown] mass promo',
+          '[00:18] Fan: hey there',
         ].join('\n'),
         messageCount: 3,
         fanDisplayName: 'D'.repeat(200), fanUsername: 'u'.repeat(200), fanCustomName: 'N'.repeat(200), fanBio: 'b'.repeat(5000),
