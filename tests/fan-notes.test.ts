@@ -6,6 +6,8 @@ import {
   FAN_NOTE_TEMPLATE_TITLE,
   FAN_NOTES_VIEW_DEFAULT,
   charCount,
+  formatNoteCreatedTitle,
+  formatNoteDate,
   normalizeFanNotesView,
   readFanNotes,
 } from '../src/shared/fan-notes.js';
@@ -19,7 +21,7 @@ describe('fan notes (E157)', () => {
       id: fan,
       notes: [
         { id: '900000000000000003', contentType: 12000, contentId: fan, title: 'B', note: 'second' },
-        { id: '900000000000000002', contentType: 12002, contentId: fan, title: 'Custom Username', note: 'Richard' },
+        { id: '900000000000000002', contentType: 12002, contentId: fan, title: 'Custom Username', note: 'Richard', createdAt: 1790790855 },
         { id: '900000000000000001', contentType: 12000, contentId: fan, title: 'A', note: 'first' },
         // Not addressable or not ours to show: skipped.
         { contentType: 12000, title: 'no id', note: 'x' },
@@ -30,13 +32,29 @@ describe('fan notes (E157)', () => {
     });
 
     expect(notes.map((note) => note.title)).toEqual(['B', 'A']);
-    expect(customName).toEqual({ id: '900000000000000002', contentType: 12002, contentId: fan, title: 'Custom Username', note: 'Richard' });
+    expect(customName).toEqual({ id: '900000000000000002', contentType: 12002, contentId: fan, title: 'Custom Username', note: 'Richard', createdAtMs: 1790790855000 });
   });
 
   it('fills what a write needs when Fansly leaves it out', () => {
     const { notes } = readFanNotes({ id: fan, notes: [{ id: '900000000000000001', contentType: 12000 }] });
-    expect(notes).toEqual([{ id: '900000000000000001', contentType: 12000, contentId: fan, title: '', note: '' }]);
+    expect(notes).toEqual([{ id: '900000000000000001', contentType: 12000, contentId: fan, title: '', note: '', createdAtMs: null }]);
     expect(readFanNotes({ id: fan })).toEqual({ notes: [], customName: null });
+  });
+
+  it('dates a note by when Fansly created it, in seconds or ms (E171)', () => {
+    const read = (createdAt: unknown) =>
+      readFanNotes({ id: fan, notes: [{ id: '900000000000000001', contentType: 12000, createdAt } as never] }).notes[0]!.createdAtMs;
+    expect(read(1790790855)).toBe(1790790855000);
+    expect(read(1790790855000)).toBe(1790790855000);
+    for (const bad of [null, undefined, 0, -1, '1790790855', Number.NaN]) expect(read(bad)).toBeNull();
+  });
+
+  it('shows the day in the head, the year only outside this one, the time on hover (E171)', () => {
+    const now = new Date(2026, 9, 17, 12, 0).getTime();
+    const at = new Date(2026, 9, 16, 19, 56).getTime();
+    expect(formatNoteDate(at, now)).toBe('16.10');
+    expect(formatNoteDate(new Date(2025, 0, 5, 9, 3).getTime(), now)).toBe('05.01.2025');
+    expect(formatNoteCreatedTitle(at)).toBe('Создана 16.10.2026 в 19:56');
   });
 
   it('starts every install on demand and rejects an unknown view', () => {

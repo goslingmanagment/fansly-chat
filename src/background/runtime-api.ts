@@ -516,7 +516,7 @@ export function registerRuntimeApi({
         const saved = noteId === null
           ? await fanslyClient.createAccountNote(fanAccountId, FANSLY_ACCOUNT_NOTE_TYPE, title, note, paced, signal)
           : await fanslyClient.editAccountNote(
-              { id: noteId, contentType: FANSLY_ACCOUNT_NOTE_TYPE, contentId: fanAccountId, title, note },
+              { id: noteId, contentType: FANSLY_ACCOUNT_NOTE_TYPE, contentId: fanAccountId, title, note, createdAtMs: null },
               title,
               note,
               paced,

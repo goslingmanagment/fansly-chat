@@ -716,11 +716,14 @@ export class FanNotesController {
     if (epoch !== this.epoch || this.drafts.get(fanId) !== draft) return;
     if (response?.ok) {
       const saved = response.note;
+      // The date in the card is the creation time (E171): an edit keeps the
+      // one read, a new note Fansly answered without one is dated now until
+      // a reread brings Fansly's own.
       this.patch(fanId, (snapshot) => ({
         ...snapshot,
         notes: snapshot.notes.some((note) => note.id === saved.id)
-          ? snapshot.notes.map((note) => (note.id === saved.id ? saved : note))
-          : [...snapshot.notes, saved],
+          ? snapshot.notes.map((note) => (note.id === saved.id ? { ...saved, createdAtMs: saved.createdAtMs ?? note.createdAtMs } : note))
+          : [...snapshot.notes, { ...saved, createdAtMs: saved.createdAtMs ?? Date.now() }],
       }));
       this.drafts.delete(fanId);
       this.trigger.sync();
@@ -1070,7 +1073,7 @@ export class FanNotesController {
         placeholder: data?.fan.displayName ?? data?.fan.username ?? 'Имя для себя',
         status: fanId ? this.nameStatus.get(fanId) ?? 'idle' : 'idle',
       },
-      notes: data?.notes.map((note) => ({ id: note.id, title: note.title, text: note.note })) ?? [],
+      notes: data?.notes.map((note) => ({ id: note.id, title: note.title, text: note.note, createdAtMs: note.createdAtMs })) ?? [],
       editor: draft
         ? {
             noteId: draft.noteId,

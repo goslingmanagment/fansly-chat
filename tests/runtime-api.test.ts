@@ -3200,10 +3200,10 @@ describe('runtime-api fan notes (E157)', () => {
       ok: true,
       creatorId,
       fan: { accountId: fanAccountId, username: 'richard24', displayName: 'Richard' },
-      customName: { id: '900000000000000002', contentType: 12002, contentId: fanAccountId, title: 'Custom Username', note: '💰 | Richard/US/24' },
+      customName: { id: '900000000000000002', contentType: 12002, contentId: fanAccountId, title: 'Custom Username', note: '💰 | Richard/US/24', createdAtMs: null },
       notes: [
-        { id: '900000000000000001', contentType: 12000, contentId: fanAccountId, title: 'Анкета', note: 'Имя: Richard' },
-        { id: '900000000000000003', contentType: 12000, contentId: fanAccountId, title: '', note: 'Летит в San Diego' },
+        { id: '900000000000000001', contentType: 12000, contentId: fanAccountId, title: 'Анкета', note: 'Имя: Richard', createdAtMs: null },
+        { id: '900000000000000003', contentType: 12000, contentId: fanAccountId, title: '', note: 'Летит в San Diego', createdAtMs: null },
       ],
     });
     // Both reads ride the paced follower lane: a 429 there cools every read down.
@@ -3273,7 +3273,8 @@ describe('runtime-api fan notes (E157)', () => {
     const edited = await send({ type: 'saveFanNote', creatorId, fanAccountId, noteId: '900000000000000001', title: 'Анкета', note: 'Имя: Richard' });
     expect(edited).toMatchObject({ ok: true, note: { id: '900000000000000001', note: 'Имя: Richard' } });
     expect(fanslyClient.editAccountNote).toHaveBeenCalledWith(
-      { id: '900000000000000001', contentType: 12000, contentId: fanAccountId, title: 'Анкета', note: 'Имя: Richard' },
+      // The background has no creation time to send: the panel keeps its own.
+      { id: '900000000000000001', contentType: 12000, contentId: fanAccountId, title: 'Анкета', note: 'Имя: Richard', createdAtMs: null },
       'Анкета',
       'Имя: Richard',
       expect.anything(),

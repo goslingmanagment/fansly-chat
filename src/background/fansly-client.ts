@@ -14,7 +14,7 @@ import {
 import { mapWithConcurrency } from '../shared/concurrency.js';
 import { aggregateEarnings } from '../shared/earnings.js';
 import { ChatGooseError } from '../shared/errors.js';
-import { readFanNote, type FanNote } from '../shared/fan-notes.js';
+import { readFanNote, readNoteTimeMs, type FanNote } from '../shared/fan-notes.js';
 import {
   estimateTargetPages,
   extractOldestMessageId,
@@ -796,6 +796,8 @@ export class FanslyClient {
       contentId: note.contentId,
       title: typeof answer.title === 'string' ? answer.title : title,
       note: typeof answer.note === 'string' ? answer.note : text,
+      // An edit never moves the creation time; Fansly keeps no edit time.
+      createdAtMs: readNoteTimeMs(answer.createdAt) ?? note.createdAtMs,
     };
   }
 

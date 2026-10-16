@@ -3684,7 +3684,7 @@ body.chatgoose-voice-studio-lock {
 }
 
 .chatgoose-note-title {
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   color: var(--chatgoose-ink-mid);
@@ -3699,10 +3699,27 @@ body.chatgoose-voice-studio-lock {
   font-weight: 500;
 }
 
+/* When the note was created (E171): after its title, or alone in the head. */
+.chatgoose-note-date {
+  flex: none;
+  color: var(--chatgoose-notes-label);
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.chatgoose-note-title + .chatgoose-note-date::before {
+  content: '·';
+  /* The head's 4px gap is already on the left. */
+  margin: 0 5px 0 1px;
+}
+
 .chatgoose-note-actions {
   display: flex;
   flex: none;
   align-items: center;
+  margin-left: auto;
   margin-right: -5px;
 }
 

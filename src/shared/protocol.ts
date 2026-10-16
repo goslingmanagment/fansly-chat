@@ -596,7 +596,8 @@ function isFanNote(value: unknown): boolean {
     isNumber(value.contentType) &&
     isFanslyId(value.contentId) &&
     isString(value.title) &&
-    isString(value.note);
+    isString(value.note) &&
+    (value.createdAtMs === undefined || value.createdAtMs === null || isNumber(value.createdAtMs));
 }
 
 function isRecapCoverage(value: unknown): boolean {

@@ -41,10 +41,11 @@ describe('Fansly account notes (E157)', () => {
 
   it('creates a note with the modal\'s body and returns it as stored', async () => {
     const h = harness();
-    const calls = stubFetch(() => envelope({ success: true, response: { id: '900000000000000009', contentType: 12000, contentId: fan, title: 'Анкета', note: 'Имя: ' } }));
+    const calls = stubFetch(() => envelope({ success: true, response: { id: '900000000000000009', contentType: 12000, contentId: fan, title: 'Анкета', note: 'Имя: ', createdAt: 1790790855 } }));
 
+    // Fansly's `createdAt` is in seconds; the note carries ms (E171).
     await expect(h.client.createAccountNote(fan, 12000, 'Анкета', 'Имя: ', h.session, h.signal)).resolves.toEqual({
-      id: '900000000000000009', contentType: 12000, contentId: fan, title: 'Анкета', note: 'Имя: ',
+      id: '900000000000000009', contentType: 12000, contentId: fan, title: 'Анкета', note: 'Имя: ', createdAtMs: 1790790855000,
     });
     expect(calls).toHaveLength(1);
     expect(calls[0]!.method).toBe('POST');
@@ -55,21 +56,22 @@ describe('Fansly account notes (E157)', () => {
 
   it('edits and deletes by id; a delete has nothing to hand back', async () => {
     const h = harness();
-    const stored = { id: '900000000000000001', contentType: 12000, contentId: fan, title: 'A', note: 'old' };
-    let calls = stubFetch(() => envelope({ success: true, response: { ...stored, note: 'new' } }));
-    await expect(h.client.editAccountNote(stored, 'A', 'new', h.session, h.signal)).resolves.toMatchObject({ id: stored.id, note: 'new' });
+    const stored = { id: '900000000000000001', contentType: 12000, contentId: fan, title: 'A', note: 'old', createdAtMs: 1790790855000 };
+    let calls = stubFetch(() => envelope({ success: true, response: { id: stored.id, contentType: 12000, contentId: fan, title: 'A', note: 'new', createdAt: 1790790855 } }));
+    await expect(h.client.editAccountNote(stored, 'A', 'new', h.session, h.signal)).resolves.toEqual({ ...stored, note: 'new' });
     expect(new URL(calls[0]!.url).pathname).toBe('/api/v1/notes/edit');
     expect(calls[0]!.body).toEqual({ id: stored.id, contentType: 12000, contentId: fan, title: 'A', note: 'new' });
 
     calls = stubFetch(() => envelope({ success: true }));
     await expect(h.client.deleteAccountNote(stored, h.session, h.signal)).resolves.toBeUndefined();
     expect(new URL(calls[0]!.url).pathname).toBe('/api/v1/notes/delete');
-    expect(calls[0]!.body).toEqual(stored);
+    // Fansly's own fields only: the creation time is ours to show, not to send.
+    expect(calls[0]!.body).toEqual({ id: stored.id, contentType: 12000, contentId: fan, title: 'A', note: 'old' });
   });
 
   it('confirms an edit as Fansly\'s own modal does: success with whatever the answer carries (E170)', async () => {
     const h = harness();
-    const stored = { id: '900000000000000001', contentType: 12000, contentId: fan, title: 'Анкета', note: 'Имя: ' };
+    const stored = { id: '900000000000000001', contentType: 12000, contentId: fan, title: 'Анкета', note: 'Имя: ', createdAtMs: 1790790855000 };
     const sent = { ...stored, note: 'Имя: Richard' };
 
     // Only the fields the modal reads.
@@ -90,9 +92,9 @@ describe('Fansly account notes (E157)', () => {
 
   it('a refused note write says what the answer was, never what it said (E170)', async () => {
     const h = harness();
-    const stored = { id: '900000000000000001', contentType: 12000, contentId: fan, title: 'A', note: 'old' };
+    const stored = { id: '900000000000000001', contentType: 12000, contentId: fan, title: 'A', note: 'old', createdAtMs: 1790790855000 };
 
-    stubFetch(() => envelope({ success: true, response: { ...stored, contentId: '111111111111111111', note: 'secret text' } }));
+    stubFetch(() => envelope({ success: true, response: { id: stored.id, contentType: 12000, contentId: '111111111111111111', title: 'A', note: 'secret text' } }));
     const foreign = await h.client.editAccountNote(stored, 'A', 'secret text', h.session, h.signal).catch((error: unknown) => error);
     expect(foreign).toMatchObject({ key: 'fansly_server_error', details: { shape: 'success:true · response:{id:string,contentType:number,contentId:string,title:string,note:string}' } });
     expect(JSON.stringify(foreign)).not.toContain('secret');
@@ -120,7 +122,7 @@ describe('Fansly account notes (E157)', () => {
 
   it('sends one attempt and never takes an answer about another note as confirmation', async () => {
     const h = harness();
-    const stored = { id: '900000000000000001', contentType: 12000, contentId: fan, title: 'A', note: 'old' };
+    const stored = { id: '900000000000000001', contentType: 12000, contentId: fan, title: 'A', note: 'old', createdAtMs: 1790790855000 };
 
     let calls = stubFetch(() => new Response('', { status: 500 }));
     await expect(h.client.editAccountNote(stored, 'A', 'new', h.session, h.signal)).rejects.toMatchObject({ key: 'fansly_server_error' });

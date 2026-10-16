@@ -12,6 +12,8 @@ import {
   FAN_NOTES_VIEWS,
   FAN_NOTE_OTHER_LABEL,
   diffNoteFacts,
+  formatNoteCreatedTitle,
+  formatNoteDate,
   hasFieldLine,
   noteLabelKey,
   parseNoteForm,
@@ -30,6 +32,8 @@ export interface NotesPanelNote {
   id: string;
   title: string;
   text: string;
+  /** Fansly's creation time, ms; shown in the head of every other note. */
+  createdAtMs: number | null;
 }
 
 export interface NotesPanelEditor {
@@ -163,6 +167,14 @@ function fillButton(onClick: () => void): HTMLButtonElement {
   node.append(spark, ' Дополнить', el('span', 'chatgoose-notes-fill-tail', ' из чата'));
   node.setAttribute('aria-label', 'Дополнить из чата');
   node.title = 'Гусь прочитает переписку и допишет анкету. Сохраняете вы';
+  return node;
+}
+
+/** «16.10» in the card's head; the full time on hover. */
+function noteDate(ms: number): HTMLTimeElement {
+  const node = el('time', 'chatgoose-note-date', formatNoteDate(ms));
+  node.dateTime = new Date(ms).toISOString();
+  node.title = formatNoteCreatedTitle(ms);
   return node;
 }
 
@@ -487,12 +499,19 @@ export class NotesPanel {
     remove.disabled = busy;
     actions.append(edit, remove);
 
-    if (form || note.title) {
-      // A questionnaire the chatter left untitled still reads as one.
-      const title = el('span', 'chatgoose-note-title', note.title || 'Анкета');
-      if (!note.title) title.classList.add('chatgoose-note-title-implied');
+    // Every note but the questionnaire is dated (E171): when it was written
+    // is the one thing its text rarely says. The questionnaire dates its
+    // facts by month instead, and it grows long after it was created.
+    const date = form || note.createdAtMs === null ? null : noteDate(note.createdAtMs);
+    if (form || note.title || date) {
       const head = el('div', 'chatgoose-note-head');
-      head.append(title);
+      if (form || note.title) {
+        // A questionnaire the chatter left untitled still reads as one.
+        const title = el('span', 'chatgoose-note-title', note.title || 'Анкета');
+        if (!note.title) title.classList.add('chatgoose-note-title-implied');
+        head.append(title);
+      }
+      if (date) head.append(date);
       if (!confirming) head.append(actions);
       card.append(head);
     } else if (!confirming) {

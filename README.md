@@ -105,7 +105,9 @@ from prose when checking what is installed or live; verify the signed update fee
   none during a rate-limit cooldown, kept for the tab's lifetime; writes are
   Fansly's own `POST /notes`, `/notes/edit`, `/notes/delete`, one attempt on an
   explicit save or delete; an edit is confirmed by `success`, as Fansly's own
-  modal confirms it (E170). Chatter-eyes-only: the custom name and free notes
+  modal confirms it (E170). Every free note shows its creation date from
+  Fansly's `createdAt` in its head; Fansly keeps no edit time (E171).
+  Chatter-eyes-only: the custom name and free notes
   never reach a prompt; the questionnaire's labels and values go to Core for
   the fill only (E164) (`src/content/fan-notes/`, `src/shared/fan-notes.ts`).
   «✨ Дополнить из чата» (E159, E164; «✨ Заполнить из чата» until E166) on a
