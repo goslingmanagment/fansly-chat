@@ -10,7 +10,7 @@ const errors = { 400: errorResponseSchema, 401: errorResponseSchema, 403: errorR
 const pageLabelParams = z.object({ pageLabel: z.string().min(1).max(100) }).strict();
 /** The screens the browser's login desk knows (spec §7); `unknown`: none of
  *  them — the owner opens the screen. */
-export const pageBrowserLoginScreenSchema = z.enum(["login", "code", "error", "success", "unknown"]);
+export const pageBrowserLoginScreenSchema = z.enum(["landing", "login", "code", "error", "success", "unknown"]);
 export const pageBrowserLoginFieldSchema = z.enum(["login", "password", "code"]);
 /** What the browser shows now. */
 export const pageBrowserScreenSchema = z.object({
@@ -325,6 +325,13 @@ export const pageBrowserRouteSchemas = {
         params: pageLabelParams,
         response: { 200: pageBrowserLoginChangeResponseSchema, ...errors },
     },
+    pageBrowserLoginOpen: {
+        auth: { kind: "owner-session" },
+        tags: ["admin"],
+        summary: "Open the recognized landing page's login modal in manual login, without entering credentials",
+        params: pageLabelParams,
+        response: { 200: pageBrowserLoginStepResponseSchema, ...errors },
+    },
     pageBrowserLoginSubmit: {
         auth: { kind: "owner-session" },
         tags: ["admin"],
@@ -418,6 +425,13 @@ export const pageBrowserRouteSchemas = {
         summary: "Close the owner's login of a new page's browser: the automation back, the account can be checked through it",
         params: profileParams,
         response: { 200: pageBrowserProfileChangeResponseSchema, ...errors },
+    },
+    pageBrowserProfileLoginOpen: {
+        auth: { kind: "owner-session" },
+        tags: ["admin"],
+        summary: "Open the recognized landing page's login modal in manual login, without entering credentials",
+        params: profileParams,
+        response: { 200: pageBrowserLoginStepResponseSchema, ...errors },
     },
     pageBrowserProfileLoginSubmit: {
         auth: { kind: "owner-session" },

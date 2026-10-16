@@ -161,6 +161,7 @@ core's `docs/decisions.md` and are REFERENCED here, never copied.
 | E169 | 2026-10-16 | Release 2.12.1 = E168 (the transcript in UTC with day lines, `transcriptClock: 'utc'`). Core's half (hub #622, #628) reached production with hub #643 (`305f4e18`, deployed 2026-10-15 23:17 UTC, contract `d4e21741…`); SDK re-vendored from that commit, replacing the development vendor of `5b7eb095`. A patch: the AI reads the chat's time right, nothing new for the chatter (E120) |
 | E170 | 2026-10-17 | A note edit is confirmed the way Fansly's own modal confirms it: `success: true`, with whatever the answer carries (an id, a type or a fan it names must be this note's; its title and text win, else the ones sent). E157 asked for the whole note back, so an edit that landed in Fansly read «Не сохранено: CG-FAN-03» (ari-1, 2026-10-16, proved by the hub's next read of the fan). A note write's failure now shows its answer's shape (status, `success`, the keys of `response` with their types, never a text) after the error; the double period in that line is gone. A create stays strict. Not released |
 | E171 | 2026-10-17 | Every free note shows when it was created: «кастом · 16.10» in its head (the year outside the current one, the full time on hover), an untitled note gets a head with the date alone; the questionnaire is not dated (its facts carry months). The date is Fansly's own `createdAt` (seconds), held by every note: old notes are dated at once, nothing is written into a note. Fansly keeps no edit time (`updatedAt` is null on every note the hub holds), so an edit keeps the creation date; the owner chose this over stamping added lines in the text. Not released |
+| E172 | 2026-10-17 | Release 2.13.0 ships E170, E171 and #161 (the reasoning sanitizer, merged without a version). The SDK is re-vendored from the deployed Core `e936a64e3` (contract `5f7573ea…`): production had moved past the released `d4e21741…`, which its `compatibleClientSdks` no longer lists. Minor bump: the note dates are a new thing the chatter sees |
 
 ## Entries
 
@@ -6183,3 +6184,31 @@ modal confirms it.
   `tests/runtime-api.test.ts`, `tests/protocol.test.ts`, `tsc`; the real
   panel and stylesheet on a local stand, dark and light. Not checked on a
   live Fansly page. Not released: it ships with E170.
+
+**E172 (2026-10-17).** Release 2.13.0 ships E170, E171 and #161.
+
+- The owner, on E170 and E171: «потом разом выкатим», then «да давай делай
+  как надо» for the review, the merge and the release.
+- Contents: E170 (a note edit confirmed by `success`, the answer's shape on
+  a failed note write), E171 (the creation date in every free note's head)
+  and #161 (the hub #621 reasoning sanitizer in `src/shared/reply-output.ts`,
+  merged 2026-10-16 «без версии и записи E»).
+- Core. Production `/api/v1/health` reports `contractHash` `5f7573ea…`
+  (agency-de runs hub `e936a64e3480`, the API container's
+  `agency-hub.source-revision`); its `compatibleClientSdks` lists
+  `5f7573ea…`, `030124…`, `9137410d…`, `a6f77fbb…`, `b95b765c…`, not the
+  released 2.12.1's `d4e21741…`. `scripts/deploy.sh` refuses a vendored hash
+  other than production's, and the field should run the contract Core
+  serves, so the SDK is re-vendored.
+- SDK. The hub's `scripts/vendor-sdk.mjs` from a clean detached checkout of
+  `e936a64e3480`; a second run into another directory gives the same bytes.
+  Against `d4e21741…` (`305f4e18`) it gains only the page-browser
+  `login/open` routes for a page and a profile: additive, called by nothing
+  here, no new capability asked for.
+- Review: gpt-6-astra and gpt-6.1-sol, both at max, read only, over
+  `origin/main...` of E170 + E171: «No serious findings» from each.
+- Version 2.13.0: a minor bump, because the dates are a new thing on screen
+  (E120 reads a small fix as a patch).
+- Checked before Ready: `tsc`, eslint on the touched files, the note tests,
+  `tests/kernel-sdk-vendor.test.ts`, `pnpm gates`, `announce-release.mjs
+  --check`; the full `pnpm check` runs in CI on Ready.

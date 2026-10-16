@@ -252,6 +252,14 @@ Important references:
 
 ## Release
 
+Release 2.13.0 (E170, E171, E172) dates every free note in the notes panel
+with Fansly's own creation time, confirms a note edit the way Fansly's modal
+does (an edit that landed no longer reads «Не сохранено: CG-FAN-03»), and
+ships the reasoning sanitizer of #161 (hub #621's rules for drafts). SDK
+re-vendored from the deployed Core (`e936a64e3`, contract `5f7573ea…`);
+additive only, this client calls none of the new routes. No new permission.
+Tabs opened before the update need a reload.
+
 Release 2.12.1 (E168, E169) sends every generation's transcript in UTC with a
 `--- YYYY-MM-DD ---` line before each day's first message, and every request
 says so (`clientContext.transcriptClock: 'utc'`), so Core's `Now:` line calls

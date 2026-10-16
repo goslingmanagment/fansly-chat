@@ -6,6 +6,7 @@ export declare const pageBrowserLoginScreenSchema: z.ZodEnum<{
     success: "success";
     error: "error";
     code: "code";
+    landing: "landing";
     login: "login";
 }>;
 export type PageBrowserLoginScreen = z.infer<typeof pageBrowserLoginScreenSchema>;
@@ -21,6 +22,7 @@ export declare const pageBrowserScreenSchema: z.ZodObject<{
         success: "success";
         error: "error";
         code: "code";
+        landing: "landing";
         login: "login";
     }>;
     screenVersion: z.ZodString;
@@ -76,6 +78,7 @@ export declare const pageBrowserLoginResponseSchema: z.ZodObject<{
             success: "success";
             error: "error";
             code: "code";
+            landing: "landing";
             login: "login";
         }>;
         screenVersion: z.ZodString;
@@ -104,6 +107,7 @@ export declare const pageBrowserLoginStepResponseSchema: z.ZodObject<{
             success: "success";
             error: "error";
             code: "code";
+            landing: "landing";
             login: "login";
         }>;
         screenVersion: z.ZodString;
@@ -376,6 +380,7 @@ export declare const pageBrowserProfileResponseSchema: z.ZodObject<{
             success: "success";
             error: "error";
             code: "code";
+            landing: "landing";
             login: "login";
         }>;
         screenVersion: z.ZodString;
@@ -758,6 +763,7 @@ export declare const pageBrowserRouteSchemas: {
                         success: "success";
                         error: "error";
                         code: "code";
+                        landing: "landing";
                         login: "login";
                     }>;
                     screenVersion: z.ZodString;
@@ -889,6 +895,80 @@ export declare const pageBrowserRouteSchemas: {
             }, z.core.$strict>;
         };
     };
+    readonly pageBrowserLoginOpen: {
+        readonly auth: {
+            readonly kind: "owner-session";
+        };
+        readonly tags: readonly ["admin"];
+        readonly summary: "Open the recognized landing page's login modal in manual login, without entering credentials";
+        readonly params: z.ZodObject<{
+            pageLabel: z.ZodString;
+        }, z.core.$strict>;
+        readonly response: {
+            readonly 400: z.ZodObject<{
+                error: z.ZodString;
+                message: z.ZodString;
+                statusCode: z.ZodNumber;
+                reason: z.ZodOptional<z.ZodString>;
+                statusUrl: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+            readonly 401: z.ZodObject<{
+                error: z.ZodString;
+                message: z.ZodString;
+                statusCode: z.ZodNumber;
+                reason: z.ZodOptional<z.ZodString>;
+                statusUrl: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+            readonly 403: z.ZodObject<{
+                error: z.ZodString;
+                message: z.ZodString;
+                statusCode: z.ZodNumber;
+                reason: z.ZodOptional<z.ZodString>;
+                statusUrl: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+            readonly 404: z.ZodObject<{
+                error: z.ZodString;
+                message: z.ZodString;
+                statusCode: z.ZodNumber;
+                reason: z.ZodOptional<z.ZodString>;
+                statusUrl: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+            readonly 409: z.ZodObject<{
+                error: z.ZodString;
+                message: z.ZodString;
+                statusCode: z.ZodNumber;
+                reason: z.ZodOptional<z.ZodString>;
+                statusUrl: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+            readonly 200: z.ZodObject<{
+                screen: z.ZodNullable<z.ZodObject<{
+                    screen: z.ZodEnum<{
+                        unknown: "unknown";
+                        success: "success";
+                        error: "error";
+                        code: "code";
+                        landing: "landing";
+                        login: "login";
+                    }>;
+                    screenVersion: z.ZodString;
+                    fields: z.ZodArray<z.ZodEnum<{
+                        code: "code";
+                        login: "login";
+                        password: "password";
+                    }>>;
+                    siteError: z.ZodNullable<z.ZodString>;
+                    codeFrom: z.ZodOptional<z.ZodLiteral<"email">>;
+                }, z.core.$strict>>;
+                refused: z.ZodNullable<z.ZodEnum<{
+                    not_manual_login: "not_manual_login";
+                    screen_changed: "screen_changed";
+                    busy: "busy";
+                    token: "token";
+                }>>;
+                unreachable: z.ZodBoolean;
+            }, z.core.$strict>;
+        };
+    };
     readonly pageBrowserLoginSubmit: {
         readonly auth: {
             readonly kind: "owner-session";
@@ -945,6 +1025,7 @@ export declare const pageBrowserRouteSchemas: {
                         success: "success";
                         error: "error";
                         code: "code";
+                        landing: "landing";
                         login: "login";
                     }>;
                     screenVersion: z.ZodString;
@@ -1021,6 +1102,7 @@ export declare const pageBrowserRouteSchemas: {
                         success: "success";
                         error: "error";
                         code: "code";
+                        landing: "landing";
                         login: "login";
                     }>;
                     screenVersion: z.ZodString;
@@ -1296,6 +1378,7 @@ export declare const pageBrowserRouteSchemas: {
                         success: "success";
                         error: "error";
                         code: "code";
+                        landing: "landing";
                         login: "login";
                     }>;
                     screenVersion: z.ZodString;
@@ -1942,6 +2025,80 @@ export declare const pageBrowserRouteSchemas: {
             }, z.core.$strict>;
         };
     };
+    readonly pageBrowserProfileLoginOpen: {
+        readonly auth: {
+            readonly kind: "owner-session";
+        };
+        readonly tags: readonly ["admin"];
+        readonly summary: "Open the recognized landing page's login modal in manual login, without entering credentials";
+        readonly params: z.ZodObject<{
+            profileId: z.ZodString;
+        }, z.core.$strict>;
+        readonly response: {
+            readonly 400: z.ZodObject<{
+                error: z.ZodString;
+                message: z.ZodString;
+                statusCode: z.ZodNumber;
+                reason: z.ZodOptional<z.ZodString>;
+                statusUrl: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+            readonly 401: z.ZodObject<{
+                error: z.ZodString;
+                message: z.ZodString;
+                statusCode: z.ZodNumber;
+                reason: z.ZodOptional<z.ZodString>;
+                statusUrl: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+            readonly 403: z.ZodObject<{
+                error: z.ZodString;
+                message: z.ZodString;
+                statusCode: z.ZodNumber;
+                reason: z.ZodOptional<z.ZodString>;
+                statusUrl: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+            readonly 404: z.ZodObject<{
+                error: z.ZodString;
+                message: z.ZodString;
+                statusCode: z.ZodNumber;
+                reason: z.ZodOptional<z.ZodString>;
+                statusUrl: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+            readonly 409: z.ZodObject<{
+                error: z.ZodString;
+                message: z.ZodString;
+                statusCode: z.ZodNumber;
+                reason: z.ZodOptional<z.ZodString>;
+                statusUrl: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+            readonly 200: z.ZodObject<{
+                screen: z.ZodNullable<z.ZodObject<{
+                    screen: z.ZodEnum<{
+                        unknown: "unknown";
+                        success: "success";
+                        error: "error";
+                        code: "code";
+                        landing: "landing";
+                        login: "login";
+                    }>;
+                    screenVersion: z.ZodString;
+                    fields: z.ZodArray<z.ZodEnum<{
+                        code: "code";
+                        login: "login";
+                        password: "password";
+                    }>>;
+                    siteError: z.ZodNullable<z.ZodString>;
+                    codeFrom: z.ZodOptional<z.ZodLiteral<"email">>;
+                }, z.core.$strict>>;
+                refused: z.ZodNullable<z.ZodEnum<{
+                    not_manual_login: "not_manual_login";
+                    screen_changed: "screen_changed";
+                    busy: "busy";
+                    token: "token";
+                }>>;
+                unreachable: z.ZodBoolean;
+            }, z.core.$strict>;
+        };
+    };
     readonly pageBrowserProfileLoginSubmit: {
         readonly auth: {
             readonly kind: "owner-session";
@@ -1998,6 +2155,7 @@ export declare const pageBrowserRouteSchemas: {
                         success: "success";
                         error: "error";
                         code: "code";
+                        landing: "landing";
                         login: "login";
                     }>;
                     screenVersion: z.ZodString;
@@ -2074,6 +2232,7 @@ export declare const pageBrowserRouteSchemas: {
                         success: "success";
                         error: "error";
                         code: "code";
+                        landing: "landing";
                         login: "login";
                     }>;
                     screenVersion: z.ZodString;
