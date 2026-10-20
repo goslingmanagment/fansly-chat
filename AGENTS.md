@@ -1,67 +1,68 @@
-# AGENTS.md — ChatGoose (расширение Fansly)
+# AGENTS.md — ChatGoose (Fansly extension)
 
-Расширение Firefox MV3 (gecko ≥ 142) для чаттеров агентства на Fansly.com:
-ИИ-помощник в живом DOM Fansly (ответы, коуч, саммари фана, пинги, борд
-спендеров, загрузки в волт, фолловеры). Клиент Agency Hub
-(`~/code/1-platform/hub`): ключи ИИ, промпты и деньги — в хабе, здесь чтение
-страницы и вендоренный SDK. Заменяется новым `chat-extension`; соседний
-клиент OnlyFans — `~/code/1-platform/onlyfans-chat`. Архитектура и фичи —
-`README.md`.
+Firefox MV3 extension (gecko ≥ 142) for agency chatters working Fansly.com:
+an AI assistant in the live Fansly DOM (replies, coaching, fan summaries,
+pings, spenders board, vault uploads, followers). A client of the Agency Hub
+(`~/code/1-platform/hub`): AI keys, prompts and money live in the hub; this
+repo reads the page and uses the vendored SDK. Being replaced by the new
+`chat-extension`; the sibling OnlyFans client is
+`~/code/1-platform/onlyfans-chat`. Architecture and features: `README.md`.
 
-## Запуск и проверки
+## Running and checks
 
-- `pnpm install && pnpm build`, затем `about:debugging#/runtime/this-firefox`
+- `pnpm install && pnpm build`, then `about:debugging#/runtime/this-firefox`
   → Load Temporary Add-on → `dist/manifest.json`.
 - Plain TS + esbuild; `src/{background,content,options,popup,shared,…}`,
-  тесты vitest в `tests/`.
-- Локально — `pnpm typecheck`, `pnpm lint` и тесты затронутого
-  (`pnpm vitest run tests/<файл>`). Полный `pnpm check` (+ `pnpm gates`,
-  build) гоняет CI на Ready PR и push в main; на ПК-раннерах — через
-  `scripts/ci-parallel-check.mjs`.
+  vitest tests in `tests/`.
+- Locally: `pnpm typecheck`, `pnpm lint` and the tests of what you touched
+  (`pnpm vitest run tests/<file>`). CI runs the full `pnpm check` (+ `pnpm
+  gates`, build) on Ready PRs and pushes to main; on the PC runners it goes
+  through `scripts/ci-parallel-check.mjs`.
 
-## Как посмотреть
+## How to look at it
 
-- Живой Fansly — Chrome DevTools MCP (`mcp__chrome-devtools__*`), сразу и
-  без напоминаний: `list_pages`, нужная уже открытая вкладка, только чтение
-  DOM/консоли/сети; без перезагрузок и переключения чатов. Открытие чата
-  может пометить его прочитанным. Отправка, загрузки и изменения аккаунта —
-  только если это поручено. Проверка в Chrome не проверяет само расширение
-  Firefox.
-- Перед правкой интеграции с Fansly — `docs/fansly-development.md`.
+- Live Fansly: Chrome DevTools MCP (`mcp__chrome-devtools__*`), right away,
+  without being reminded: `list_pages`, the intended already-open tab,
+  read-only DOM/console/network; no reloads and no chat switches. Opening a
+  chat can mark it read. Sending, uploads and account changes only when the
+  task says so. A check in Chrome does not check the Firefox extension
+  itself.
+- Before changing the Fansly integration, read `docs/fansly-development.md`.
 
-## Релиз
+## Release
 
-Поднять версию в `package.json` и `manifest.json` вместе, обновить
-`CHANGELOG.md` и `changelog.html`, запустить `scripts/deploy.sh` (подпись в
-AMO, проверка served == manifest == package.json, выкладка, анонс). Только
-страницы: `scripts/deploy.sh --pages-only`. Ключи AMO — в `.env.deploy`
-(образец `.env.deploy.example`). Единственный канал — собственный
-update-feed.
+Bump the version in `package.json` and `manifest.json` together, update
+`CHANGELOG.md` and `changelog.html`, run `scripts/deploy.sh` (AMO signing,
+served == manifest == package.json check, upload, announcement). Pages
+only: `scripts/deploy.sh --pages-only`. AMO keys are in `.env.deploy`
+(template `.env.deploy.example`). The self-hosted update feed is the only
+channel.
 
-## Опасно
+## Dangerous
 
-- ИИ только через хаб: никаких SDK вендоров, ключей и сборки промптов здесь.
-  Генерация — refs + `clientContext` в `/api/v1/ai/features/<feature>`,
-  SSE; оборванный стрим — ошибка, не результат.
-- ИИ никогда не отправляет без явного действия человека; неясную отправку
-  не повторять автоматически.
-- Запросы к Fansly идут от сессии чаттера. Новые — только там, где хаб не
-  может (волт, фолловеры), и с пейсингом и кулдауном: без них — риск бана
-  модели.
-- Расширение — живой читатель Fansly; архив хаба отстаёт. Живое чтение не
-  заменять чтением из хаба.
+- AI only through the hub: no vendor SDKs, keys or prompt assembly here.
+  Generation sends refs + `clientContext` to `/api/v1/ai/features/<feature>`
+  over SSE; a truncated stream is an error, never a result.
+- AI never sends without explicit human action; never auto-retry an
+  indeterminate send.
+- Requests to Fansly ride the chatter's session. New ones only where the hub
+  can't do the job (vault, followers), and with pacing and a cooldown:
+  without them a model ban is at risk.
+- The extension is the live reader of Fansly; the hub's archive lags behind.
+  Don't replace a live read with a hub read.
 
-## Подводные камни
+## Things that bite
 
-- `vendor/kernel-sdk` и `vendor/chatgoose-hotkeys` генерирует хаб
-  (`scripts/vendor-sdk.mjs`, `scripts/vendor-hotkeys.mjs`); руками не
-  править. Хоткеи — общие с десктопом, sha256 манифеста одинаковый в обоих
-  клиентах; `src/shared/hotkeys.ts` только адаптирует.
-- Вход: логин + пароль → device token (`src/background/device-token.ts`).
-- Хранилище: миграции только вперёд в `src/shared/migrations.ts`, версия —
-  `STORAGE_SCHEMA_VERSION` в `src/shared/constants.ts`; учётные данные хаба в
-  своих ключах, полный persist — через `serializePersistedState`.
-- Деньги: хаб отдаёт целые mills; конвертация, тиры и формат — только в
-  `src/shared/spenders.ts`.
-- `docs/decisions.md` (E1–E172) заморожен 2026-10-20 — справка по истории;
-  новые решения — в описании PR.
+- `vendor/kernel-sdk` and `vendor/chatgoose-hotkeys` are generated by the
+  hub (`scripts/vendor-sdk.mjs`, `scripts/vendor-hotkeys.mjs`); never
+  hand-edit them. The hotkeys are shared with the desktop app, the manifest
+  sha256 is the same in both clients; `src/shared/hotkeys.ts` only adapts it.
+- Sign-in: login + password → device token (`src/background/device-token.ts`).
+- Storage: forward-only migrations in `src/shared/migrations.ts`, the version
+  is `STORAGE_SCHEMA_VERSION` in `src/shared/constants.ts`; hub credentials
+  live in their own keys, every full persist goes through
+  `serializePersistedState`.
+- Money: the hub returns integer mills; conversion, tiers and formatting live
+  only in `src/shared/spenders.ts`.
+- `docs/decisions.md` (E1–E172) is frozen since 2026-10-20 as a reference for
+  history; new decisions go in the PR description.
