@@ -235,7 +235,7 @@ No settings migration or additional Fansly requests are required for diagnostics
 ### Checks
 
 ```bash
-pnpm check      # typecheck + lint + architecture gates + tests + build
+pnpm check      # typecheck + lint + tests + build
 pnpm watch      # rebuild on source changes
 pnpm test       # Vitest suite
 pnpm typecheck  # strict TypeScript check

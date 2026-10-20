@@ -15,9 +15,12 @@ repo reads the page and uses the vendored SDK. Being replaced by the new
 - Plain TS + esbuild; `src/{background,content,options,popup,shared,…}`,
   vitest tests in `tests/`.
 - Locally: `pnpm typecheck`, `pnpm lint` and the tests of what you touched
-  (`pnpm vitest run tests/<file>`). CI runs the full `pnpm check` (+ `pnpm
-  gates`, build) on Ready PRs and pushes to main; on the PC runners it goes
-  through `scripts/ci-parallel-check.mjs`.
+  (`pnpm vitest run tests/<file>`). CI runs the full `pnpm check` (typecheck,
+  lint, tests, build) on Ready PRs and pushes to main; on the PC runners it
+  goes through `scripts/ci-parallel-check.mjs`.
+- Tests cover only what can hurt: what is sent to which fan, money, auth and
+  tokens, data sent to the hub, the update feed, storage migrations. No tests
+  for UI, copy or wiring.
 
 ## How to look at it
 

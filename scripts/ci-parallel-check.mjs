@@ -18,19 +18,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 // Parts that only read the tree, each pinned to the exact package.json body
-// known to only read: `tsc --noEmit`, `eslint .` and the grep gates. The name
-// alone proves nothing: `eslint . --fix`, `tsc -b` or a gates body that first
-// generates a file into src/ would write what a neighbour reads, and the race
-// can pass a broken tree. A read-only part with any other body (or none)
-// makes the whole check run as `pnpm check`. Not `test`: the copy-vocabulary
-// falsifiability cases write a line into real src/ and page files for a
-// moment (tests/copy-vocabulary.test.ts), which a parallel tsc, eslint or
-// grep would read. Not `build`: it writes dist/. A new part runs alone until
-// it is known to only read.
+// known to only read: `tsc --noEmit` and `eslint .`. The name alone proves
+// nothing: `eslint . --fix` or `tsc -b` would write what a neighbour reads,
+// and the race can pass a broken tree. A read-only part with any other body
+// (or none) makes the whole check run as `pnpm check`. Not `build`: it writes
+// dist/. A new part runs alone until it is known to only read.
 const READ_ONLY_PARTS = new Map([
   ['typecheck', 'tsc --noEmit'],
   ['lint', 'eslint .'],
-  ['gates', 'node scripts/check-ai-cutover.mjs'],
 ]);
 
 // Words no shell splits, quotes or expands, so the argv is exactly what
