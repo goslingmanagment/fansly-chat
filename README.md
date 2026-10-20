@@ -244,7 +244,8 @@ pnpm typecheck  # strict TypeScript check
 Important references:
 
 - [AGENTS.md](AGENTS.md) — binding engineering rules and invariants;
-- [docs/decisions.md](docs/decisions.md) — append-only architecture decisions;
+- [docs/decisions.md](docs/decisions.md) — decision log E1–E172, frozen on
+  2026-10-20; new decisions live in PR descriptions;
 - `docs/generated/` — point-in-time code maps; check each file's snapshot SHA
   before relying on line numbers or current-state claims;
 - [SPEC_FINAL.md](SPEC_FINAL.md) — historical v1.3 product/UX intent, not current
