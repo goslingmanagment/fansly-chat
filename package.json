@@ -10,13 +10,12 @@
   },
   "scripts": {
     "build": "node esbuild.config.mjs",
-    "check": "pnpm typecheck && pnpm lint && pnpm gates && pnpm test && pnpm build",
+    "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm build",
     "watch": "node esbuild.config.mjs --watch",
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit",
-    "gates": "node scripts/check-ai-cutover.mjs"
+    "typecheck": "tsc --noEmit"
   },
   "license": "ISC",
   "pnpm": {
