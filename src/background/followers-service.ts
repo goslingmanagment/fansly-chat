@@ -9,7 +9,6 @@ import {
 } from '../shared/followers.js';
 import { AUTOMATED_MESSAGE_LABEL, buildGreetingContext, countPersonalMessages, isAutomatedGreetingMessage } from '../shared/greeting-context.js';
 import { describeDmRequirements, unmetDmRequirements, type DmRequirement } from '../shared/fansly-dm-permissions.js';
-import { HI_GREETING_MAX_TRANSCRIPT } from '../shared/constants.js';
 import type { FanslyAccountResponse, FanslyGroup, FanslyMessage, PersistedState, SessionTemplate } from '../shared/types.js';
 import type { AgencyHubClient } from './agency-hub-client.js';
 import type { FanslyClient, InboxChat } from './fansly-client.js';
@@ -61,9 +60,6 @@ const key = (kind: string, creator: string, fan = '') => `chatgoose:followers:v1
 const ready = (row: FollowerRow) => row.status === 'ready' || row.status === 'reply';
 const needsVerification = (row: FollowerRow) => row.status === 'pending' || row.status === 'unknown';
 const workable = (row: FollowerRow) => ready(row) || row.status === 'pending';
-/** Hi is for a conversation that has barely started. Past the limit the fan
- * needs a real reply with the whole chat in view, not a one-line opener. */
-const NEEDS_REPLY = `В переписке уже больше ${HI_GREETING_MAX_TRANSCRIPT} личных сообщений: это диалог, а не приветствие. Откройте чат и используйте Ответ (Reply).`;
 /** Workable is not sendable: a message leaves only a row whose chat was read. */
 const sendable = (row: FollowerRow) => ready(row) && row.evidence === 'history';
 /** The chat id a saved mapping, a proof or a send journal carries, if any. */
@@ -931,14 +927,6 @@ export class FollowersService {
       // old conversation stops here, a fan's own message becomes the transcript.
       await this.resolveByIdentity(scan, row, signal, scope);
       if (!sendable(row)) throw new Error(blockedText(row, 'generate'));
-      // The same limit as Core's gate_hi_greeting_limit, on the history the
-      // resolved chat actually has, before a hub read is spent on a row that
-      // cannot be greeted.
-      const personalMessages = countPersonalMessages(this.greetingWindow(scan, fanId).window);
-      if (personalMessages > HI_GREETING_MAX_TRANSCRIPT) {
-        scope?.event('generation.refused', { reason: 'too-many-personal-messages', personalMessages, limit: HI_GREETING_MAX_TRANSCRIPT });
-        throw new Error(NEEDS_REPLY);
-      }
       const source = JSON.stringify([state.settings.agencyHubBaseUrl, resolveHubBearer(state.settings), state.personaCatalogSource, persona.key, persona.definitionId]);
       const assertPersona = async () => {
         this.assertCurrent(scan);
@@ -997,11 +985,7 @@ export class FollowersService {
           onUsage: (usage) => request?.event('generation.usage', { ...usage }),
           onStopReason: (reason) => request?.event('generation.stop', { reason }),
         }, signal);
-      }, { clientRequestId, feature: 'hi-greeting', variantCount: 1 }).catch((error: unknown) => {
-        // The kernel gate counts the same thing; the chatter gets one wording.
-        if (error instanceof ChatGooseError && error.key === 'hi_too_many_messages') throw new Error(NEEDS_REPLY);
-        throw error;
-      });
+      }, { clientRequestId, feature: 'hi-greeting', variantCount: 1 });
       await assertPersona();
       if (!text.trim() || text.length > 5000 || /\[(VARIANT|NEXT)\]/.test(text)) throw new ChatGooseError('ai_output_unusable');
       scope?.event('generation.result', { textChars: text.trim().length });

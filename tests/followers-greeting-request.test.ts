@@ -120,62 +120,13 @@ describe('followers greeting request (wire pin)', () => {
     expect(coreAccepts(request)).toBe(true);
   });
 
-  it('greets a fan at the ten-message limit and counts only the personal messages', async () => {
+  it('counts only the personal messages and sets no limit on them (owner 2026-10-21)', async () => {
     const h = harness({ id: '2', username: 'fan', notes: [] }, [
       ...Array.from({ length: 12 }, (_, index) => msg({ id: String(100 + index), createdAt: 1000 + index, correlationId: '77', content: `mass ${index}` })),
-      ...Array.from({ length: 10 }, (_, index) => msg({ id: String(200 + index), createdAt: 2000 + index, senderId: '2', content: `fan ${index}` })),
+      ...Array.from({ length: 11 }, (_, index) => msg({ id: String(200 + index), createdAt: 2000 + index, senderId: '2', content: `fan ${index}` })),
     ]);
     const request = await h.generate() as { clientContext: Record<string, unknown> };
-    expect(request.clientContext).toMatchObject({ messageCount: 22, personalMessageCount: 10 });
-  });
-
-  it('refuses a fan with more than ten personal messages before any further read, in the chatter\'s words', async () => {
-    const h = harness({ id: '2', username: 'fan', notes: [], avatar: { location: 'https://cdn3.fansly.com/old.jpg' } }, [
-      msg(),
-      ...Array.from({ length: 11 }, (_, index) => msg({ id: String(200 + index), createdAt: 2000 + index, senderId: '2', content: `fan ${index}` })),
-    ], true);
-    const snapshot = await h.scan();
-    expect(h.service.state(7, snapshot.scanId).rows[0]?.status).toBe('reply');
-    const accountReads = h.fansly.getAccountNames.mock.calls.length;
-    await expect(h.service.generate(7, snapshot.scanId, '2')).rejects.toThrow('В переписке уже больше 10 личных сообщений: это диалог, а не приветствие. Откройте чат и используйте Ответ (Reply).');
-    expect(h.gateway.streamFeature).not.toHaveBeenCalled();
-    // No avatar refresh is spent on a row that cannot be greeted.
-    expect(h.fansly.getAccountNames.mock.calls.length).toBe(accountReads);
-    // The row stays composable: the chatter may still write by hand.
-    expect(h.service.state(7, snapshot.scanId).rows[0]?.status).toBe('reply');
-    const report = h.service.traces.get(snapshot.debug!.traceId)!.read();
-    expect(report.events).toContainEqual(expect.objectContaining({ name: 'generation.refused', data: { reason: 'too-many-personal-messages', personalMessages: 11, limit: 10 } }));
-  });
-
-  it('counts the actual personal history found by automatic identity resolution', async () => {
-    // The inbox miss begins with no history. E138 resolves it automatically;
-    // E136's gate must count the actual chat, never the empty pending row.
-    const h = harness({ id: '2', username: 'fan', notes: [] }, [
-      ...Array.from({ length: 11 }, (_, index) => msg({ id: String(200 + index), createdAt: 2000 + index, senderId: '2', content: `fan ${index}` })),
-    ], true);
-    h.fansly.listInboxPrefix.mockResolvedValue([]);
-    h.fansly.findFollowerGroup.mockResolvedValue(null);
-    const snapshot = await h.scan();
-    expect(h.service.state(7, snapshot.scanId).rows[0]).toMatchObject({ status: 'reply', evidence: 'history' });
-    await expect(h.service.generate(7, snapshot.scanId, '2')).rejects.toThrow('это диалог, а не приветствие');
-    expect(h.fansly.createFollowerGroup).toHaveBeenCalledOnce();
-    expect(h.gateway.streamFeature).not.toHaveBeenCalled();
-    const report = h.service.traces.get(snapshot.debug!.traceId)!.read();
-    expect(report.events).toContainEqual(expect.objectContaining({ name: 'generation.refused', data: { reason: 'too-many-personal-messages', personalMessages: 11, limit: 10 } }));
-  });
-
-  it('gives the kernel gate the same wording and never retries the generation', async () => {
-    const h = harness({ id: '2', username: 'fan', notes: [] }, [], true);
-    h.gateway.streamFeature.mockRejectedValue(new ChatGooseError('hi_too_many_messages'));
-    const snapshot = await h.scan();
-    await expect(h.service.generate(7, snapshot.scanId, '2')).rejects.toThrow('Откройте чат и используйте Ответ (Reply).');
-    expect(h.gateway.streamFeature).toHaveBeenCalledOnce();
-    const report = h.service.traces.get(snapshot.debug!.traceId)!.read();
-    const span = report.events.find((event) => event.name === 'hub.generate' && event.phase === 'start')!;
-    expect(span.data).toMatchObject({ feature: 'hi-greeting', variantCount: 1 });
-    expect(JSON.stringify(report)).not.toContain('greetingMode');
-    // The trace keeps the kernel's own error code, not the chatter wording.
-    expect(report.events.find((event) => event.name === 'hub.generate' && event.phase === 'error')!.data).toMatchObject({ errorCode: 'hi_too_many_messages' });
+    expect(request.clientContext).toMatchObject({ messageCount: 23, personalMessageCount: 11 });
   });
 
   it('passes every other kernel error through untouched', async () => {

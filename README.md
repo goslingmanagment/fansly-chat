@@ -253,6 +253,15 @@ Important references:
 
 ## Release
 
+Release 2.13.1 moves the 10-message rule from Hi to Ping (owner 2026-10-21).
+Hi has no message limit any more, in the chat and in «Новые». Ping needs at
+least 10 personal messages (welcome and mass sends do not count): the client
+refuses by itself only on a certain count (the whole history read) with
+«Ping — от 10 сообщений» (`ping_too_few_messages`, CG-FLOW-10), and sends the
+personal count in `clientContext.personalMessageCount`, which the hub's Ping
+gate (`gate_min_messages`) counts; the active-fan block is unchanged. SDK
+re-vendored from Core `9f829008` (contract `24317a4a…`).
+
 Release 2.13.0 (E170, E171, E172) dates every free note in the notes panel
 with Fansly's own creation time, confirms a note edit the way Fansly's modal
 does (an edit that landed no longer reads «Не сохранено: CG-FAN-03»), and

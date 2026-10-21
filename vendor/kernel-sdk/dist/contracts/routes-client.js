@@ -103,6 +103,15 @@ export const CLIENT_HUB_CAPABILITY_NAMES = [
     "archive-feed-v1", "spenders-stats-v1", "awaiting-reply-v1", "audience-new-v1",
     "preview-send-custody-v1", "client-health-perf-v1", "ai-usage-v1", "manual-greeting-v1",
     "coverage-check-v1", "conversation-recaps-v1", "hi-start-proof-v1", "voice-notes-v1",
+    "send-attribution-v1",
+    // chat-extension X54: the AI feature stream takes `livePpvContext`.
+    "live-ppv-v1",
+    "live-text-review-coach-v1",
+    "live-text-recap-v1",
+    "live-text-fansly-tools-v1",
+    // The AI feature stream takes `livePpvContext` on a Fansly page too: one item
+    // per paid attachment of the open chat, read from Fansly at the click.
+    "live-ppv-fansly-v1",
 ];
 /**
  * Append-only. `client_outdated` (the caller's `x-client-version` is below the
@@ -242,7 +251,7 @@ export const clientBootstrapResponseSchema = z.object({
 //
 // The freshest usable full and short recap of one fan on one page, WITH their
 // text. A recap is shared: every chatter granted the page reads the same one,
-// whoever generated it (chat-extension architecture §19, decision 1; there are
+// whoever generated it (chat-extension architecture §19; there are
 // no private recaps). `aiRecapStatus` (routes.ts) answers the same two slots
 // as metadata only.
 /** Known values of `coverage.transcriptCoverage`. On the wire an open token. */
@@ -353,12 +362,11 @@ export const clientFanProfileFromGenerationResponseSchema = z.object({
 // platform request, no refresh and no queued work, so reading the feed never
 // marks the chat read on OnlyFans.
 //
-// THE READER is the one a generation uses: the owner's
-// `aiTranscriptFreshUnionMode` decides between the archive and the archive ∪
-// webhook-store union, and `source` says which one served. A message deleted on
-// the platform stays in the feed as a row with `deleted: true` and an empty
-// `text` (a generation drops it): the row says a message was there and is gone,
-// never what it said.
+// THE READER is the one a generation uses: the archive ∪ webhook-store union
+// on OnlyFans, the archive on Fansly, and `source` says which one served. A
+// message deleted on the platform stays in the feed as a row with
+// `deleted: true` and an empty `text` (a generation drops it): the row says a
+// message was there and is gone, never what it said.
 //
 // ONE WALK, ONE SNAPSHOT. A request without a cursor starts a walk and freezes
 // it: `snapshotRevision`, `asOf`, `coverage`, `head` and `newestKnownAt` are
@@ -922,14 +930,15 @@ export const adminClientHealthResponseSchema = z.object({
 // lets out and answers only what it reads. The states of the three automata are
 // closed enums here and there: a new state is a new route version.
 //
-// A MANUAL GROUP (`manual-greeting-v1`, chat-extension R20 HF-3): a greeting
+// A MANUAL GROUP (`manual-greeting-v1`, chat-extension R20 HF-3): a text
 // the chatter wrote or edited, sent with no AI generation behind it. Its group
 // is `{kind: "manual", textFingerprint}`, the sha256 of the exact text, and is
 // one part. The hub keeps it as `generation_ref` `manual:<textFingerprint>`,
 // variant 0, one part, and answers it in that form (`group.generationRef`):
 // the custody rules see one more group, and no table changes. Only where the
-// platform's admission takes it (Fansly; never OnlyFans) and only for a
-// greeting. The hub never sees the text, as with an AI group.
+// platform's admission takes it: on Fansly a greeting; on OnlyFans a greeting
+// or a reply from the preview (audit 2026-10-20, row 1). The hub never sees
+// the text, as with an AI group.
 /** An id the client mints (lease token, install id, attempt id): its UUID form. */
 const clientMintedId = z.string().regex(CLIENT_REQUEST_ID_PATTERN);
 export const CLIENT_CLAIM_ACTIONS = [
@@ -971,8 +980,9 @@ export const clientClaimGroupSchema = z.object({
     partCount: z.number().int().min(1).max(CLIENT_CLAIM_MAX_PARTS),
 }).strict();
 /**
- * A greeting with no AI generation behind it (`manual-greeting-v1`): one part,
- * named by the sha256 of its exact text. Only for a greeting.
+ * A text with no AI generation behind it (`manual-greeting-v1`): one part,
+ * named by the sha256 of its exact text. Which purposes take it is the
+ * platform's admission.
  */
 export const clientManualClaimGroupSchema = z.object({
     kind: z.literal("manual"),
@@ -999,7 +1009,10 @@ export const clientFanClaimBodySchema = z.discriminatedUnion("action", [
         group: clientClaimSendGroupSchema,
         partIndex: clientPartIndex,
         textRevision: clientRevision,
-        /** A greeting needs the caller's live lease until the greeting is confirmed. */
+        /**
+         * An older client's lease on a greeting not yet confirmed: then that live lease of the caller's
+         * install is required. Without it the greeting is claimed at the send (audit 2026-10-20 row 11).
+         */
         leaseToken: clientMintedId.optional(),
         /**
          * The bootstrap `configRevision` the client acted on. Recorded with the
@@ -1036,12 +1049,9 @@ export const clientFanClaimBodySchema = z.discriminatedUnion("action", [
     if (body.action === "dispatch" || body.action === "registerNativeSend") {
         const { group } = body;
         if ("kind" in group) {
-            // A manual group is one part, and only a greeting's.
+            // A manual group is one part; which purposes take it is the platform's admission.
             if (body.partIndex !== 0) {
                 ctx.addIssue({ code: "custom", path: ["partIndex"], message: "a manual group is one part: partIndex must be 0" });
-            }
-            if (body.purpose !== "greeting") {
-                ctx.addIssue({ code: "custom", path: ["group"], message: "a manual group is a greeting's only" });
             }
         }
         else {
@@ -1426,6 +1436,66 @@ export const clientAudienceNewResponseSchema = z.object({
     /** Null on the last page of the walk. */
     nextCursor: clientCursorSchema.nullable(),
 });
+// ── who sent each outgoing message (send-attribution-v1) ────────────────────
+//
+// The chat extension observes each send a person makes in the platform page's
+// own composer and, once the page's own response named the platform's message
+// id, reports it: this message of this page, to this fan, observed then, with a
+// price or media or neither. The chatter is the user of the token that reports,
+// never a field of the body. No text of the message travels.
+/**
+ * The clients that observe a send, by the page they run on: the `source` of a
+ * report. Open on the wire; a platform admits its own (the hub's
+ * CLIENT_SEND_ATTRIBUTION_ADMISSIONS): OnlyFans `chatspace-extension`, the
+ * extension on OnlyMonster ChatSpace. Another one is 409
+ * `client_feature_disabled` / `platform_unsupported`.
+ */
+export const CLIENT_SEND_ATTRIBUTION_SOURCES = ["chatspace-extension"];
+/**
+ * What the hub did with one fact; every one is final, nothing is retried:
+ * - `recorded`: the first report of this message; it is stored.
+ * - `duplicate`: the message was already reported by the same person for the same fan: a repeat.
+ * - `conflict`: the message was already reported by another person, or for another fan. The first
+ *   report stands.
+ * - `out_of_range`: `observedAt` is more than CLIENT_SEND_ATTRIBUTION_MAX_AHEAD_MS ahead of the hub's
+ *   clock or more than CLIENT_SEND_ATTRIBUTION_MAX_AGE_DAYS old; nothing is stored.
+ */
+export const CLIENT_SEND_ATTRIBUTION_OUTCOMES = ["recorded", "duplicate", "conflict", "out_of_range"];
+/** Facts in one report. */
+export const CLIENT_SEND_ATTRIBUTION_MAX_FACTS = 50;
+/** How far ahead of the hub's clock an `observedAt` may be (a client clock that runs fast). */
+export const CLIENT_SEND_ATTRIBUTION_MAX_AHEAD_MS = 5 * 60_000;
+/** How old an `observedAt` may be: a report owed longer than that is not taken. */
+export const CLIENT_SEND_ATTRIBUTION_MAX_AGE_DAYS = 30;
+/** RFC 3339 with a zone, as `Date.prototype.toISOString` writes it. */
+export const CLIENT_SEND_ATTRIBUTION_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?(Z|[+-]\d{2}:\d{2})$/;
+export const clientSendAttributionFactSchema = z.object({
+    /** The platform's id of the message, from the page's own response to exactly this send. */
+    platformMessageId: clientNumericIdSchema,
+    /** The fan the message went to (on OnlyFans the fan id, which is the chat id). */
+    fanRef: clientFanRefSchema,
+    /** When the client saw the page confirm the send, by the client's clock. */
+    observedAt: z.string().regex(CLIENT_SEND_ATTRIBUTION_TIMESTAMP_PATTERN),
+    /** The send carried a price (a PPV). */
+    priced: z.boolean(),
+    /** The send carried media. */
+    withMedia: z.boolean(),
+}).strict();
+export const clientSendAttributionsBodySchema = z.object({
+    /** Open token; known values: CLIENT_SEND_ATTRIBUTION_SOURCES. */
+    source: clientOpenToken,
+    facts: z.array(clientSendAttributionFactSchema).min(1).max(CLIENT_SEND_ATTRIBUTION_MAX_FACTS),
+}).strict();
+export const clientSendAttributionsResponseSchema = z.object({
+    pageLabel: z.string(),
+    /** One per fact, in the order of the body. */
+    results: z.array(z.object({
+        platformMessageId: z.string(),
+        /** Open token; known values: CLIENT_SEND_ATTRIBUTION_OUTCOMES. */
+        outcome: clientOpenToken,
+    })),
+    serverNow: isoTimestamp,
+});
 export const clientRouteSchemas = {
     clientBootstrap: {
         auth: { kind: "apiKey" },
@@ -1473,7 +1543,8 @@ export const clientRouteSchemas = {
         summary: "One conversation's messages from the hub's own stores, newest first, with a Ping summary on the first page",
         description: "Read-only and database-only: no platform request, no refresh, no queued work, so the chat is "
             + "never marked read on the platform. `fanRef` is the OnlyFans fan id, which is the chat id. The reader is "
-            + "the one a generation uses (`aiTranscriptFreshUnionMode`): `source` is `archive` or `union`. Rows come "
+            + "the one a generation uses: `source` is `union` (archive ∪ webhook store) on OnlyFans, `archive` on Fansly. "
+            + "Rows come "
             + "newest first, `limit` (1 to 100) a page; a message deleted on the platform stays as a row with "
             + "`deleted: true` and an empty `text`. A request without `cursor` starts a walk and freezes it: "
             + "`snapshotRevision`, `asOf`, "
@@ -1618,34 +1689,40 @@ export const clientRouteSchemas = {
         description: "Database-only: no platform request, no queued work; the hub never sends the message itself. "
             + "`fanRef` is the platform's fan id: on OnlyFans the fan id, which is the chat id; on Fansly the fan's "
             + "account id (18 to 19 digits, kept as text). Three facts per fan: the first greeting is "
-            + "confirmed; one person and client install holds the lease on working it out (`claim`, `renew`, "
-            + "`release`); one attempt holds the custody of a part being sent (`dispatch`, then `sent` or `failed`). "
+            + "confirmed; one person and client install may hold the lease on working it out (`claim`, `renew`, "
+            + "`release`: older clients; a greeting may be sent without one); one attempt holds the custody of a "
+            + "part being sent (`dispatch`, then `sent` or `failed`). "
             + "A lease is refused while another person or install holds the fan (409 `claim_busy`), to everyone "
             + "but the greeting's owner once the fan is greeted (409 `greeting_done`), and to everyone while a "
             + "desktop new-follower command may have greeted the fan (409 `custody_held`). "
             + "`dispatch` decides in one transaction, in this order: a repeat of the same `attemptId` with the same "
             + "body only reads (never a second ticket), another body is 409 `attempt_conflict`; the owner's switches; "
-            + "the rate (per person and platform: on OnlyFans 6 sends from the preview per 60 s, greetings and "
+            + "the rate (per person and platform: on OnlyFans 30 sends from the preview per 60 s, greetings and "
             + "replies together, `limits.previewSendPerMinute`; on Fansly 30 greetings per 60 s, "
-            + "`limits.greetingSendPerMinute`; 429 `preview_send_rate_limited` with `retryAfterMs`); no unresolved "
-            + "send to the fan (409 `custody_held`); for a greeting, no desktop new-follower command that greeted the "
-            + "fan (409 `greeting_done`) or may have (409 `custody_held`), then either the confirmed greeting's owner "
-            + "and group (409 `greeting_done`, `generation_mismatch`) or the caller's live lease (409 `claim_busy` "
-            + "while another person or install holds the fan, `claim_expired` when there is no live lease or this "
-            + "install holds the fan under another token than the one named); the part not sent yet (409 "
-            + "`part_already_sent`). It answers a one-time `ticket` once. "
+            + "`limits.greetingSendPerMinute`; 429 `preview_send_rate_limited` with `retryAfterMs`); no send to "
+            + "the fan in flight (409 `custody_held` while another dispatch is inside its ticket; one past its "
+            + "ticket with no proof is set aside as unconfirmed and holds nothing); for a greeting, no desktop "
+            + "new-follower command that greeted the fan (409 `greeting_done`) or may have (409 `custody_held`), "
+            + "then either the confirmed greeting's owner and group (409 `greeting_done`, `generation_mismatch`), "
+            + "or with no `leaseToken` no live lease of another person (409 `claim_busy`: the greeting is claimed "
+            + "at the send), or with a `leaseToken` the caller's live lease (409 `claim_busy` while another person "
+            + "or install holds the fan, `claim_expired` when there is no live lease or this install holds the fan "
+            + "under another token than the one named); the part not sent yet (409 `part_already_sent`). It answers "
+            + "a one-time `ticket` once. "
             + "The switches of a dispatch are the owner's stored `chatExtensionEnabled` and `chatExtensionFeatures`, "
             + "read under a row lock inside that transaction, so a change of them waits for the dispatch and holds "
-            + "from the next one; a value that only the environment sets admits no dispatch. Custody never expires: "
-            + "past its ticket an unreported dispatch reads `uncertain-held` and holds the fan until `sent` or a "
-            + "manual resolve. `sent` and `failed` come only from the person and install that dispatched (409 "
-            + "`custody_not_owned`); `failed` only with proof the part never went out, and only while the ticket "
-            + "lasts (409 `custody_held` after it: `uncertain-held` never becomes `failed`). The proof is "
+            + "from the next one; a value that only the environment sets admits no dispatch. Past its ticket an "
+            + "unreported dispatch reads `uncertain-held` (the outcome is unknown) until `sent`, a manual resolve, "
+            + "or the next dispatch to the fan, which sets it aside as unconfirmed (it still reads `uncertain-held` "
+            + "to its own sender, frees the fan and the part, and a late `sent` still lands on it unless its part "
+            + "was sent or dispatched again since: 409 `attempt_conflict`). `sent` and `failed` come only from the "
+            + "person and install that dispatched (409 `custody_not_owned`); `failed` only with proof the part never "
+            + "went out, and only while the ticket lasts (409 `custody_held` after it: `uncertain-held` never "
+            + "becomes `failed`). The proof is "
             + "`not_enqueued` (no request was made: the native queue never took the part, or the client's last "
             + "check before its own request refused it) or `native_rejected` with the platform's 4xx other than "
             + "401. Nothing else proves it: a 401, a 5xx, a timeout or a 2xx that says it failed (Fansly's `200` "
-            + "with `success: false`) is no proof, and the send stays held, `uncertain-held` once the ticket is "
-            + "over, until a late `sent` or a manual resolve. "
+            + "with `success: false`) is no proof, and the send stays `uncertain-held` once the ticket is over. "
             + "`registerNativeSend` records a proven send from the composer, once per page and message, and frees "
             + "nobody's custody: a part whose send from the preview is unresolved stays held (409 `custody_held`). "
             + "A greeting is the exception in what it records, not in what it frees: the proof confirms the fan's "
@@ -1653,10 +1730,10 @@ export const clientRouteSchemas = {
             + "never reads as not greeted after it. In the group `heldParts` lists only the parts nobody can vouch "
             + "for (`uncertain-held`); a part inside its ticket is in flight. "
             + "A group is an AI generation's (`generationRef`, `variant`, `partCount`) or, with `manual-greeting-v1`, "
-            + "a manual one (`{kind: \"manual\", textFingerprint}`: a greeting with no generation, one part, the "
+            + "a manual one (`{kind: \"manual\", textFingerprint}`: a text with no generation, one part, the "
             + "sha256 of its exact text), answered as `generationRef` `manual:<textFingerprint>`, variant 0, one "
-            + "part. What each platform admits (purpose, group, switches): on OnlyFans a greeting or a reply, AI "
-            + "groups only, `dispatch` needs `previewSend` and `newcomers` too for a greeting; on Fansly a greeting "
+            + "part. What each platform admits (purpose, group, switches): on OnlyFans a greeting or a reply, an "
+            + "AI or a manual group, `dispatch` needs `previewSend` and `newcomers` too for a greeting; on Fansly a greeting "
             + "only (a reply, `dispatch` or `registerNativeSend`, is 409 `client_feature_disabled` / "
             + "`platform_unsupported`), an AI or a manual group, `dispatch` needs `newcomers` and not `previewSend`. "
             + "The admission is decided after the repeat check, with the switches. `claim` and `renew` need "
@@ -1710,6 +1787,35 @@ export const clientRouteSchemas = {
             409: errorResponseSchema,
         },
     },
+    clientSendAttributions: {
+        auth: { kind: "apiKey", scope: "page" },
+        tags: ["client"],
+        summary: "Report who sent outgoing messages: the caller sent these messages of the page from the platform page's own composer",
+        description: "Database-only: no platform request, no queued work; the hub never sends anything. The chat "
+            + "extension observed a person's send in the page's own composer and the page's own response named the "
+            + "platform's message id: one fact per message, at most 50 a report, all of the page in the path. The "
+            + "chatter is the user of the token, never a field of the body; no text of a message travels or is "
+            + "stored. `source` names the client that observed the sends and must be one the page's platform admits "
+            + "(OnlyFans: `chatspace-extension`), else 409 `client_feature_disabled` with the reason "
+            + "`platform_unsupported`. One row per message of a page, the first report wins: each fact is answered "
+            + "`recorded`, `duplicate` (the same person already reported it for the same fan), `conflict` (another "
+            + "person, or another fan, reported it first; nothing changes) or `out_of_range` (`observedAt` more than "
+            + "5 minutes ahead of the hub's clock or more than 30 days old; nothing is stored). Every answer is final: "
+            + "a client never repeats a fact the hub answered, and a repeat of a lost answer reads `duplicate`. "
+            + "It needs only the page grant: a send that already happened is recorded whatever the owner's switches "
+            + "and the minimum version say, like `registerNativeSend`. A page that is not an active page granted to "
+            + "the caller is 409 `client_feature_disabled` with the reason `not_granted`.",
+        params: clientPageParamsSchema,
+        body: clientSendAttributionsBodySchema,
+        response: {
+            200: clientSendAttributionsResponseSchema,
+            400: errorResponseSchema,
+            401: errorResponseSchema,
+            403: errorResponseSchema,
+            404: errorResponseSchema,
+            409: errorResponseSchema,
+        },
+    },
     clientAudienceNew: {
         auth: { kind: "apiKey", scope: "page" },
         tags: ["client"],
@@ -1753,14 +1859,16 @@ export const clientRouteSchemas = {
         summary: "Resolve a held chat-extension send by hand: sent or not sent, with a note",
         description: "A cabinet route for the owner and team leads (cookie session, a page they reach); no device "
             + "token reaches it and it is on no narrow-token list. Ends the custody of one attempt that is still "
-            + "`dispatching` or `uncertain-held`, after the resolver looked at the chat: `sent` (optionally with the "
+            + "`dispatching` or `uncertain-held` (a send set aside as unconfirmed included), after the resolver "
+            + "looked at the chat: `sent` (optionally with the "
             + "OnlyFans message id; the first part of a greeting then confirms the greeting) or `not_sent` (the part "
             + "may be sent again). `not_sent` waits for the attempt's ticket to run out: inside it the page may still "
             + "send the part (409 `conflict` with the reason `ticket_live`). Audited as "
             + "`client.send_custody_resolved` in the same transaction. Idempotent: the same resolve again answers "
             + "the same and writes nothing. 404 for an attempt that is not of this page; 409 `conflict` with the "
             + "reason `custody_not_held` for one already reported sent or failed; 409 `attempt_conflict` for one "
-            + "resolved otherwise, or a message id another send already carries.",
+            + "resolved otherwise, a message id another send already carries, or `sent` of a set-aside send whose "
+            + "part was sent or dispatched again since.",
         params: clientSendCustodyParamsSchema,
         body: clientSendCustodyResolveBodySchema,
         response: {

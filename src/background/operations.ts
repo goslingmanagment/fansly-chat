@@ -14,9 +14,9 @@ import {
   DEEP_OPERATION_PREP_TIMEOUT_MS,
   FANSLY_PAGE_LIMIT,
   FANSLY_PAGINATION_DELAY_MS,
-  HI_GREETING_MAX_TRANSCRIPT,
   HI_WELCOME_LOAD_TIMEOUT_MS,
   MIN_MESSAGES_FOR_DEEP,
+  PING_MIN_PERSONAL_MESSAGES,
   QUICK_OPERATION_TIMEOUT_MS,
   SHORT_SUMMARY_MESSAGE_COUNT,
   STREAM_CHUNK_FLUSH_MS,
@@ -2420,7 +2420,7 @@ export class OperationCoordinator {
 
       // Hi (E136, Core Decision 379): the same greeting context as the New
       // Followers window. Welcome and mass messages get the shared transcript
-      // label and do not count against the freshness gate.
+      // label. Hi has no limit on the number of messages (owner 2026-10-21).
       let greetingWindow: GreetingWindowMessage[] | undefined;
       if (payload.feature === 'hi-greeting') {
         // Cache-first, never forced fresh, never in the way: a cold cache gets
@@ -2473,19 +2473,37 @@ export class OperationCoordinator {
             : message,
         );
         greetingWindow = window;
+      }
 
-        // One Fansly page is all Hi reads. If it does not reach the start of
-        // the conversation, older messages may be personal: fail closed, that
-        // fan is Reply or Ping territory. Otherwise only personal messages count.
+      // Ping (owner 2026-10-21): only for a conversation with at least
+      // PING_MIN_PERSONAL_MESSAGES personal messages — welcome and mass sends
+      // do not count, as they never counted for Hi. Welcome texts come from the
+      // cache only (no Fansly request for Ping); the other automation markers
+      // need none. The client refuses by itself only on a certain count: the
+      // whole history read, or a window that already holds enough. Otherwise
+      // no count goes to the hub, and its gate counts every message.
+      let pingPersonalWindow: GreetingWindowMessage[] | undefined;
+      if (payload.feature === 'ping') {
+        const welcome = await this.welcomeDefinitions.peek(resolvedAccountId).catch(() => null);
+        const rawById = new Map(
+          transcriptPages.flatMap((page) => page.messages ?? []).map((message) => [message.id, message]),
+        );
+        const window = transcriptMessages.map((message) => {
+          const raw = rawById.get(message.id);
+          return {
+            automated: raw !== undefined && isAutomatedGreetingMessage(raw, resolvedAccountId, welcome?.texts ?? new Set<string>()),
+          };
+        });
         const personalMessages = countPersonalMessages(window);
-        logDebug(debugEnabled, 'hi greeting gate', {
+        logDebug(debugEnabled, 'ping message gate', {
           messages: window.length,
           personalMessages,
           historyCovered: Boolean(providerReachedEnd),
         });
-        if (!providerReachedEnd || personalMessages > HI_GREETING_MAX_TRANSCRIPT) {
-          throw new ChatGooseError('hi_too_many_messages');
+        if (providerReachedEnd && personalMessages < PING_MIN_PERSONAL_MESSAGES) {
+          throw new ChatGooseError('ping_too_few_messages');
         }
+        pingPersonalWindow = window;
       }
 
       let pingSegment: PingSegment | undefined;
@@ -2910,6 +2928,19 @@ export class OperationCoordinator {
               transcript: { messageCount: keptMessageCount },
             })
           : undefined;
+      // Ping: the personal count of the KEPT window (never above
+      // clientContext.messageCount), sent only when it is certain — the whole
+      // history kept, or already enough to pass the hub's gate.
+      const pingKeptPersonal =
+        pingPersonalWindow !== undefined && keptMessageCount > 0
+          ? countPersonalMessages(pingPersonalWindow.slice(-keptMessageCount))
+          : undefined;
+      const pingPersonalMessageCount =
+        pingKeptPersonal !== undefined &&
+        ((providerReachedEnd && keptMessageCount === transcriptMessages.length) ||
+          pingKeptPersonal >= PING_MIN_PERSONAL_MESSAGES)
+          ? pingKeptPersonal
+          : undefined;
       const kernelRequest = {
         feature: payload.feature,
         clientRequestId: payload.operationId,
@@ -2964,6 +2995,7 @@ export class OperationCoordinator {
               }),
           ...(pingSegment !== undefined ? { pingSegment } : {}),
           ...(fanSilenceDays !== undefined ? { fanSilenceDays } : {}),
+          ...(pingPersonalMessageCount !== undefined ? { personalMessageCount: pingPersonalMessageCount } : {}),
           ...(transcriptCoverage !== undefined ? { transcriptCoverage } : {}),
           ...(transcriptMedia !== undefined ? { media: transcriptMedia } : {}),
         },
