@@ -331,7 +331,13 @@ const ERROR_REGISTRY: Record<UserErrorKey, ErrorRegistryEntry> = {
     key: 'hi_too_many_messages',
     code: 'CG-FLOW-09',
     message: 'В переписке слишком много сообщений для приветствия.',
-    description: 'Приветствие подходит, пока в переписке не больше 10 личных сообщений (welcome и рассылки не считаются) и вся она умещается на одной странице истории. Используйте Ответ.',
+    description: 'Agency Hub отказал в приветствии для этой переписки. Используйте Ответ.',
+  },
+  ping_too_few_messages: {
+    key: 'ping_too_few_messages',
+    code: 'CG-FLOW-10',
+    message: 'Ping — от 10 сообщений.',
+    description: 'В переписке меньше 10 личных сообщений (welcome и рассылки не считаются). Для начала разговора используйте Hi.',
   },
   coach_requires_newer_hub: {
     key: 'coach_requires_newer_hub',

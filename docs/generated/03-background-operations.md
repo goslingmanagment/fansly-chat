@@ -186,8 +186,9 @@ Ordered steps with anchors:
     the resolved fan id; a null fan id degrades PPV labels to "unknown" rather
     than misclassifying (`src/background/operations.ts:1705-1714`).
 15. **Feature gates on transcript size**: deep features with fewer than
-    `MIN_MESSAGES_FOR_DEEP` (30) messages → `not_enough_history`; `hi-greeting`
-    with more than `HI_GREETING_MAX_TRANSCRIPT` (10) → `hi_too_many_messages`
+    `MIN_MESSAGES_FOR_DEEP` (30) messages → `not_enough_history`; `ping`
+    with a whole history of fewer than `PING_MIN_PERSONAL_MESSAGES` (10)
+    personal messages → `ping_too_few_messages` (2.13.1; Hi has no limit)
     (`src/background/operations.ts:1716-1728`;
     `src/shared/constants.ts:89-90`).
 16. **Ping analysis** (`ping-analysis` stage, ping-segment features only).

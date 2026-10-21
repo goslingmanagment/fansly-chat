@@ -789,6 +789,7 @@ export type UserErrorKey =
   | 'gate_voice_disabled'
   | 'compare_cards_unavailable'
   | 'hi_too_many_messages'
+  | 'ping_too_few_messages'
   | 'coach_requires_newer_hub'
   | 'coach_fan_unresolved'
   | 'no_saved_recap'

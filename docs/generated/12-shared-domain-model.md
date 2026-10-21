@@ -300,7 +300,7 @@ maps the bucket to a `Settings` field, returning the fixed `25` for `hi` at
   50 ms, conversation-attach timeouts/retries, `PORT_RECONNECT_DELAYS_MS =
   [100, 200, 400]`.
 - **Feature thresholds** (`constants.ts:87`): `MIN_MESSAGES_FOR_DEEP = 30`,
-  `HI_GREETING_MAX_TRANSCRIPT = 10`, `PING_ACTIVE_DAYS = 5`,
+  `PING_MIN_PERSONAL_MESSAGES = 10`, `PING_ACTIVE_DAYS = 5`,
   `PING_MIN_FAN_MESSAGES = 3`.
 - **Earnings / agency hub** (`constants.ts:94`): earnings fallback window 90
   days; hub prefetch/sync timeouts; AI-usage batch cap 100, debounce 1 s,
@@ -361,6 +361,7 @@ value into one.
 | `hub_request_failed` | CG-HUB-07 | | Agency Hub request failed. |
 | `hub_sync_failed` | CG-HUB-08 | | Hub sync failed, summary remains available locally. |
 | `hi_too_many_messages` | CG-FLOW-09 | | This conversation has too many messages for a greeting. |
+| `ping_too_few_messages` | CG-FLOW-10 | | Ping needs at least 10 personal messages. |
 | `insertion_failed` | CG-UI-01 | | Could not insert into the Fansly message box. |
 | `unknown_error` | CG-APP-01 | | Something went wrong. |
 

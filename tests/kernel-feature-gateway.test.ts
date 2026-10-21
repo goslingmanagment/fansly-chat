@@ -258,11 +258,17 @@ describe('kernel feature gateway', () => {
     // The vendored Core contract takes exactly this body.
     expect(routeSchemas.aiFeatureStream.body!.safeParse(hi).success).toBe(true);
 
-    // Core answers 400 to any of the four on another feature.
+    // Core answers 400 to the greeting fields on another feature; the
+    // personal count rides Ping too (the hub's Ping gate, 2026-10-21).
     const ping = await bodyFor('ping');
     expect(ping).not.toHaveProperty('variantCount');
-    for (const field of ['fanUsername', 'fanAvatarUrl', 'personalMessageCount']) {
+    for (const field of ['fanUsername', 'fanAvatarUrl']) {
       expect(ping.clientContext).not.toHaveProperty(field);
+    }
+    expect(ping.clientContext).toMatchObject({ personalMessageCount: 1 });
+    const reply = await bodyFor('fast-reply');
+    for (const field of ['fanUsername', 'fanAvatarUrl', 'personalMessageCount']) {
+      expect(reply.clientContext).not.toHaveProperty(field);
     }
   });
 
@@ -353,7 +359,7 @@ describe('kernel feature gateway', () => {
   });
 
   it('maps kernel gate codes structurally, independent of the message wording (#120)', async () => {
-    const gateByCode = async (code: string): Promise<ChatGooseError> => {
+    const gateByCode = async (code: string, feature: KernelFeatureRequest['feature'] = 'fast-reply'): Promise<ChatGooseError> => {
       const fetchMock = vi.fn(async () =>
         new Response(JSON.stringify({ error: code, message: 'reworded upstream', statusCode: 400 }), {
           status: 400,
@@ -361,7 +367,7 @@ describe('kernel feature gateway', () => {
         }));
       const gateway = createKernelFeatureGateway(fetchMock as unknown as typeof fetch);
       try {
-        await gateway.streamFeature(settings(), request(), { onText: () => {} }, new AbortController().signal);
+        await gateway.streamFeature(settings(), request({ feature }), { onText: () => {} }, new AbortController().signal);
         throw new Error('expected a throw');
       } catch (error) {
         if (error instanceof ChatGooseError) return error;
@@ -370,6 +376,7 @@ describe('kernel feature gateway', () => {
     };
 
     expect((await gateByCode('gate_min_messages')).key).toBe('not_enough_history');
+    expect((await gateByCode('gate_min_messages', 'ping')).key).toBe('ping_too_few_messages');
     expect((await gateByCode('gate_hi_greeting_limit')).key).toBe('hi_too_many_messages');
     expect((await gateByCode('gate_ping_active')).key).toBe('ping_blocked');
     expect((await gateByCode('gate_draft_required')).key).toBe('unknown_error');

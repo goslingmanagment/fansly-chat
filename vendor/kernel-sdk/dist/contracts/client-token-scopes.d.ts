@@ -8,8 +8,8 @@ import { type RouteAuthPolicy } from "./routes";
  * reaches tokens already issued, with no re-issue.
  *
  * The API server refuses every route outside `operations` with a reason-less
- * 403, in both `AUTH_POLICY_ENFORCEMENT` modes; routes that take no principal
- * (`public`, `hmac`, `pending-device-token`) are not subject to it. The capture
+ * 403; routes that take no principal (`public`, `hmac`,
+ * `pending-device-token`) are not subject to it. The capture
  * lane accepts only `ingestKinds` from such a token, under the profile's own
  * producer.
  *
@@ -23,7 +23,7 @@ import { type RouteAuthPolicy } from "./routes";
  */
 export declare const CLIENT_TOKEN_PROFILES: {
     readonly "chat-extension": {
-        readonly operations: readonly ["authRevokeCurrentDeviceToken", "me", "clientBootstrap", "aiPersonaCatalog", "aiFeatureStream", "aiRecapStatus", "pageConversationProfile", "pageFanProfile", "spenders", "spenderDetail", "spenderBatch", "pageSpenderAutoLists", "ingestObservations", "clientConversationRecaps", "clientConversationFeed", "clientFanProfileFromGeneration", "clientAiUsageDaily", "clientSpenderStats", "clientSpenderAwaitingReply", "clientFanClaim", "clientFanClaimStatus", "clientAudienceNew", "voiceNoteCreate", "voiceNoteStatus", "voiceNoteAudio"];
+        readonly operations: readonly ["authRevokeCurrentDeviceToken", "me", "clientBootstrap", "aiPersonaCatalog", "aiFeatureStream", "aiRecapStatus", "pageConversationProfile", "pageFanProfile", "spenders", "spenderDetail", "spenderBatch", "pageSpenderAutoLists", "ingestObservations", "clientConversationRecaps", "clientConversationFeed", "clientFanProfileFromGeneration", "clientAiUsageDaily", "clientSpenderStats", "clientSpenderAwaitingReply", "clientFanClaim", "clientFanClaimStatus", "clientAudienceNew", "clientSendAttributions", "voiceNoteCreate", "voiceNoteStatus", "voiceNoteAudio"];
         readonly ingestKinds: readonly ["ai_acceptance", "client_health"];
     };
 };

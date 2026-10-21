@@ -1,4 +1,12 @@
 export declare const kernelOperations: {
+    readonly adminAiAccountUpdate: {
+        readonly method: "PATCH";
+        readonly path: "/api/v1/admin/ai/accounts/:accountId";
+    };
+    readonly adminAiAccountsList: {
+        readonly method: "GET";
+        readonly path: "/api/v1/admin/ai/accounts";
+    };
     readonly adminAiPersonaArchive: {
         readonly method: "DELETE";
         readonly path: "/api/v1/admin/ai/personas/:key";
@@ -34,10 +42,6 @@ export declare const kernelOperations: {
     readonly adminConfigClear: {
         readonly method: "DELETE";
         readonly path: "/api/v1/admin/config/:key";
-    };
-    readonly adminConfigStaged: {
-        readonly method: "PATCH";
-        readonly path: "/api/v1/admin/config/staged";
     };
     readonly adminConfigUpdate: {
         readonly method: "PATCH";
@@ -99,10 +103,6 @@ export declare const kernelOperations: {
         readonly method: "POST";
         readonly path: "/api/v1/admin/sync/followers-reconcile/reset";
     };
-    readonly adminGrantModel: {
-        readonly method: "POST";
-        readonly path: "/api/v1/admin/users/by-id/:userId/models";
-    };
     readonly adminIncidents: {
         readonly method: "GET";
         readonly path: "/api/v1/admin/incidents";
@@ -114,10 +114,6 @@ export declare const kernelOperations: {
     readonly adminListDeviceTokens: {
         readonly method: "GET";
         readonly path: "/api/v1/admin/users/by-id/:userId/device-tokens";
-    };
-    readonly adminListUserGrants: {
-        readonly method: "GET";
-        readonly path: "/api/v1/admin/users/by-id/:userId/grants";
     };
     readonly adminListUsers: {
         readonly method: "GET";
@@ -286,10 +282,6 @@ export declare const kernelOperations: {
     readonly adminRevokeDeviceTokens: {
         readonly method: "DELETE";
         readonly path: "/api/v1/admin/users/by-id/:userId/device-tokens";
-    };
-    readonly adminRevokeModel: {
-        readonly method: "DELETE";
-        readonly path: "/api/v1/admin/users/by-id/:userId/models/:modelSlug";
     };
     readonly adminSetDeviceTokenHarvestCapability: {
         readonly method: "PATCH";
@@ -582,6 +574,10 @@ export declare const kernelOperations: {
     readonly clientFanProfileFromGeneration: {
         readonly method: "POST";
         readonly path: "/api/v1/client/pages/:pageLabel/fans/:fanRef/profile/from-generation";
+    };
+    readonly clientSendAttributions: {
+        readonly method: "POST";
+        readonly path: "/api/v1/client/pages/:pageLabel/send-attributions";
     };
     readonly clientSendCustodyList: {
         readonly method: "GET";

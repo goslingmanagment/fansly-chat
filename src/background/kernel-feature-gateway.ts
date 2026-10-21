@@ -32,9 +32,9 @@ export interface KernelFeatureClientContext {
    * so the gateway sends them for that feature alone. */
   fanUsername?: string;
   fanAvatarUrl?: string;
-  /** hi-greeting only: messages of the shipped transcript that are not
-   * automated; what the kernel's freshness gate counts. Never above
-   * `messageCount` (build it with `buildGreetingContext`). */
+  /** hi-greeting and ping: messages of the shipped transcript that are not
+   * automated; what the hub's Ping gate counts (at least 10, owner
+   * 2026-10-21). Never above `messageCount`. */
   personalMessageCount?: number;
   /** The chatter's saved name for the fan (Fansly rename, E115 / Core
    * Decision 290); read by the ping template. Absent when never renamed. */
@@ -208,15 +208,18 @@ function createKernelErrorFrameError(
  * BEFORE the generic HTTP mapping so gate messages stay user-meaningful
  * (the desktop adapter's recorded pattern). Structured code first; the
  * wording match stays as a fallback for pre-#120 kernels. */
-function mapKernelGateError(error: KernelApiError): ChatGooseError | null {
+function mapKernelGateError(error: KernelApiError, feature?: FeatureType): ChatGooseError | null {
   if (error.status !== 400) {
     return null;
   }
   const message = error.message;
+  // The hub's minimum is per feature: Ping's is 10 personal messages, the deep
+  // features' 30 messages.
+  const tooFew = feature === 'ping' ? 'ping_too_few_messages' : 'not_enough_history';
   if (error.code !== null) {
     switch (error.code) {
       case 'gate_min_messages':
-        return new ChatGooseError('not_enough_history', { message });
+        return new ChatGooseError(tooFew, { message });
       case 'gate_hi_greeting_limit':
         return new ChatGooseError('hi_too_many_messages', { message });
       case 'gate_ping_active':
@@ -228,7 +231,7 @@ function mapKernelGateError(error: KernelApiError): ChatGooseError | null {
     }
   }
   if (message.includes('requires at least')) {
-    return new ChatGooseError('not_enough_history', { message });
+    return new ChatGooseError(tooFew, { message });
   }
   if (message.includes('at most') && message.includes('hi-greeting')) {
     return new ChatGooseError('hi_too_many_messages', { message });
@@ -260,7 +263,7 @@ async function toChatGooseError(
     return error;
   }
   if (error instanceof KernelApiError) {
-    const gate = mapKernelGateError(error);
+    const gate = mapKernelGateError(error, feature);
     if (gate) {
       return gate;
     }
@@ -446,8 +449,10 @@ export function createKernelFeatureGateway(
       };
 
       // Core Decision 379: these four are valid for hi-greeting only and a
-      // 400 anywhere else. One guard here beats trusting every caller.
+      // 400 anywhere else. One guard here beats trusting every caller. The
+      // personal count rides Ping too (the hub's Ping gate, 2026-10-21).
       const greetingFields = request.feature === 'hi-greeting';
+      const personalCountField = greetingFields || request.feature === 'ping';
       const handle = streamAiFeature(
         {
           baseUrl,
@@ -504,7 +509,7 @@ export function createKernelFeatureGateway(
               fanDisplayName: request.clientContext.fanDisplayName,
               ...(greetingFields && request.clientContext.fanUsername !== undefined ? { fanUsername: request.clientContext.fanUsername } : {}),
               ...(greetingFields && request.clientContext.fanAvatarUrl ? { fanAvatarUrl: request.clientContext.fanAvatarUrl } : {}),
-              ...(greetingFields && request.clientContext.personalMessageCount !== undefined
+              ...(personalCountField && request.clientContext.personalMessageCount !== undefined
                 ? { personalMessageCount: request.clientContext.personalMessageCount }
                 : {}),
               fanSpendingData: request.clientContext.fanSpendingData,

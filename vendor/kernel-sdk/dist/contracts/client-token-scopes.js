@@ -8,8 +8,8 @@ import { routeSchemas } from "./routes";
  * reaches tokens already issued, with no re-issue.
  *
  * The API server refuses every route outside `operations` with a reason-less
- * 403, in both `AUTH_POLICY_ENFORCEMENT` modes; routes that take no principal
- * (`public`, `hmac`, `pending-device-token`) are not subject to it. The capture
+ * 403; routes that take no principal (`public`, `hmac`,
+ * `pending-device-token`) are not subject to it. The capture
  * lane accepts only `ingestKinds` from such a token, under the profile's own
  * producer.
  *
@@ -50,6 +50,9 @@ export const CLIENT_TOKEN_PROFILES = {
             "clientFanClaimStatus",
             // H-7c: the "new subscribers" list.
             "clientAudienceNew",
+            // send-attribution-v1: who sent each outgoing message (the person's own
+            // sends from the page's composer, as the extension observed them).
+            "clientSendAttributions",
             // R20 HF-4б: the voice notes of a Fansly page (the paid render of a
             // voice script, its status, its audio), behind the page's `voice` flag
             // (modules/voice).
