@@ -272,6 +272,30 @@ describe('kernel feature gateway', () => {
     }
   });
 
+  it('sends the fan\'s photos on Reply, Fix and Coach only, in the shape Core takes', async () => {
+    const liveImages = [{
+      platformMessageId: '900',
+      mediaId: '55',
+      sentAt: '2026-10-22T06:01:00.000Z',
+      mediaType: 'image/jpeg' as const,
+      data: 'AAAA',
+    }];
+    const bodyFor = async (feature: KernelFeatureRequest['feature']): Promise<Record<string, unknown>> => {
+      const calls: Array<{ init: RequestInit | undefined }> = [];
+      const fetchMock = vi.fn(async (_url: URL | string, init?: RequestInit) => {
+        calls.push({ init });
+        return sseResponse([{ ...META, feature }, { type: 'content_delta', text: 'hey' }, { type: 'done', stopReason: 'end_turn' }]);
+      });
+      const gateway = createKernelFeatureGateway(fetchMock as unknown as typeof fetch);
+      await gateway.streamFeature(settings(), request({ feature, liveImages }), { onText: () => {} }, new AbortController().signal);
+      return JSON.parse(String(calls[0]!.init?.body)) as Record<string, unknown>;
+    };
+    const reply = await bodyFor('fast-reply');
+    expect(reply.liveImages).toEqual(liveImages);
+    expect(routeSchemas.aiFeatureStream.body!.safeParse(reply).success).toBe(true);
+    expect(await bodyFor('help-me')).not.toHaveProperty('liveImages');
+  });
+
   it('sends summaryMode only for a short recap; a full recap omits it', async () => {
     const bodyFor = async (summaryMode: 'short' | undefined): Promise<Record<string, unknown>> => {
       const calls: Array<{ init: RequestInit | undefined }> = [];

@@ -2018,10 +2018,14 @@ export const FAN_SILENCE_DAYS_MAX = 20_000;
 // 12 MiB: the limit is 13 MiB (13.63MB) from here on, about 1MB above the
 // worst schema-valid body, so the next small field does not raise it again.
 //
+// chat-extension live images add the open chat's newest fan photos as bytes
+// (`liveImages`): 3 x 700k base64 characters, one byte each on the wire (JSON
+// escapes nothing of the base64 alphabet), 2.1MB. The limit is 16 MiB from
+// here on.
+//
 // Kept in the contract next to the schema so the limit and the field caps that
-// drive it cannot drift apart; asserted against the measured worst case in
-// tests/contracts-coach-body.test.ts.
-export const AI_FEATURE_STREAM_BODY_LIMIT_BYTES = 13 * 1024 * 1024;
+// drive it cannot drift apart.
+export const AI_FEATURE_STREAM_BODY_LIMIT_BYTES = 16 * 1024 * 1024;
 // chat-extension H-4c — the fresh text of the open chat (OnlyFans; Fansly since
 // R20 HF-8б): the last confirmed messages the client reads off the page it is
 // showing, for the features that draft a message to the fan (Reply, Fix, Hi,
@@ -2143,6 +2147,26 @@ export const aiLivePpvContextSchema = z.object({
     items: z.array(z.union([aiLivePpvMessageItemSchema, aiLivePpvAttachmentItemSchema])).min(1).max(AI_LIVE_PPV_MAX_ITEMS)
         .refine((items) => new Set(items.map(aiLivePpvItemKey)).size === items.length, { message: "livePpvContext ids repeat" }),
 }).strict();
+// chat-extension live images — the newest photos the fan sent in the open
+// chat, as the client's page already shows them: re-encoded by the client as
+// JPEG (at most 1024 px on the long edge), so the model looks at the photo
+// itself instead of a caption. The hub decodes and re-encodes them again,
+// never stores the bytes and attaches them to ONE generation
+// (context/live-images.ts). Never a paid PPV body: only what the fan sent.
+export const AI_LIVE_IMAGES_MAX = 3;
+/** Per image, base64 characters (about 512 KiB of JPEG). */
+export const AI_LIVE_IMAGE_DATA_MAX_CHARS = 700_000;
+export const aiLiveImagesSchema = z.array(z.object({
+    /** The fan's message that carries the photo, by the platform's own id. */
+    platformMessageId: clientNumericIdSchema,
+    /** The platform's media id of the photo (OnlyFans media id, Fansly accountMedia id). */
+    mediaId: clientNumericIdSchema,
+    /** When the fan sent the message. */
+    sentAt: aiLiveTextInstantSchema,
+    mediaType: z.literal("image/jpeg"),
+    data: z.string().min(4).max(AI_LIVE_IMAGE_DATA_MAX_CHARS).regex(/^[A-Za-z0-9+/]+={0,2}$/, "liveImages data is base64"),
+}).strict()).min(1).max(AI_LIVE_IMAGES_MAX)
+    .refine((images) => new Set(images.map((image) => image.mediaId)).size === images.length, { message: "liveImages media ids repeat" });
 // chat-extension R20 HF-8в — the window coverage check (above). Ids only: no
 // text travels, nothing is added to the prompt and nothing is stored. Every id
 // is named once across both lists: one id with two answers would be no answer.
@@ -2175,24 +2199,22 @@ export const aiCoverageCheckSchema = z.object({
 // already loaded, and counts the personal messages there: its open tab, by a
 // fresh end of the history shorter than a page and the continuous observation
 // since (`tab-short-page`), or its walk of the history to the empty page
-// (`pass-empty-page`). The hub checks the ids against the history it holds and
-// the count against the Hi limit (docs/ai-gateway-contract.md, "Hi on Fansly").
-// Ids only, never a text.
+// (`pass-empty-page`). Hi has no count limit since 2026-10-21, so the hub
+// gates nothing on it: a valid proof of this chat only leaves its counts in the
+// context manifest (docs/ai-gateway-contract.md, "Hi on Fansly"). Ids only,
+// never a text.
 //
 // The schema is the client's own, field by field and rule by rule
-// (chat-extension `packages/contracts/src/fansly.ts`, `StartProofV1Schema`);
-// tests/fixtures/ai-hi-start-proof-matrix.json holds the bodies both accept
-// and both refuse.
+// (chat-extension `packages/contracts/src/fansly.ts`, `StartProofV1Schema`).
 /** Who proved the start. */
 export const AI_START_PROOF_SOURCES = ["tab-short-page", "pass-empty-page"];
 /** How many ids `startProof.automatedIds` may name: the newest ones. */
 export const AI_START_PROOF_AUTOMATED_IDS_MAX = 120;
 /** A pass counts personal messages among the last 30 of the history it walked. */
 export const AI_START_PROOF_PASS_PERSONAL_WINDOW = 30;
-/** `reason` of a `gate_hi_greeting_limit` refusal on the start-proof lane:
- *  `history_unproven` (no proof, or one the hub's history contradicts) and
- *  `too_many_personal` (the proof counts more personal messages than Hi
- *  allows). Open on the wire: a client reads an unknown reason as a refusal. */
+/** Legacy: the `reason`s a `gate_hi_greeting_limit` refusal carried on the
+ *  start-proof lane until Hi lost its count limit (2026-10-21). The hub emits
+ *  neither any more; kept for the released clients that map them. */
 export const AI_HI_GREETING_REFUSAL_REASONS = ["history_unproven", "too_many_personal"];
 export const aiStartProofV1Schema = z.object({
     v: z.literal(1),
@@ -2311,18 +2333,13 @@ export const aiFeatureStreamBodySchema = z.object({
     // chat-extension R20 HF-5 — Hi on Fansly (above). These three are read only
     // on `hi-greeting`, on a Fansly page, without `clientContext`, from a caller
     // that advertised `hi-start-proof-v1`; anywhere else each is a 400 with a
-    // machine reason. With that capability the hub admits Hi on Fansly by the
-    // proof (its start checked against the hub's history, at most 10 personal
-    // messages) and by nothing else: without a proof the answer is
-    // `gate_hi_greeting_limit` with reason `history_unproven`.
+    // machine reason. They gate nothing: Hi has no count limit (2026-10-21).
     startProof: aiStartProofV1Schema.optional(),
     // The same count at the top level, as the released clients carry it in
-    // `clientContext.personalMessageCount`. On the Fansly lane it proves nothing
-    // by itself, and beside a proof it must equal `startProof.personalCount`.
-    // On an OnlyFans `hi-greeting` (no clientContext) it is accepted alone: the
-    // ChatSpace extension's count of the personal messages in the window it read
-    // (fan messages and the model's own, no mass, queue or welcome sends), which
-    // the Hi gate counts in place of the hub's transcript (audit 2026-10-20 row 6).
+    // `clientContext.personalMessageCount`. On the Fansly lane, beside a proof,
+    // it must equal `startProof.personalCount`. On an OnlyFans `hi-greeting` (no
+    // clientContext) it is accepted alone: the ChatSpace extension's count of
+    // the personal messages in the window it read (audit 2026-10-20 row 6).
     personalMessageCount: z.number().int().min(0).optional(),
     // The fan's avatar as the page already loaded it; rides to the provider as
     // an image, exactly as `clientContext.fanAvatarUrl` does. The hub never
@@ -2344,6 +2361,11 @@ export const aiFeatureStreamBodySchema = z.object({
     // same flag as the fresh text (the page's `freshText` flag); switched off,
     // it is ignored.
     livePpvContext: aiLivePpvContextSchema.optional(),
+    // chat-extension live images (above). Accepted on fast-reply, improve-draft
+    // and coach-chat, beside clientContext only on a Fansly page (the released
+    // Fansly extension): anything else is a 400 with a machine reason. Used while the owner's `aiLiveImagesEnabled` is on;
+    // switched off, they are ignored.
+    liveImages: aiLiveImagesSchema.optional(),
     // Client-loaded context for platforms whose kernel archive is
     // pull-cadenced (Fansly: dm_conversations 30 min / dm_messages 24 h — no
     // webhook lane), where the client reads the conversation live at
@@ -2366,10 +2388,10 @@ export const aiFeatureStreamBodySchema = z.object({
         // to the deprecated greetingMode alias). The kernel never fetches the URL.
         fanUsername: z.string().max(200).optional(),
         fanAvatarUrl: fanslyAvatarUrlSchema.optional(),
-        // hi-greeting only: messages in the window that are NOT
-        // automatic/mass sends (fan messages plus the model's personal ones). The
-        // freshness gate counts these when present, so a fan holding only welcome
-        // and mass messages is not locked out. Never above messageCount.
+        // hi-greeting and ping only: messages in the window that are NOT
+        // automatic/mass sends (fan messages plus the model's personal ones).
+        // Ping's minimum (10, `gate_min_messages`) counts these when present, and
+        // every message otherwise; Hi has no count limit. Never above messageCount.
         personalMessageCount: z.number().int().min(0).max(5000).optional(),
         pingSegment: z.enum(["segment-a", "segment-b", "active"]).optional(),
         // Whole days since the fan's latest text message, computed from the same
@@ -5086,6 +5108,131 @@ const insightsTrafficRowSchema = z.object({
     previewVideoPercentWatchedSum: z.string().nullable(),
     revisionCount: z.number().int(),
     lastObservedAt: isoTimestamp,
+});
+/** Fansly's 2026-10 statistics (`/creator/stats/*`, 0292): one page's
+ *  account plane over the last `days` UTC days ending on `to` (default:
+ *  today). The window's totals are Fansly's own, from the summary of exactly
+ *  that length when Hub holds one (uniques and paying fans are not sums of
+ *  days); everything else is the daily rows as served — a day without a row
+ *  inside the covered span had no activity. */
+export const creatorStatsOverviewQuerySchema = z.object({
+    days: z.coerce.number().int().refine((value) => [7, 30, 90, 180, 365].includes(value), "days must be 7, 30, 90, 180 or 365").default(30),
+    to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected a UTC day YYYY-MM-DD").optional(),
+});
+const creatorStatsCount = z.number().int().nullable();
+export const creatorStatsOverviewResponseSchema = z.object({
+    page: insightsPageSchema,
+    window: z.object({ fromDay: z.string(), toDay: z.string(), days: z.number().int() }),
+    totalsWindow: z.object({ fromDay: z.string(), toDay: z.string(), capturedAt: isoTimestamp }).nullable(),
+    /** `{ value, previous }` of the summary window; money metrics end in `Mills`,
+     *  ratios and averages are not whole numbers. */
+    totals: z.array(z.object({
+        scope: z.string(), ref: z.string(), metric: z.string(), value: z.number().nullable(), previous: z.number().nullable(),
+    })),
+    views: z.array(z.object({
+        day: z.string(), source: z.number().int(), views: creatorStatsCount, uniqueViewers: creatorStatsCount,
+        videoViews: creatorStatsCount, completedViews: creatorStatsCount, watchMs: creatorStatsCount,
+        watchPctSum: z.number().nullable(), imageViews: creatorStatsCount,
+    })),
+    profile: z.array(z.object({
+        day: z.string(), source: z.number().int(), profileVisits: creatorStatsCount, uniqueVisitors: creatorStatsCount,
+        profileWatchMs: creatorStatsCount,
+    })),
+    follows: z.array(z.object({ day: z.string(), follows: creatorStatsCount, unfollows: creatorStatsCount })),
+    subscriptions: z.array(z.object({
+        day: z.string(), tierId: z.string(), subscriptionsNew: creatorStatsCount, subscriptionsRenewed: creatorStatsCount,
+        subscriptionsExpired: creatorStatsCount, subscriptionsCancelled: creatorStatsCount,
+    })),
+    revenue: z.array(z.object({
+        day: z.string(), productType: z.number().int(), productLabel: z.string(), transactions: creatorStatsCount,
+        grossMills: mills.nullable(), netMills: mills.nullable(), refunds: creatorStatsCount, refundedNetMills: mills.nullable(),
+    })),
+    levels: z.array(z.object({ day: z.string(), followerCount: creatorStatsCount, subscriberCount: creatorStatsCount })),
+    tierLevels: z.array(z.object({ day: z.string(), tierId: z.string(), subscriberCount: creatorStatsCount })),
+    engagement: z.array(z.object({ day: z.string(), metric: z.string(), source: z.number().int(), value: creatorStatsCount })),
+    hourlyViews: z.array(z.object({ hour: isoTimestamp, source: z.number().int(), views: creatorStatsCount, watchMs: creatorStatsCount })),
+    hourlyRevenue: z.array(z.object({ hour: isoTimestamp, netMills: mills.nullable(), transactions: creatorStatsCount })),
+    tiers: z.array(z.object({
+        tierId: z.string(), name: z.string().nullable(), color: z.string().nullable(), position: z.number().int().nullable(),
+        active: z.boolean().nullable(),
+    })),
+    coverage: z.array(z.object({
+        scopeRef: z.string(), oldestCapturedAt: isoTimestamp.nullable(), newestCapturedAt: isoTimestamp.nullable(), updatedAt: isoTimestamp,
+    })),
+});
+/** The media plane (0293) over the last `days` UTC days: the page's media by
+ *  views in the window, each tied to the post that carries it. */
+export const creatorStatsContentResponseSchema = z.object({
+    page: insightsPageSchema,
+    window: z.object({ fromDay: z.string(), toDay: z.string(), days: z.number().int() }),
+    /** The media walk's progress: offers queued, and those visited at least once. */
+    walk: z.object({ visited: z.number().int(), queued: z.number().int() }),
+    media: z.array(z.object({
+        mediaOfferId: z.string(),
+        mediaType: z.number().int().nullable(),
+        durationMs: z.number().int().nullable(),
+        postId: z.string().nullable(),
+        postedAt: isoTimestamp.nullable(),
+        /** When the model deleted the media; Fansly still serves its days. */
+        deletedAt: isoTimestamp.nullable(),
+        caption: z.string().nullable(),
+        views: creatorStatsCount,
+        forYouViews: creatorStatsCount,
+        timelineViews: creatorStatsCount,
+        otherViews: creatorStatsCount,
+        videoViews: creatorStatsCount,
+        completedViews: creatorStatsCount,
+        watchMs: creatorStatsCount,
+        /** Sum of each view's watched share in hundredths of a percent. */
+        watchPctSum: z.number().nullable(),
+        likes: creatorStatsCount,
+        allTimeViews: creatorStatsCount,
+    })),
+});
+export const creatorStatsMediaParamsSchema = pageParamsSchema.extend({ mediaOfferId: z.string().regex(/^\d{1,30}$/) });
+export const creatorStatsMediaResponseSchema = z.object({
+    mediaOfferId: z.string(),
+    window: z.object({ fromDay: z.string(), toDay: z.string(), days: z.number().int() }),
+    daily: z.array(z.object({
+        day: z.string(), source: z.number().int(), views: creatorStatsCount, videoViews: creatorStatsCount,
+        completedViews: creatorStatsCount, watchMs: creatorStatsCount, uniqueViewers: creatorStatsCount,
+    })),
+    hourly: z.array(z.object({ hour: isoTimestamp, source: z.number().int(), views: creatorStatsCount })),
+    retention: z.array(z.object({
+        source: z.number().int(), sampleSize: creatorStatsCount, capturedDay: z.string(),
+        points: z.array(z.object({ percent: z.number(), stillWatching: z.number() })),
+    })),
+    tags: z.array(z.object({ tag: z.string(), source: z.number().int(), views: creatorStatsCount })),
+});
+/** The audience plane (0294) over the last `days` UTC days. */
+export const creatorStatsAudienceResponseSchema = z.object({
+    page: insightsPageSchema,
+    window: z.object({ fromDay: z.string(), toDay: z.string(), days: z.number().int() }),
+    countries: z.array(z.object({
+        country: z.string(), source: z.number().int(), views: creatorStatsCount, watchMs: creatorStatsCount, profileVisits: creatorStatsCount,
+    })),
+    /** The days of the window the countries cover (served windows inside it). */
+    countriesCoveredDays: z.number().int(),
+    tags: z.object({
+        fromDay: z.string(), toDay: z.string(),
+        rows: z.array(z.object({
+            tag: z.string(), source: z.number().int(), views: creatorStatsCount, videoViews: creatorStatsCount,
+            completedViews: creatorStatsCount, liftPoints: z.number().nullable(), liftAvailable: z.boolean().nullable(),
+        })),
+    }).nullable(),
+    activeHours: z.object({
+        fromDay: z.string(), toDay: z.string(),
+        cells: z.array(z.object({ source: z.number().int(), weekday: z.number().int(), hour: z.number().int(), views: creatorStatsCount })),
+    }).nullable(),
+    benchmarks: z.object({
+        fromDay: z.string(), toDay: z.string(),
+        rows: z.array(z.object({
+            source: z.number().int(), lengthBucket: z.number().int(), minMs: creatorStatsCount, maxMs: creatorStatsCount,
+            mediaCount: creatorStatsCount, avgWatchPercent: z.number().nullable(), completionRate: z.number().nullable(),
+            videoViews: creatorStatsCount,
+        })),
+    }).nullable(),
+    mediaShown: z.array(z.object({ hour: isoTimestamp, source: z.number().int(), mediaShown: creatorStatsCount })),
 });
 export const statsTrafficQuerySchema = z.object({
     from: insightsInstant,
@@ -8116,6 +8263,44 @@ const baseRouteSchemas = {
             403: errorResponseSchema,
             404: errorResponseSchema,
         },
+    },
+    creatorStatsOverview: {
+        auth: { kind: "owner-session", scope: "page" },
+        tags: ["insights"],
+        summary: "Fansly's 2026-10 statistics of one page: daily series, levels, engagement, last hours and the window's totals",
+        params: pageParamsSchema,
+        querystring: creatorStatsOverviewQuerySchema,
+        response: {
+            200: creatorStatsOverviewResponseSchema,
+            400: errorResponseSchema,
+            401: errorResponseSchema,
+            403: errorResponseSchema,
+            404: errorResponseSchema,
+        },
+    },
+    creatorStatsContent: {
+        auth: { kind: "owner-session", scope: "page" },
+        tags: ["insights"],
+        summary: "Fansly's 2026-10 media statistics of one page: its media by views in the window, with their posts",
+        params: pageParamsSchema,
+        querystring: creatorStatsOverviewQuerySchema,
+        response: { 200: creatorStatsContentResponseSchema, 400: errorResponseSchema, 401: errorResponseSchema, 403: errorResponseSchema, 404: errorResponseSchema },
+    },
+    creatorStatsMedia: {
+        auth: { kind: "owner-session", scope: "page" },
+        tags: ["insights"],
+        summary: "Fansly's 2026-10 statistics of one media offer: days by surface, last hours, retention, tags",
+        params: creatorStatsMediaParamsSchema,
+        querystring: creatorStatsOverviewQuerySchema,
+        response: { 200: creatorStatsMediaResponseSchema, 400: errorResponseSchema, 401: errorResponseSchema, 403: errorResponseSchema, 404: errorResponseSchema },
+    },
+    creatorStatsAudience: {
+        auth: { kind: "owner-session", scope: "page" },
+        tags: ["insights"],
+        summary: "Fansly's 2026-10 audience statistics of one page: countries, tags, active hours, benchmarks, media shown",
+        params: pageParamsSchema,
+        querystring: creatorStatsOverviewQuerySchema,
+        response: { 200: creatorStatsAudienceResponseSchema, 400: errorResponseSchema, 401: errorResponseSchema, 403: errorResponseSchema, 404: errorResponseSchema },
     },
     statsCoverage: {
         auth: { kind: "owner-session", scope: "page" },

@@ -112,6 +112,9 @@ export const CLIENT_HUB_CAPABILITY_NAMES = [
     // The AI feature stream takes `livePpvContext` on a Fansly page too: one item
     // per paid attachment of the open chat, read from Fansly at the click.
     "live-ppv-fansly-v1",
+    // The AI feature stream takes `liveImages`, the fan's newest photos of the
+    // open chat as bytes; listed while the owner's `aiLiveImagesEnabled` is on.
+    "live-images-v1",
 ];
 /**
  * Append-only. `client_outdated` (the caller's `x-client-version` is below the
@@ -657,6 +660,8 @@ export const clientSpenderStatsTierSchema = z.object({
     /** Of the row's fans, those with a purchase in the window. */
     windowPayers: count,
     windowGrossMills: mills,
+    /** The creator's share of `windowGrossMills` after the platform's fee; the rows sum to `totals.d30.creatorNetMills`. */
+    windowNetMills: mills,
 });
 const clientSpenderStatsSilenceBucketSchema = z.object({
     fans: count,
@@ -771,7 +776,7 @@ export const clientSpenderAwaitingReplyQuerySchema = z.object({
         .min(1).max(CLIENT_SPENDER_AWAITING_REPLY_MAX_LIMIT).default(CLIENT_SPENDER_AWAITING_REPLY_DEFAULT_LIMIT),
 }).strict();
 export const clientSpenderAwaitingReplyItemSchema = z.object({
-    /** The OnlyFans fan id, which is the chat id. */
+    /** The platform's fan id: on OnlyFans also the chat id; a Fansly chat is a group apart from its fan. */
     fanRef: clientFanRefSchema,
     username: z.string().nullable(),
     displayName: z.string().nullable(),
@@ -1389,6 +1394,14 @@ export const clientAudienceNewItemSchema = z.object({
         /** The chat's history was read from OnlyFans to its first message. */
         backfillComplete: z.boolean(),
     }).nullable(),
+    /**
+     * The newest message a person sent the fan by hand in the page's own
+     * composer at or after `subscribedAt`, as the chat extension reported it
+     * (send-attribution-v1, the client's clock); null when the hub knows none.
+     * A greeting made without Hi: a client shows the fan as greeted. Automatic
+     * welcomes and mass messages are never reported, so they never count.
+     */
+    lastPersonalSendAt: isoTimestamp.nullable(),
     claim: clientClaimSummarySchema,
 });
 export const clientAudienceNewResponseSchema = z.object({

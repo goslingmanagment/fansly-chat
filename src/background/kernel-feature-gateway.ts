@@ -9,6 +9,7 @@
 // wording, budgets, capture, ledger) is kernel-side.
 
 import type { KernelClientMedia } from '../shared/transcript.js';
+import { featureTakesLiveImages, type LiveImage } from '../shared/live-images.js';
 import { KernelApiError, streamAiFeature, type AiFeatureStreamFrame } from '@kernel/sdk';
 import { ChatGooseError } from '../shared/errors.js';
 import { clientVersionHeaders } from '../shared/client-version.js';
@@ -103,6 +104,9 @@ export interface KernelFeatureRequest {
    * recap-status mode matching breaks (a full recap at 3000 recorded as 1500). */
   messageCount?: number;
   clientContext: KernelFeatureClientContext;
+  /** Reply, Fix and Coach only: the photos of the fan's latest turn, drawn by
+   * the tab, for a hub that lists `live-images-v1` (shared/live-images.ts). */
+  liveImages?: LiveImage[];
   /** Debug mode only (E28): ask the kernel to echo the prompt it assembled.
    * Rides a capability HEADER, never the request body — an old kernel ignores
    * it, so a kernel rollback can never break a generation from a new client.
@@ -500,6 +504,11 @@ export function createKernelFeatureGateway(
               ? { messageCount: request.messageCount }
               : {}),
             isRegeneration: request.isRegeneration ?? false,
+            ...(request.liveImages !== undefined &&
+            request.liveImages.length > 0 &&
+            featureTakesLiveImages(request.feature)
+              ? { liveImages: request.liveImages }
+              : {}),
             clientContext: {
               transcript: request.clientContext.transcript,
               // E168: every transcript is written by src/shared/transcript.ts

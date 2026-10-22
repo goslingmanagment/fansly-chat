@@ -1,6 +1,7 @@
 import { AgencyHubClient } from './agency-hub-client.js';
 import { createAcceptanceReporter } from './acceptance-reporter.js';
 import { createKernelFeatureGateway } from './kernel-feature-gateway.js';
+import { createLiveImagesSource } from './live-images.js';
 import {
   createPersonaCatalogController,
   startPersonaCatalogRefreshLoop,
@@ -149,6 +150,12 @@ const coordinator = new OperationCoordinator(
 coordinator.setVoiceCapabilityResolver((tabId) =>
   voiceService.resolveCapabilityFast(tabId, VOICE_CAPABILITY_BUDGET_MS),
 );
+// Reply, Fix and Coach send the photos of the fan's latest turn to a hub that
+// takes them; the Fansly tab draws them (top frame only).
+coordinator.setLiveImagesSource(createLiveImagesSource({
+  hubCapabilities: (settings, signal) => agencyHubClient.hubCapabilities(settings, signal),
+  sendToTab: (tabId, message) => browser.tabs.sendMessage(tabId, message, { frameId: 0 }),
+}));
 // Wired AFTER the coordinator exists — voiceService is constructed before it,
 // so this cannot be a constructor dependency.
 voiceService.setOnCapabilityResolvedLate((tabId) => {
