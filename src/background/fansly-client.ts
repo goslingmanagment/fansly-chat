@@ -453,6 +453,7 @@ export class FanslyClient {
     optional = false,
     retryPolicy: 'default' | 'none' = 'default',
     trace?: TraceScope,
+    onlyTab?: number,
   ): Promise<T> {
     const maxAttempts = retryPolicy === 'none' ? 0 : FANSLY_RETRY_DELAYS_MS.length;
 
@@ -471,7 +472,7 @@ export class FanslyClient {
       try {
         // The route settles first (E149): nothing asynchronous may come
         // between the identity check below and the dispatch.
-        const route = await this.transport.route(session, 'GET', composite);
+        const route = await this.transport.route(session, 'GET', composite, onlyTab);
         if (permit) {
           signal.throwIfAborted();
           this.followerSessions.get(session)?.();
@@ -872,6 +873,16 @@ export class FanslyClient {
     };
   }
 
+  private messagePageUrl(groupId: string, before: string | null): URL {
+    const url = new URL('https://apiv3.fansly.com/api/v1/message');
+    url.searchParams.set('groupId', groupId);
+    url.searchParams.set('limit', String(FANSLY_PAGE_LIMIT));
+    if (before) {
+      url.searchParams.set('before', before);
+    }
+    return url;
+  }
+
   async getMessagePage(
     groupId: string,
     before: string | null,
@@ -880,13 +891,19 @@ export class FanslyClient {
     trace?: TraceScope,
     retry: 'default' | 'none' = 'default',
   ): Promise<FanslyMessagePageResponse> {
-    const url = new URL('https://apiv3.fansly.com/api/v1/message');
-    url.searchParams.set('groupId', groupId);
-    url.searchParams.set('limit', String(FANSLY_PAGE_LIMIT));
-    if (before) {
-      url.searchParams.set('before', before);
-    }
-    return this.fetchEnvelope<FanslyMessagePageResponse>(url, session, 'message', signal, false, retry, trace);
+    return this.fetchEnvelope<FanslyMessagePageResponse>(this.messagePageUrl(groupId, before), session, 'message', signal, false, retry, trace);
+  }
+
+  /** The conversation's newest page, read once through `tabId`'s own frame
+   * whatever «Fansly через вкладку» says: the CDN URLs in it are signed for
+   * that tab's address (its container proxy). No retry, no direct fallback. */
+  async getNewestMessagePageViaTab(
+    groupId: string,
+    tabId: number,
+    session: SessionTemplate,
+    signal: AbortSignal,
+  ): Promise<FanslyMessagePageResponse> {
+    return this.fetchEnvelope<FanslyMessagePageResponse>(this.messagePageUrl(groupId, null), session, 'message', signal, false, 'none', undefined, tabId);
   }
 
   private async getMediaOrderHistory(

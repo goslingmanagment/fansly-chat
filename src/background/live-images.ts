@@ -10,11 +10,12 @@ import {
   LIVE_IMAGES_DRAW_MESSAGE,
   LIVE_IMAGE_LIMITS,
   acceptDrawnLiveImages,
+  liveImageRefsSignedBy,
   type LiveImage,
   type LiveImageRef,
   type LiveImagesDrawRequest,
 } from '../shared/live-images.js';
-import type { Settings } from '../shared/types.js';
+import type { FanslyMessagePageResponse, Settings } from '../shared/types.js';
 import { resolveHubBearer } from './agency-hub-client.js';
 
 export interface LiveImagesSource {
@@ -49,6 +50,41 @@ function within<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
       timer = setTimeout(() => resolve(fallback), ms);
     }),
   ]).finally(() => clearTimeout(timer));
+}
+
+/** How long a click with photos waits for the tab's read of the newest page. */
+export const LIVE_IMAGES_TAB_READ_MS = 1_500;
+
+/**
+ * URLs the drawing tab may fetch. Fansly signs each CDN URL for its reader's
+ * /24, and the tab fetches through its container's proxy: a transcript read
+ * on the direct route (the chatter's own address) names URLs that tab gets a
+ * 403 for. So, only when there are photos and the transcript came the direct
+ * way, the newest page is read once more through that tab and the photos take
+ * the URLs it names. With «Fansly через вкладку» on the transcript already
+ * came through a tab: nothing is read. A tab read that fails or is late keeps
+ * the direct URLs (they serve a chatter without a proxy). Never rejects.
+ */
+export async function liveImageRefsForTab(
+  refs: readonly LiveImageRef[],
+  transcriptViaTab: boolean,
+  readNewestPageViaTab: (signal: AbortSignal) => Promise<FanslyMessagePageResponse>,
+  waitMs: number = LIVE_IMAGES_TAB_READ_MS,
+): Promise<LiveImageRef[]> {
+  if (refs.length === 0 || transcriptViaTab) {
+    return [...refs];
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), waitMs);
+  try {
+    const signed = Promise.resolve()
+      .then(() => readNewestPageViaTab(controller.signal))
+      .then((page) => liveImageRefsSignedBy(refs, page));
+    return await within(signed, waitMs, [...refs]);
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
+  }
 }
 
 export function createLiveImagesSource(dependencies: LiveImagesSourceDependencies): LiveImagesSource {

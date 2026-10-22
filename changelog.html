@@ -679,8 +679,19 @@ code {
 
 <div class="timeline wrap">
 
+  <div class="release" id="v2-14-1">
+    <div class="release-header"><span class="release-version">2.14.1</span><span class="release-badge latest">22 октября 2026</span></div>
+    <div class="release-changes">
+      <div class="release-summary"><p>Фото фана теперь доходят до ИИ и у тех, чья вкладка Fansly работает через прокси контейнера.</p></div>
+      <ul class="changes-list">
+        <li><strong>Фото фана через прокси.</strong> В 2.14.0 Гусь передавал ИИ фото, которые фан прислал последними, но если вкладка Fansly открыта в контейнере со своим прокси, фото не загружались и ответ уходил без них. Теперь, когда в последних сообщениях фана есть фото, Гусь один раз перечитывает свежие сообщения через саму вкладку модели, и фото загружаются. В переписках без фото ничего не меняется. Если вкладка не ответила за полторы секунды, ответ уходит как раньше.</li>
+      </ul>
+      <p>После обновления перезагрузите открытые вкладки Fansly.</p>
+    </div>
+  </div>
+
   <div class="release" id="v2-14-0">
-    <div class="release-header"><span class="release-version">2.14.0</span><span class="release-badge latest">22 октября 2026</span></div>
+    <div class="release-header"><span class="release-version">2.14.0</span><span class="release-badge">22 октября 2026</span></div>
     <div class="release-changes">
       <div class="release-summary"><p>Reply, Fix и Coach теперь сами смотрят на фото, которые фан прислал последними.</p></div>
       <ul class="changes-list">

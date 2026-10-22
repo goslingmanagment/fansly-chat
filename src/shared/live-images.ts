@@ -180,6 +180,18 @@ export function liveImageRefsOf(
   return refs;
 }
 
+/** The same photos with the URLs `page` names for them (`pickFanslyImageUrl`),
+ * where it names one: Fansly signs each URL for its reader's /24, so a page
+ * the drawing tab read itself gives URLs that tab may fetch. A photo the page
+ * does not carry keeps its URL. */
+export function liveImageRefsSignedBy(
+  refs: readonly LiveImageRef[],
+  page: FanslyMessagePageResponse,
+): LiveImageRef[] {
+  const mediaById = new Map((page.accountMedia ?? []).map((media) => [media.id, media]));
+  return refs.map((ref) => ({ ...ref, url: pickFanslyImageUrl(mediaById.get(ref.mediaId)?.media) ?? ref.url }));
+}
+
 /** The tab's answer, trusted only for the refs asked: one image per asked
  * media, base64 JPEG within the hub's bound, in the order asked. */
 export function acceptDrawnLiveImages(raw: unknown, refs: readonly LiveImageRef[]): LiveImage[] {

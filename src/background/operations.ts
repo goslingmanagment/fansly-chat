@@ -82,8 +82,8 @@ import {
   normalizeTranscript,
 } from '../shared/transcript.js';
 import { parseChatReviewXml, parseHelpMeXml } from '../shared/xml.js';
-import { featureTakesLiveImages, liveImageRefsOf, type LiveImage } from '../shared/live-images.js';
-import type { LiveImagesSource } from './live-images.js';
+import { featureTakesLiveImages, liveImageRefsOf, type LiveImage, type LiveImageRef } from '../shared/live-images.js';
+import { liveImageRefsForTab, type LiveImagesSource } from './live-images.js';
 import type {
   EarningsBreakdownEntry,
   AggregatedEarnings,
@@ -2894,12 +2894,31 @@ export class OperationCoordinator {
       } = formatTranscriptWithMediaForKernel(transcriptMessages, validated.urlGroupId);
       // Live images: the tab draws the photos of the fan's latest turn while
       // the page label resolves; at most LIVE_IMAGE_LIMITS.waitMs, never an
-      // error. A hub that does not list `live-images-v1` gets none.
+      // error. A hub that does not list `live-images-v1` gets none. A
+      // transcript read the direct way names URLs signed for the chatter's
+      // address, not the tab's proxy: the newest page is read once through
+      // that tab first (≤ LIVE_IMAGES_TAB_READ_MS, background/live-images.ts).
       const liveImageRefs = liveImagesSource !== null
         ? liveImageRefsOf(transcriptMessages, transcriptPages)
         : [];
+      let liveImageRefsDrawn: LiveImageRef[] = liveImageRefs;
       const liveImagesDrawn: Promise<LiveImage[]> = liveImagesSource !== null && liveImageRefs.length > 0
-        ? liveImagesCapable.then((capable) => (capable ? liveImagesSource.draw(tabId, liveImageRefs) : []))
+        ? liveImagesCapable.then(async (capable) => {
+            if (!capable) {
+              return [];
+            }
+            liveImageRefsDrawn = await liveImageRefsForTab(
+              liveImageRefs,
+              validated.storage.settings.fanslyViaTab,
+              (tabReadSignal) => this.fanslyClient.getNewestMessagePageViaTab(
+                validated.urlGroupId,
+                tabId,
+                validated.session,
+                AbortSignal.any([signal, tabReadSignal]),
+              ),
+            );
+            return liveImagesSource.draw(tabId, liveImageRefsDrawn);
+          })
         : Promise.resolve([]);
       // Stage 32: prompt ASSEMBLY is kernel-side (templates, personas,
       // platform wording, budgets, capture). The client ships context VALUES
@@ -2965,7 +2984,11 @@ export class OperationCoordinator {
           : undefined;
       const liveImages = await liveImagesDrawn;
       if (liveImageRefs.length > 0) {
-        logDebug(debugEnabled, 'live images', { asked: liveImageRefs.length, drawn: liveImages.length });
+        logDebug(debugEnabled, 'live images', {
+          asked: liveImageRefs.length,
+          signedForTab: liveImageRefsDrawn.filter((ref, index) => ref.url !== liveImageRefs[index]?.url).length,
+          drawn: liveImages.length,
+        });
       }
       const kernelRequest = {
         feature: payload.feature,

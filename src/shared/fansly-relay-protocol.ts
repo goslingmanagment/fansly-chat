@@ -6,6 +6,16 @@
 export const FANSLY_RELAY_PORT_NAME = 'chatgoose-fansly-relay';
 export const FANSLY_RELAY_PAGE = 'fansly-relay.html';
 
+/** The background asks a tab to hold its frame for a moment while the switch
+ * is off: one read pinned to that tab (the live images' newest page). */
+export const FANSLY_RELAY_LEND_MESSAGE = 'chatgoose:fansly-relay:lend';
+/** How long a lent frame stays; a new lend restarts it. */
+export const FANSLY_RELAY_LEND_MS = 5_000;
+
+export function isFanslyRelayLend(value: unknown): boolean {
+  return typeof value === 'object' && value !== null && (value as { type?: unknown }).type === FANSLY_RELAY_LEND_MESSAGE;
+}
+
 /** The relay reaches Fansly's API and nothing else, whatever it is asked. */
 const FANSLY_RELAY_TARGET = 'https://apiv3.fansly.com/api/v1/';
 

@@ -17,6 +17,11 @@ import {
 } from './hotkey-input.js';
 import { installUiTheme, readUiThemeSetting } from '../shared/theme.js';
 import { installLiveImagesListener } from './live-images.js';
+import {
+  FANSLY_RELAY_LEND_MS,
+  FANSLY_RELAY_PAGE,
+  isFanslyRelayLend,
+} from '../shared/fansly-relay-protocol.js';
 
 type ContentAppModule = typeof import('./index.js');
 type ContentApp = InstanceType<ContentAppModule['ChatGooseContentApp']>;
@@ -125,10 +130,14 @@ void readUiThemeSetting()
 // in this tab and carries the background's Fansly requests, so they take the
 // tab's network path (its container proxy). The closed shadow root keeps the
 // frame's moz-extension address, which names this install, out of the page's
-// reach. Off, the tab holds nothing of it.
+// reach. Off, the tab holds nothing of it, except for a few seconds after the
+// background asks to borrow the frame for one read (live images: the newest
+// page, so the photo URLs are signed for this tab's address).
 let fanslyRelayHost: HTMLElement | null = null;
-function syncFanslyRelay(settings: unknown): void {
-  if ((settings as { fanslyViaTab?: unknown } | undefined)?.fanslyViaTab !== true) {
+let fanslyViaTab = false;
+let fanslyRelayLease: number | undefined;
+function renderFanslyRelay(): void {
+  if (!fanslyViaTab && fanslyRelayLease === undefined) {
     fanslyRelayHost?.remove();
     fanslyRelayHost = null;
     return;
@@ -139,9 +148,21 @@ function syncFanslyRelay(settings: unknown): void {
   fanslyRelayHost = document.createElement('div');
   fanslyRelayHost.style.setProperty('display', 'none', 'important');
   const frame = document.createElement('iframe');
-  frame.src = browser.runtime.getURL('fansly-relay.html');
+  frame.src = browser.runtime.getURL(FANSLY_RELAY_PAGE);
   fanslyRelayHost.attachShadow({ mode: 'closed' }).append(frame);
   document.body.append(fanslyRelayHost);
+}
+function syncFanslyRelay(settings: unknown): void {
+  fanslyViaTab = (settings as { fanslyViaTab?: unknown } | undefined)?.fanslyViaTab === true;
+  renderFanslyRelay();
+}
+function lendFanslyRelay(): void {
+  window.clearTimeout(fanslyRelayLease);
+  fanslyRelayLease = window.setTimeout(() => {
+    fanslyRelayLease = undefined;
+    renderFanslyRelay();
+  }, FANSLY_RELAY_LEND_MS);
+  renderFanslyRelay();
 }
 void browser.storage.local.get('settings')
   .then((stored) => syncFanslyRelay(stored.settings))
@@ -150,6 +171,12 @@ browser.storage.onChanged.addListener((changes, areaName) => {
   if (areaName === 'local' && changes.settings) {
     syncFanslyRelay(changes.settings.newValue);
   }
+});
+browser.runtime.onMessage.addListener((message: unknown, sender) => {
+  if (sender.id === browser.runtime.id && isFanslyRelayLend(message)) {
+    lendFanslyRelay();
+  }
+  return undefined;
 });
 
 function loadContentAppModule(): Promise<ContentAppModule> {

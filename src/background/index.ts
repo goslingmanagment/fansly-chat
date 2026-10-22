@@ -27,7 +27,7 @@ import {
   VOICE_CAPABILITY_BUDGET_MS,
 } from '../shared/constants.js';
 import { buildAgencyHubOriginPattern } from '../shared/agency-hub.js';
-import { FANSLY_RELAY_PORT_NAME } from '../shared/fansly-relay-protocol.js';
+import { FANSLY_RELAY_LEND_MESSAGE, FANSLY_RELAY_PORT_NAME } from '../shared/fansly-relay-protocol.js';
 import { readStorageState } from '../shared/storage.js';
 import { FollowersService } from './followers-service.js';
 import { WelcomeDefinitionsService } from './welcome-definitions.js';
@@ -49,6 +49,12 @@ const fanslyClient = new FanslyClient(sessionStore, browser.storage.local, creat
   viaTab: async () => (await storageCoordinator.getState()).settings.fanslyViaTab,
   tabsFor: (session) => sessionStore.getTabIdsForAccount(session.accountId),
   relays: fanslyRelays,
+  // Off, a tab has no frame: a read pinned to it (live images) borrows one.
+  lend: (tabId) => {
+    void Promise.resolve()
+      .then(() => browser.tabs.sendMessage(tabId, { type: FANSLY_RELAY_LEND_MESSAGE }, { frameId: 0 }))
+      .catch(() => undefined);
+  },
 }));
 const spendersService = new SpendersService(
   fanslyClient,
