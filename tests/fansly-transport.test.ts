@@ -5,6 +5,7 @@ import {
   FANSLY_RELAY_WAIT_MS,
   FanslyRelayHub,
   createFanslyTransport,
+  directFanslyTransport,
   type FanslyRoute,
   type FanslyTransport,
   type FanslyWireRequest,
@@ -317,6 +318,28 @@ describe('E149 createFanslyTransport', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('a read pinned to one tab rides that tab\'s frame with the switch off, borrowing it first; never direct', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const viaRelay: FanslyRoute = { tabId: 5, send: vi.fn() };
+    const relays = { route: vi.fn(async (_tabIds: () => readonly number[], _method: 'GET' | 'POST', _signal: AbortSignal) => viaRelay) };
+    const lend = vi.fn();
+    const viaTab = vi.fn(async () => false);
+    const transport = createFanslyTransport({ viaTab, tabsFor: () => [5, 6], relays, lend });
+
+    await expect(transport.route(session, 'GET', new AbortController().signal, 5)).resolves.toBe(viaRelay);
+    expect(lend).toHaveBeenCalledWith(5);
+    expect(relays.route.mock.calls[0]![0]()).toEqual([5]);
+    // A tab that does not hold the session is no route at all, and borrows nothing.
+    await expect(transport.route(session, 'GET', new AbortController().signal, 9)).rejects.toMatchObject({ key: 'fansly_tab_unavailable' });
+    expect(lend).toHaveBeenCalledTimes(1);
+    expect(viaTab).not.toHaveBeenCalled();
+    // Unpinned, the switch still governs: off is the background request.
+    await expect(transport.route(session, 'GET', new AbortController().signal)).resolves.toBe(DIRECT_FANSLY_ROUTE);
+    await expect(directFanslyTransport.route(session, 'GET', new AbortController().signal, 5)).rejects.toMatchObject({ key: 'fansly_tab_unavailable' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('unreadable settings keep the route every install has had', async () => {
     const relays = { route: vi.fn() };
     const transport = createFanslyTransport({ viaTab: async () => { throw new Error('storage'); }, tabsFor: () => [5], relays });
@@ -397,6 +420,20 @@ describe('E149 FanslyClient on the tab route', () => {
     await expect(client.getAuthenticatedAccount(session, new AbortController().signal)).resolves.toMatchObject({ id: '777' });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(frame.commands).toEqual([]);
+  });
+
+  it('the live images\' newest page goes once through the tab with the switch off: a 5xx is not retried', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const { client, frame, session } = harness(false);
+    const pending = client.getNewestMessagePageViaTab('123', 5, session, new AbortController().signal);
+    await vi.waitFor(() => expect(frame.requests()).toHaveLength(1));
+    const command = frame.requests()[0]!;
+    expect(command).toMatchObject({ method: 'GET', url: 'https://apiv3.fansly.com/api/v1/message?groupId=123&limit=25&ngsw-bypass=true' });
+    frame.answer(command.id, 503);
+    await expect(pending).rejects.toMatchObject({ key: 'fansly_server_error' });
+    expect(frame.requests()).toHaveLength(1);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('assertRoute: a no-op off; on, it waits for the frame like a read and names a missing one', async () => {

@@ -28,8 +28,9 @@ export interface FanslyRoute {
 export interface FanslyTransport {
   /** Settles the route of a session before its identity check. Throws
    * `fansly_tab_unavailable` when the route is missing; only a read waits for
-   * a tab that is still loading its frame. */
-  route: (session: SessionTemplate, method: 'GET' | 'POST', signal: AbortSignal) => Promise<FanslyRoute>;
+   * a tab that is still loading its frame. `onlyTab` pins this one request to
+   * that tab's frame whatever the switch says, never the direct route. */
+  route: (session: SessionTemplate, method: 'GET' | 'POST', signal: AbortSignal, onlyTab?: number) => Promise<FanslyRoute>;
 }
 
 /** The extension's own background request. Firefox gives it no tab, so a
@@ -39,7 +40,12 @@ export const DIRECT_FANSLY_ROUTE: FanslyRoute = {
     fetch(url, { method, headers, ...(body !== undefined ? { body } : {}), signal, credentials: 'omit' }),
 };
 
-export const directFanslyTransport: FanslyTransport = { route: async () => DIRECT_FANSLY_ROUTE };
+export const directFanslyTransport: FanslyTransport = {
+  route: async (_session, _method, _signal, onlyTab) => {
+    if (onlyTab !== undefined) throw new ChatGooseError('fansly_tab_unavailable');
+    return DIRECT_FANSLY_ROUTE;
+  },
+};
 
 /** How long a read waits for the frame of a tab that is still loading. */
 export const FANSLY_RELAY_WAIT_MS = 5_000;
@@ -260,14 +266,25 @@ interface FanslyTransportOptions {
   /** Tabs whose captured session is this one, in no particular order. */
   tabsFor: (session: SessionTemplate) => readonly number[];
   relays: Pick<FanslyRelayHub, 'route'>;
+  /** Asks a tab to hold its frame for a moment: with the switch off it has
+   * none (content/bootstrap.ts). Best effort; the read waits for the frame. */
+  lend?: (tabId: number) => void;
 }
 
 /** Off (the default) keeps the background request. On, the request rides the
  * frame of a tab that holds the same session and never falls back to the
- * direct route: that route is the one this mode exists to avoid. */
+ * direct route: that route is the one this mode exists to avoid. A request
+ * pinned to one tab (`onlyTab`) rides that tab's frame with the switch on or
+ * off: the live images read the URLs the tab itself may fetch. */
 export function createFanslyTransport(options: FanslyTransportOptions): FanslyTransport {
   return {
-    route: async (session, method, signal) => {
+    route: async (session, method, signal, onlyTab) => {
+      if (onlyTab !== undefined) {
+        const pinned = (): readonly number[] => options.tabsFor(session).filter((tabId) => tabId === onlyTab);
+        if (pinned().length === 0) throw new ChatGooseError('fansly_tab_unavailable');
+        options.lend?.(onlyTab);
+        return options.relays.route(pinned, method, signal);
+      }
       let viaTab = false;
       try {
         viaTab = await options.viaTab();

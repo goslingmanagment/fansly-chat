@@ -1,7 +1,8 @@
 // Live images: which of the fan's photos a Reply, Fix or Coach sends to the
 // hub, from which address, and what of the tab's answer is trusted.
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { LIVE_IMAGES_TAB_READ_MS, liveImageRefsForTab } from '../src/background/live-images.js';
 import {
   acceptDrawnLiveImages,
   liveImageRefsOf,
@@ -102,5 +103,44 @@ describe('live images', () => {
     ], refs);
     expect(accepted).toEqual([{ platformMessageId: '903', mediaId: '41', sentAt: '2026-10-22T06:00:00.000Z', mediaType: 'image/jpeg', data: 'BBBB' }]);
     expect(acceptDrawnLiveImages(undefined, refs)).toEqual([]);
+  });
+});
+
+describe('live images read through the drawing tab', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const direct = [
+    { platformMessageId: '903', mediaId: '40', sentAt: '2026-10-22T06:00:00.000Z', url: cdn('40-direct') },
+    { platformMessageId: '903', mediaId: '41', sentAt: '2026-10-22T06:00:00.000Z', url: cdn('41-direct') },
+  ];
+  // The tab's own read of the newest page: its URLs are signed for the tab's proxy.
+  const tabPage: FanslyMessagePageResponse = { messages: [], accountMedia: [photo('40'), photo('77')], accountMediaBundles: [] };
+
+  it('re-reads only when there are photos and the transcript came the direct way', async () => {
+    const read = vi.fn(async () => tabPage);
+    await expect(liveImageRefsForTab([], false, read)).resolves.toEqual([]);
+    await expect(liveImageRefsForTab(direct, true, read)).resolves.toEqual(direct);
+    expect(read).not.toHaveBeenCalled();
+
+    const signed = await liveImageRefsForTab(direct, false, read);
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(signed.map((ref) => ref.url)).toEqual([cdn('40-1080'), cdn('41-direct')]);
+    expect(signed.map((ref) => [ref.platformMessageId, ref.mediaId])).toEqual([['903', '40'], ['903', '41']]);
+  });
+
+  it('a failed or late tab read keeps the direct URLs, and the late one is aborted at the cap', async () => {
+    await expect(liveImageRefsForTab(direct, false, async () => { throw new Error('fansly_tab_unavailable'); })).resolves.toEqual(direct);
+
+    vi.useFakeTimers();
+    let readSignal: AbortSignal | undefined;
+    const late = liveImageRefsForTab(direct, false, (signal) => {
+      readSignal = signal;
+      return new Promise<FanslyMessagePageResponse>(() => {});
+    });
+    await vi.advanceTimersByTimeAsync(LIVE_IMAGES_TAB_READ_MS);
+    await expect(late).resolves.toEqual(direct);
+    expect(readSignal?.aborted).toBe(true);
   });
 });
