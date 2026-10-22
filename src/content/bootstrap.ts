@@ -16,6 +16,7 @@ import {
   sharedHotkeyEngine,
 } from './hotkey-input.js';
 import { installUiTheme, readUiThemeSetting } from '../shared/theme.js';
+import { installLiveImagesListener } from './live-images.js';
 
 type ContentAppModule = typeof import('./index.js');
 type ContentApp = InstanceType<ContentAppModule['ChatGooseContentApp']>;
@@ -92,6 +93,9 @@ installContentStyles(bootstrapStyles, 'chatgoose-bootstrap-style');
 // refresh loop is useful during long Fansly shifts even before a chat opens.
 // This raw port has no protocol/controller graph; the full app replaces it.
 const bootstrapKeepalive = startBootstrapKeepalive();
+// Reply, Fix and Coach: the background asks this tab to draw the photos of the
+// fan's latest turn (only the page may read Fansly's CDN).
+installLiveImagesListener();
 // The followers window stays independent of native chat routing. Its module
 // (and styles) load only when the chatter opens it.
 const followersButton = document.createElement('button');

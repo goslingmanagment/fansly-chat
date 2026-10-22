@@ -82,6 +82,8 @@ import {
   normalizeTranscript,
 } from '../shared/transcript.js';
 import { parseChatReviewXml, parseHelpMeXml } from '../shared/xml.js';
+import { featureTakesLiveImages, liveImageRefsOf, type LiveImage } from '../shared/live-images.js';
+import type { LiveImagesSource } from './live-images.js';
 import type {
   EarningsBreakdownEntry,
   AggregatedEarnings,
@@ -502,6 +504,8 @@ export class OperationCoordinator {
   /** Voice transport stays outside this coordinator. This callback exists
    * only because TabUiState is assembled here. */
   private voiceCapabilityResolver: ((tabId: number) => Promise<boolean>) | null = null;
+  /** Reply, Fix and Coach photos (background/live-images.ts); none until wired. */
+  private liveImagesSource: LiveImagesSource | null = null;
   /** Latest user-started Scan for each conversation AND recap size. Kept after
    * completion so an async full Hub append cannot be overtaken by an older
    * cross-tab full operation, while an independent short recap cannot fence it. */
@@ -534,6 +538,10 @@ export class OperationCoordinator {
 
   setVoiceCapabilityResolver(resolver: (tabId: number) => Promise<boolean>): void {
     this.voiceCapabilityResolver = resolver;
+  }
+
+  setLiveImagesSource(source: LiveImagesSource): void {
+    this.liveImagesSource = source;
   }
 
   /** Correlation for post-settle copy/insert signals (bounded, newest-wins). */
@@ -2192,6 +2200,11 @@ export class OperationCoordinator {
         );
       }
 
+      // Live images: whether the hub takes photos is asked while the messages
+      // load (one cached hub read, never a Fansly request).
+      const liveImagesSource = featureTakesLiveImages(payload.feature) ? this.liveImagesSource : null;
+      const liveImagesCapable = liveImagesSource?.capable(validated.storage.settings) ?? Promise.resolve(false);
+
       startStage('load-messages', 'Load messages');
       profiler.log(`Requested ${effectiveMessageCount} messages`);
       sendDebugProgress();
@@ -2879,6 +2892,15 @@ export class OperationCoordinator {
         messageCount: keptMessageCount,
         media: transcriptMedia,
       } = formatTranscriptWithMediaForKernel(transcriptMessages, validated.urlGroupId);
+      // Live images: the tab draws the photos of the fan's latest turn while
+      // the page label resolves; at most LIVE_IMAGE_LIMITS.waitMs, never an
+      // error. A hub that does not list `live-images-v1` gets none.
+      const liveImageRefs = liveImagesSource !== null
+        ? liveImageRefsOf(transcriptMessages, transcriptPages)
+        : [];
+      const liveImagesDrawn: Promise<LiveImage[]> = liveImagesSource !== null && liveImageRefs.length > 0
+        ? liveImagesCapable.then((capable) => (capable ? liveImagesSource.draw(tabId, liveImageRefs) : []))
+        : Promise.resolve([]);
       // Stage 32: prompt ASSEMBLY is kernel-side (templates, personas,
       // platform wording, budgets, capture). The client ships context VALUES
       // because Fansly has no webhook lane — the kernel archive is
@@ -2941,6 +2963,10 @@ export class OperationCoordinator {
           pingKeptPersonal >= PING_MIN_PERSONAL_MESSAGES)
           ? pingKeptPersonal
           : undefined;
+      const liveImages = await liveImagesDrawn;
+      if (liveImageRefs.length > 0) {
+        logDebug(debugEnabled, 'live images', { asked: liveImageRefs.length, drawn: liveImages.length });
+      }
       const kernelRequest = {
         feature: payload.feature,
         clientRequestId: payload.operationId,
@@ -2978,6 +3004,7 @@ export class OperationCoordinator {
         // E28: ask only in debug mode. The kernel answers only inside an
         // owner-set time-bounded window, so this is a request, not a right.
         debugPromptEcho: profiler.enabled,
+        ...(liveImages.length > 0 ? { liveImages } : {}),
         clientContext: {
           transcript: formattedTranscript,
           messageCount: keptMessageCount,

@@ -611,6 +611,22 @@ export declare const kernelOperations: {
         readonly method: "POST";
         readonly path: "/api/v1/ofapi/commands";
     };
+    readonly creatorStatsAudience: {
+        readonly method: "GET";
+        readonly path: "/api/v1/pages/:pageLabel/stats/creator/audience";
+    };
+    readonly creatorStatsContent: {
+        readonly method: "GET";
+        readonly path: "/api/v1/pages/:pageLabel/stats/creator/content";
+    };
+    readonly creatorStatsMedia: {
+        readonly method: "GET";
+        readonly path: "/api/v1/pages/:pageLabel/stats/creator/media/:mediaOfferId";
+    };
+    readonly creatorStatsOverview: {
+        readonly method: "GET";
+        readonly path: "/api/v1/pages/:pageLabel/stats/creator";
+    };
     readonly crossPageFanDetail: {
         readonly method: "GET";
         readonly path: "/api/v1/fans/:platform/:platformUserId";

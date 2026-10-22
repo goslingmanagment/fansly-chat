@@ -412,6 +412,22 @@ export class AgencyHubClient {
     }
   }
 
+  /** The hub bootstrap's `capabilities` (live images ask for `live-images-v1`).
+   * Read-only on the hub; throws like every other hub read. */
+  async hubCapabilities(
+    settings: Pick<Settings, 'agencyHubBaseUrl' | 'agencyHubDeviceToken'>,
+    signal: AbortSignal,
+  ): Promise<string[]> {
+    const baseUrl = normalizeAgencyHubBaseUrl(settings.agencyHubBaseUrl);
+    const bearer = resolveHubBearer(settings);
+    if (!baseUrl || !bearer) throw new ChatGooseError('hub_missing_api_key');
+    try {
+      return (await this.sdkFor(baseUrl, bearer, signal).clientBootstrap()).capabilities;
+    } catch (error) {
+      throw await this.toHubError(error, 'bootstrap', bearer);
+    }
+  }
+
   /** Stage 32: the feature lane needs the kernel page label for the signed-in
    * Fansly creator. Exact-match rule over the SDK pages list (the profile
    * push's resolvePageLabel, exposed). Null means a configured, reachable Hub
